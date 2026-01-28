@@ -1,0 +1,555 @@
+// ANTI-PATTERN: Missing Output Count Validation
+// VULNERABILITY: Unbounded output creation enables multiple attack vectors
+// ATTACK VECTOR: Unauthorized minting, output spam, fee manipulation, multi-output extraction
+//
+// This file demonstrates the critical vulnerability of missing output count limits.
+// Without explicit `tx.outputs.length` validation, attackers can create arbitrary
+// additional outputs beyond those validated by the covenant logic.
+//
+// CashScript Version: ^0.13.0
+// Network: Bitcoin Cash (BCH)
+// Security Level: VULNERABLE - DO NOT USE IN PRODUCTION
+
+// ============================================================================
+// VULNERABLE CODE: Missing Output Count Validation
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// VULNERABLE: This covenant validates output[0] but allows unlimited additional outputs
+// RISK: Attacker can create extra outputs to mint tokens, spam outputs, or extract value
+contract VulnerableCovenantNoOutputLimit(
+    pubkey ownerPubKey
+) {
+    // VULNERABILITY: Only validates output[0], assumes no other outputs exist
+    // MISSING: tx.outputs.length check (allows arbitrary extra outputs)
+    function spend(sig ownerSig) {
+        // Validate authorization
+        require(checkSig(ownerSig, ownerPubKey));
+        
+        // Validate output[0] - covenant continuation
+        bytes inputLockingBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+        bytes outputLockingBytecode = tx.outputs[0].lockingBytecode;
+        require(outputLockingBytecode == inputLockingBytecode);
+        
+        // Validate output[0] preserves token category
+        bytes inputTokenCategory = tx.inputs[this.activeInputIndex].tokenCategory;
+        bytes outputTokenCategory = tx.outputs[0].tokenCategory;
+        require(outputTokenCategory == inputTokenCategory);
+        
+        // Validate output[0] preserves value
+        int inputValue = tx.inputs[this.activeInputIndex].value;
+        int outputValue = tx.outputs[0].value;
+        require(outputValue == inputValue);
+        
+        // CRITICAL FLAW: No validation of tx.outputs.length
+        // Attacker can add outputs[1], outputs[2], outputs[3], etc.
+        // The contract only checks output[0], ignoring all others
+        // This allows:
+        // - Unauthorized token minting (creating new tokens)
+        // - Value extraction via additional outputs
+        // - Output spam attacks
+        // - Fee manipulation via output splitting
+    }
+}
+
+// ============================================================================
+// ATTACK SCENARIO 1: Unauthorized Token Minting
+// ============================================================================
+//
+// Initial State:
+// - Contract holds NFT with minting capability
+// - tokenCategory: 0xAABBCCDD...
+// - capability: "minting"
+// - Intended behavior: Only authorized minting allowed
+//
+// Attack Transaction:
+// Input:
+//   - VulnerableCovenantNoOutputLimit UTXO (NFT with minting capability)
+//   - Valid signature from ownerPubKey
+//
+// Outputs:
+//   - Output 0: Covenant continuation (passes all checks)
+//     - Same lockingBytecode ✓
+//     - Same tokenCategory ✓
+//     - Same value ✓
+//     - NFT with minting capability preserved
+//   
+//   - Output 1: NEWLY MINTED tokens to attacker's address
+//     - tokenCategory: 0xAABBCCDD... (same category!)
+//     - tokenAmount: 1,000,000 fungible tokens
+//     - capability: none (immutable tokens)
+//     - Recipient: Attacker's P2PKH address
+//   
+//   - Output 2: ANOTHER NEWLY MINTED token batch
+//     - tokenCategory: 0xAABBCCDD...
+//     - tokenAmount: 500,000 fungible tokens
+//     - Recipient: Attacker's second address
+//
+// Result:
+// - Covenant continues correctly in output[0]
+// - Attacker minted 1,500,000 unauthorized tokens in outputs[1] and [2]
+// - Token supply inflated without authorization
+// - Minting control BYPASSED
+//
+// Why it works:
+// - Contract never checks: require(tx.outputs.length == 1);
+// - Minting capability in output[0] allows creating tokens in other outputs
+// - Contract validates output[0] but ignores outputs[1], [2], [3], etc.
+// - BCH allows unlimited outputs in a transaction
+
+// ============================================================================
+// ATTACK SCENARIO 2: Multi-Output Value Extraction
+// ============================================================================
+//
+// Initial State:
+// - Contract holds 100,000 sats
+// - No tokens involved
+// - Intended behavior: Preserve all value in covenant
+//
+// Attack Transaction:
+// Input:
+//   - VulnerableCovenantNoOutputLimit UTXO (100,000 sats)
+//   - Valid signature from ownerPubKey
+//
+// Outputs:
+//   - Output 0: Covenant continuation (passes all checks)
+//     - Same lockingBytecode ✓
+//     - Same tokenCategory ✓ (both empty/none)
+//     - value: 100,000 sats ✓
+//   
+//   - Output 1: Value extraction to attacker
+//     - value: 50,000 sats
+//     - Recipient: Attacker's address
+//   
+//   - Output 2: More value extraction
+//     - value: 30,000 sats
+//     - Recipient: Attacker's second address
+//   
+//   - Output 3: Even more extraction
+//     - value: 19,000 sats
+//     - Recipient: Attacker's third address
+//
+// Wait, how does this work? Output[0] has 100,000 sats but total outputs = 199,000 sats?
+//
+// Answer: This attack requires ADDITIONAL INPUTS
+// 
+// Modified Attack with Multiple Inputs:
+// Inputs:
+//   - Input 0: VulnerableCovenantNoOutputLimit UTXO (100,000 sats)
+//   - Input 1: Attacker's UTXO (100,000 sats) - provides extra value
+//
+// Outputs:
+//   - Output 0: 100,000 sats to covenant (validates correctly)
+//   - Output 1: 99,000 sats to attacker (extracting from Input 1)
+//
+// Result:
+// - Covenant check passes (output[0] preserves input value)
+// - But attacker used the transaction to move their own funds
+// - This enables fee manipulation and covenant bloating
+//
+// More dangerous version - NFT duplication attempt:
+// If the covenant holds an NFT, attacker might try:
+//   - Output 0: NFT to covenant continuation
+//   - Output 1: DUPLICATE NFT to attacker (INVALID - would fail consensus)
+//
+// However, without output count limits, attacker CAN:
+//   - Output 0: NFT to covenant continuation  
+//   - Output 1: Different token/BCH to attacker from other inputs
+// This allows using covenant transactions as cover for other transfers
+
+// ============================================================================
+// ATTACK SCENARIO 3: Output Spam / Bloat Attack
+// ============================================================================
+//
+// Initial State:
+// - Contract holds 10,000 sats
+// - Attacker wants to bloat the blockchain
+//
+// Attack Transaction:
+// Input:
+//   - VulnerableCovenantNoOutputLimit UTXO (10,000 sats)
+//   - Valid signature from ownerPubKey
+//
+// Outputs:
+//   - Output 0: Covenant continuation (10,000 sats) ✓
+//   - Output 1: Dust (546 sats) to random address
+//   - Output 2: Dust (546 sats) to random address
+//   - Output 3: Dust (546 sats) to random address
+//   ... (repeat)
+//   - Output 100: Dust (546 sats) to random address
+//
+// Total outputs: 101
+// Total dust outputs: 100
+// Additional BCH needed: 100 * 546 = 54,600 sats (from attacker's inputs)
+//
+// Result:
+// - Covenant continues correctly
+// - 100 dust outputs created (blockchain spam)
+// - Transaction size significantly increased
+// - Network resources wasted
+// - UTXO set bloated
+//
+// Why it works:
+// - Contract doesn't limit output count
+// - Attacker can add unlimited outputs using additional inputs
+// - Covenant transaction used as spam vehicle
+
+// ============================================================================
+// ATTACK SCENARIO 4: Fee Manipulation via Output Splitting
+// ============================================================================
+//
+// Initial State:
+// - Contract holds 5,000 sats
+// - Transaction fee expected: ~200 sats
+//
+// Legitimate Transaction (what contract expects):
+// Inputs:
+//   - Input 0: Covenant UTXO (5,000 sats)
+// Outputs:
+//   - Output 0: Covenant continuation (4,800 sats)
+// Fee: 200 sats (5,000 - 4,800)
+//
+// Malicious Transaction (output splitting):
+// Inputs:
+//   - Input 0: Covenant UTXO (5,000 sats)
+//   - Input 1: Attacker UTXO (10,000 sats)
+// Outputs:
+//   - Output 0: Covenant continuation (5,000 sats) ✓ (passes check)
+//   - Output 1: 9,000 sats to attacker
+//   - Output 2: 500 sats to attacker
+//   - Output 3: 300 sats to attacker
+// Fee: 200 sats (15,000 - 14,800)
+//
+// Result:
+// - Covenant preserved at 5,000 sats (check passes)
+// - Attacker used covenant transaction to split their own funds
+// - Multiple outputs created for attacker's purposes
+// - Covenant transaction used as a "free" transaction builder
+//
+// Impact:
+// - Covenant transactions can be hijacked for unrelated purposes
+// - Output count inflation without cost to attacker
+// - Transaction graph analysis becomes misleading
+
+// ============================================================================
+// SECURE VERSION: Explicit Output Count Validation
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// SECURE: This covenant enforces strict output count limits
+// PROTECTION: Prevents unauthorized minting, spam, and output manipulation
+contract SecureCovenantWithOutputLimit(
+    pubkey ownerPubKey
+) {
+    // SECURE: Validates signature, output properties, AND output count
+    // INCLUDES: Explicit tx.outputs.length validation
+    function spend(sig ownerSig) {
+        // Step 1: Validate authorization
+        require(checkSig(ownerSig, ownerPubKey));
+        
+        // Step 2: CRITICAL - Validate output count FIRST
+        // This prevents ALL unauthorized output creation attacks
+        // Only exactly 1 output is allowed (the covenant continuation)
+        require(tx.outputs.length == 1);
+        
+        // WHY CHECK OUTPUT COUNT FIRST?
+        // - Prevents wasted computation on output[0] validation if extra outputs exist
+        // - Makes attack impossible before validating individual output properties
+        // - Clear fail-fast security principle
+        
+        // Step 3: Validate output[0] lockingBytecode (prevents code injection)
+        bytes inputLockingBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+        bytes outputLockingBytecode = tx.outputs[0].lockingBytecode;
+        require(outputLockingBytecode == inputLockingBytecode);
+        
+        // Step 4: Validate output[0] tokenCategory (prevents token substitution)
+        bytes inputTokenCategory = tx.inputs[this.activeInputIndex].tokenCategory;
+        bytes outputTokenCategory = tx.outputs[0].tokenCategory;
+        require(outputTokenCategory == inputTokenCategory);
+        
+        // Step 5: Validate output[0] value (prevents value extraction)
+        int inputValue = tx.inputs[this.activeInputIndex].value;
+        int outputValue = tx.outputs[0].value;
+        require(outputValue == inputValue);
+        
+        // RESULT: All output-based attacks are now IMPOSSIBLE
+        // - Unauthorized minting: BLOCKED (no output[1] for new tokens)
+        // - Multi-output extraction: BLOCKED (only 1 output allowed)
+        // - Output spam: BLOCKED (cannot create extra outputs)
+        // - Fee manipulation: BLOCKED (no output splitting possible)
+    }
+}
+
+// ============================================================================
+// ALTERNATIVE PATTERN: Multiple Outputs with Explicit Validation
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// ALTERNATIVE: Covenant that intentionally allows multiple outputs
+// USE CASE: Covenant + change output, or covenant + withdrawal
+// CRITICAL: Must validate EVERY output explicitly
+contract SecureCovenantMultipleOutputs(
+    pubkey ownerPubKey,
+    pubkey recipientPubKey  // Authorized withdrawal recipient
+) {
+    // Pattern: Covenant continuation + withdrawal output
+    // REQUIREMENT: Validate ALL outputs, not just some
+    function spendWithWithdrawal(sig ownerSig, int withdrawalAmount) {
+        // Step 1: Validate authorization
+        require(checkSig(ownerSig, ownerPubKey));
+        
+        // Step 2: CRITICAL - Validate EXACT output count
+        // This covenant intentionally creates 2 outputs
+        // Must enforce exactly 2, no more, no less
+        require(tx.outputs.length == 2);
+        
+        // Step 3: Validate output[0] - covenant continuation
+        bytes inputLockingBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+        require(tx.outputs[0].lockingBytecode == inputLockingBytecode);
+        
+        // Step 4: Validate output[0] preserves tokens
+        bytes inputTokenCategory = tx.inputs[this.activeInputIndex].tokenCategory;
+        require(tx.outputs[0].tokenCategory == inputTokenCategory);
+        
+        // Step 5: Validate output[0] value accounts for withdrawal
+        int inputValue = tx.inputs[this.activeInputIndex].value;
+        int remainingValue = inputValue - withdrawalAmount;
+        require(tx.outputs[0].value == remainingValue);
+        
+        // Step 6: Validate output[1] - withdrawal to authorized recipient
+        // Build the expected P2PKH locking bytecode for recipient
+        bytes20 recipientPkh = hash160(recipientPubKey);
+        bytes expectedWithdrawalBytecode = new LockingBytecodeP2PKH(recipientPkh);
+        require(tx.outputs[1].lockingBytecode == expectedWithdrawalBytecode);
+        
+        // Step 7: Validate output[1] receives exactly the withdrawal amount
+        require(tx.outputs[1].value == withdrawalAmount);
+        
+        // Step 8: Validate output[1] has no tokens (BCH only withdrawal)
+        require(tx.outputs[1].tokenCategory == 0x);
+        
+        // Step 9: Validate withdrawal amount is reasonable
+        require(withdrawalAmount > 0);  // Must withdraw something
+        require(withdrawalAmount < inputValue);  // Cannot withdraw everything
+        require(remainingValue >= 1000);  // Covenant must retain minimum balance
+        
+        // RESULT: Two-output pattern is SECURE
+        // - Output count: FIXED at 2
+        // - Output[0]: Fully validated covenant continuation
+        // - Output[1]: Fully validated withdrawal to authorized recipient
+        // - No additional outputs possible (would fail tx.outputs.length check)
+    }
+}
+
+// ============================================================================
+// EXPLANATION: Why Output Count Validation Is Critical
+// ============================================================================
+
+// OUTPUT COUNT VALIDATION PRINCIPLE
+// ----------------------------------
+// The tx.outputs array in Bitcoin Cash can contain 0 to N outputs (practical limit ~1000s).
+// Without explicit length validation, a covenant that checks output[0] has NO CONTROL
+// over outputs[1], [2], [3], etc.
+//
+// This creates multiple attack vectors:
+//
+// 1. UNAUTHORIZED MINTING
+//    - If covenant holds minting capability NFT
+//    - Output[0] preserves the minting NFT (passes validation)
+//    - Outputs[1..N] create unlimited new tokens using that capability
+//    - Token supply inflated without authorization
+//
+// 2. VALUE EXTRACTION VIA ADDITIONAL INPUTS
+//    - Attacker adds their own UTXOs as additional inputs
+//    - Output[0] satisfies covenant validation
+//    - Outputs[1..N] send attacker's funds wherever they want
+//    - Covenant transaction hijacked for unrelated purposes
+//
+// 3. BLOCKCHAIN SPAM
+//    - Output[0] satisfies covenant
+//    - Outputs[1..100] are dust outputs to random addresses
+//    - UTXO set bloated
+//    - Network resources wasted
+//
+// 4. FEE MANIPULATION
+//    - Multiple outputs change transaction size
+//    - Can affect fee calculations if covenant attempts fee validation
+//    - Output splitting used to manipulate transaction structure
+
+// IMPLEMENTATION REQUIREMENTS
+// ----------------------------
+// Every covenant MUST include ONE of these patterns:
+//
+// Pattern A: Fixed Output Count (most common)
+//   require(tx.outputs.length == 1);  // Single output only
+//   require(tx.outputs.length == 2);  // Exactly two outputs
+//   require(tx.outputs.length == 3);  // Exactly three outputs
+//
+// Pattern B: Maximum Output Count (rare, usually wrong)
+//   require(tx.outputs.length <= 2);  // At most two outputs
+//   WARNING: Usually you want EXACT count, not maximum
+//   Maximum allows attacker to omit expected outputs
+//
+// Pattern C: Conditional Output Count (complex use cases)
+//   if (withdrawalMode) {
+//       require(tx.outputs.length == 2);  // Covenant + withdrawal
+//   } else {
+//       require(tx.outputs.length == 1);  // Covenant only
+//   }
+
+// VALIDATION ORDER MATTERS
+// -------------------------
+// Check output count BEFORE validating individual outputs:
+//
+// CORRECT ORDER:
+//   require(tx.outputs.length == 1);  // Check count first
+//   require(tx.outputs[0].value == inputValue);  // Then validate output
+//
+// WHY?
+// - Fail fast if wrong output count
+// - Avoid wasting gas/computation on output validation
+// - Clear security boundary
+//
+// INCORRECT ORDER:
+//   require(tx.outputs[0].value == inputValue);  // Validates output[0]
+//   require(tx.outputs.length == 1);  // But output[1], [2] already exist!
+//
+// While this still works (transaction fails), it's less clear and wastes computation.
+
+// COMMON MISTAKES
+// ----------------
+// MISTAKE 1: Assuming output count
+//   // No output count check
+//   require(tx.outputs[0].value == inputValue);
+//   // WRONG: Allows unlimited additional outputs
+//
+// MISTAKE 2: Using >= instead of ==
+//   require(tx.outputs.length >= 1);
+//   // WRONG: Allows unlimited outputs beyond first one
+//
+// MISTAKE 3: Using <= without validating all outputs
+//   require(tx.outputs.length <= 2);
+//   require(tx.outputs[0].value == inputValue);
+//   // WRONG: If 2 outputs exist, output[1] is unvalidated
+//   // If 1 output exists, might be missing expected output
+//
+// MISTAKE 4: Off-by-one errors
+//   require(tx.outputs.length == 2);
+//   require(tx.outputs[0].lockingBytecode == ...);
+//   require(tx.outputs[2].lockingBytecode == ...);
+//   // WRONG: outputs[2] doesn't exist (0-indexed, only 0 and 1 exist)
+//   // Should be: tx.outputs[1]
+
+// SPECIAL CASE: Minting Capability NFTs
+// --------------------------------------
+// Covenants holding NFTs with "minting" capability require EXTRA vigilance:
+//
+// DANGER: Minting capability allows creating new tokens in ANY output
+//   - Output[0]: Covenant continuation with minting NFT ✓
+//   - Output[1]: Newly minted tokens (UNAUTHORIZED)
+//
+// PROTECTION: Strict output count validation
+//   require(tx.outputs.length == 1);
+//
+// ALTERNATIVE: If minting is intended, validate the minting output explicitly
+//   require(tx.outputs.length == 2);
+//   require(tx.outputs[0].lockingBytecode == ...);  // Covenant continuation
+//   require(tx.outputs[1].lockingBytecode == ...);  // Authorized mint recipient
+//   require(tx.outputs[1].tokenCategory == ...);    // Correct category
+//   require(tx.outputs[1].tokenAmount == ...);      // Authorized amount
+
+// ============================================================================
+// DEPLOYMENT CHECKLIST FOR OUTPUT COUNT VALIDATION
+// ============================================================================
+//
+// Before deploying a covenant contract, verify:
+//
+// [ ] Output count validation is present: require(tx.outputs.length == N)
+// [ ] Output count uses == (equality), not >= or <= unless specifically needed
+// [ ] Output count check occurs BEFORE individual output validation
+// [ ] If using <= or >=, ALL possible outputs are validated
+// [ ] Output indices match output count (0-indexed, no off-by-one errors)
+// [ ] Every output in the count is fully validated:
+//     [ ] lockingBytecode
+//     [ ] value
+//     [ ] tokenCategory (if tokens involved)
+//     [ ] tokenAmount (if fungible tokens)
+//     [ ] nftCommitment (if NFTs with data)
+//     [ ] tokenCapability (if minting/mutable NFTs)
+// [ ] Special case: If covenant holds minting capability, minting is controlled
+// [ ] Test case: Transaction with extra outputs beyond count (should FAIL)
+// [ ] Test case: Transaction with fewer outputs than count (should FAIL)
+// [ ] Test case: Transaction with exact output count (should SUCCEED)
+
+// ============================================================================
+// TESTING RECOMMENDATIONS
+// ============================================================================
+//
+// Test Cases for VULNERABLE version (demonstrates vulnerability):
+// 1. Transaction with 1 output (covenant continuation)
+//    Expected: SUCCEEDS (normal operation)
+//
+// 2. Transaction with 2 outputs (covenant + unauthorized output)
+//    Expected: SUCCEEDS (VULNERABILITY - should fail but doesn't)
+//
+// 3. Transaction with 10 outputs (covenant + spam outputs)
+//    Expected: SUCCEEDS (VULNERABILITY - spam allowed)
+//
+// 4. If covenant holds minting NFT: Transaction with unauthorized minting
+//    Expected: SUCCEEDS (VULNERABILITY - unauthorized minting)
+//
+// Test Cases for SECURE version (should PASS):
+// 1. Transaction with 1 output (covenant continuation)
+//    Expected: SUCCEEDS (valid transaction)
+//
+// 2. Transaction with 2 outputs (covenant + unauthorized output)
+//    Expected: FAILS (output count validation rejects it)
+//
+// 3. Transaction with 0 outputs
+//    Expected: FAILS (output count validation rejects it)
+//
+// 4. Transaction with 10 outputs
+//    Expected: FAILS (output count validation rejects it)
+//
+// Test Cases for MULTI-OUTPUT version:
+// 1. Transaction with exactly 2 outputs (both validated)
+//    Expected: SUCCEEDS (valid transaction)
+//
+// 2. Transaction with 1 output (missing withdrawal output)
+//    Expected: FAILS (output count is wrong)
+//
+// 3. Transaction with 3 outputs (extra unauthorized output)
+//    Expected: FAILS (output count is wrong)
+//
+// 4. Transaction with 2 outputs but wrong withdrawal recipient
+//    Expected: FAILS (output[1] validation fails)
+
+// ============================================================================
+// REAL-WORLD IMPACT
+// ============================================================================
+//
+// Historical Examples (hypothetical for demonstration):
+//
+// Scenario: DAO-style covenant without output count validation
+// - Covenant holds 1,000,000 sats + minting capability NFT
+// - Intended: Controlled token distribution
+// - Attack: Attacker creates 100 outputs, minting 10,000 tokens each
+// - Result: 1,000,000 unauthorized tokens minted
+// - Impact: Token value destroyed, governance compromised
+//
+// Scenario: Escrow covenant without output count validation  
+// - Covenant holds 500,000 sats for conditional release
+// - Intended: Single release to authorized party
+// - Attack: Attacker adds 50 dust outputs in the release transaction
+// - Result: UTXO set bloated, covenant transaction used for spam
+// - Impact: Network degradation, covenant reputation damaged
+//
+// LESSON: Output count validation is NOT optional.
+// It is a CRITICAL security requirement for ALL covenants.
+
+// ============================================================================
+// END OF FILE
+// ============================================================================

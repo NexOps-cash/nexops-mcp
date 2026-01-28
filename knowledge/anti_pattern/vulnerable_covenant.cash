@@ -1,0 +1,316 @@
+// ANTI-PATTERN: Vulnerable Covenant
+// VULNERABILITY: Missing output validation allows multiple critical attacks
+// ATTACK VECTOR: Code injection, token category substitution, value extraction
+//
+// This file demonstrates THREE critical covenant vulnerabilities:
+// 1. Missing lockingBytecode validation (code injection)
+// 2. Missing tokenCategory validation (token substitution)
+// 3. Missing value validation (value extraction)
+//
+// CashScript Version: ^0.13.0
+// Network: Bitcoin Cash (BCH)
+// Security Level: VULNERABLE - DO NOT USE IN PRODUCTION
+
+// ============================================================================
+// VULNERABLE CODE: Missing Critical Output Validations
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// VULNERABLE: This covenant fails to validate output properties
+// RISK: Attackers can modify outputs to steal funds or inject malicious code
+contract VulnerableCovenantNoValidation(
+    pubkey ownerPubKey
+) {
+    // VULNERABILITY: Only verifies signature, assumes output will be correct
+    // MISSING: lockingBytecode check (allows code injection)
+    // MISSING: tokenCategory check (allows token substitution)
+    // MISSING: value check (allows value extraction)
+    function spend(sig ownerSig) {
+        // Only validates the signature
+        require(checkSig(ownerSig, ownerPubKey));
+        
+        // CRITICAL FLAW: No validation of tx.outputs[0]
+        // Attacker can create ANY output they want:
+        // - Different contract code (code injection)
+        // - Different token category (token theft)
+        // - Different BCH amount (value extraction)
+    }
+}
+
+// ============================================================================
+// ATTACK SCENARIO 1: Code Injection via Missing lockingBytecode Validation
+// ============================================================================
+//
+// Initial State:
+// - Contract holds 1000 sats
+// - lockingBytecode: <VulnerableCovenantNoValidation bytecode>
+//
+// Attack Transaction:
+// Input:
+//   - VulnerableCovenantNoValidation UTXO (1000 sats)
+//   - Valid signature from ownerPubKey
+//
+// Output:
+//   - 950 sats to ATTACKER-CONTROLLED contract with different bytecode
+//   - Attacker's contract has backdoor: allows unrestricted withdrawal
+//
+// Result:
+// - Covenant "continues" but code is now malicious
+// - Attacker can drain all funds from new contract
+// - Original covenant security guarantees DESTROYED
+//
+// Why it works:
+// - Contract never checks: tx.outputs[0].lockingBytecode == tx.inputs[this.activeInputIndex].lockingBytecode
+// - Any bytecode is accepted as long as signature is valid
+
+// ============================================================================
+// ATTACK SCENARIO 2: Token Category Substitution
+// ============================================================================
+//
+// Initial State:
+// - Contract holds NFT with category: 0xAABBCCDD... (valuable NFT)
+// - Contract enforces covenant pattern
+//
+// Attack Transaction:
+// Input:
+//   - VulnerableCovenantNoValidation UTXO (valuable NFT)
+//   - Valid signature from ownerPubKey
+//
+// Output:
+//   - Different tokenCategory: 0x11223344... (worthless token attacker created)
+//   - Attacker keeps the valuable NFT category: 0xAABBCCDD...
+//
+// Result:
+// - Covenant continues with worthless token
+// - Attacker extracted valuable NFT
+// - Token custody guarantees VIOLATED
+//
+// Why it works:
+// - Contract never checks: tx.outputs[0].tokenCategory == tx.inputs[this.activeInputIndex].tokenCategory
+// - Any category (or no category) is accepted
+
+// ============================================================================
+// ATTACK SCENARIO 3: Value Extraction Attack
+// ============================================================================
+//
+// Initial State:
+// - Contract holds 10,000 sats
+// - Intended behavior: preserve value in covenant
+//
+// Attack Transaction:
+// Input:
+//   - VulnerableCovenantNoValidation UTXO (10,000 sats)
+//   - Valid signature from ownerPubKey
+//
+// Outputs:
+//   - Output 0: 546 sats (dust) to same contract
+//   - Output 1: 9,400 sats to attacker's address
+//
+// Result:
+// - Covenant continues with only dust amount
+// - Attacker extracted 94% of the value
+// - Value preservation FAILED
+//
+// Why it works:
+// - Contract never checks: tx.outputs[0].value == tx.inputs[this.activeInputIndex].value
+// - Any value is accepted (even dust amounts)
+
+// ============================================================================
+// SECURE VERSION: Explicit Output Validation
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// SECURE: This covenant validates ALL critical output properties
+// PROTECTION: Prevents code injection, token substitution, and value extraction
+contract SecureCovenantWithValidation(
+    pubkey ownerPubKey
+) {
+    // SECURE: Validates signature AND enforces output constraints
+    // INCLUDES: lockingBytecode, tokenCategory, and value validation
+    function spend(sig ownerSig) {
+        // Step 1: Validate authorization (signature check)
+        require(checkSig(ownerSig, ownerPubKey));
+        
+        // Step 2: CRITICAL - Validate lockingBytecode (prevents code injection)
+        // Ensures output[0] uses the EXACT SAME contract code as this input
+        // This prevents attackers from replacing contract logic with malicious code
+        bytes inputLockingBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+        bytes outputLockingBytecode = tx.outputs[0].lockingBytecode;
+        require(outputLockingBytecode == inputLockingBytecode);
+        
+        // Step 3: CRITICAL - Validate tokenCategory (prevents token substitution)
+        // Ensures output[0] preserves the EXACT SAME token category as this input
+        // This prevents attackers from swapping valuable tokens with worthless ones
+        bytes inputTokenCategory = tx.inputs[this.activeInputIndex].tokenCategory;
+        bytes outputTokenCategory = tx.outputs[0].tokenCategory;
+        require(outputTokenCategory == inputTokenCategory);
+        
+        // Step 4: CRITICAL - Validate value (prevents value extraction)
+        // Ensures output[0] preserves the EXACT SAME BCH amount as this input
+        // This prevents attackers from draining value while maintaining covenant
+        int inputValue = tx.inputs[this.activeInputIndex].value;
+        int outputValue = tx.outputs[0].value;
+        require(outputValue == inputValue);
+        
+        // RESULT: All three attack vectors are now IMPOSSIBLE
+        // - Code injection: BLOCKED by lockingBytecode check
+        // - Token substitution: BLOCKED by tokenCategory check
+        // - Value extraction: BLOCKED by value check
+    }
+}
+
+// ============================================================================
+// EXPLANATION: Why Each Validation Is Critical
+// ============================================================================
+
+// 1. LOCKINGBYTECODE VALIDATION
+// ------------------------------
+// What it protects:
+// - Ensures covenant contract code cannot be changed mid-chain
+// - Prevents attacker from injecting backdoors or malicious logic
+// - Maintains immutability guarantee of smart contract rules
+//
+// Without this check:
+// - Attacker can replace contract with one that allows unrestricted withdrawal
+// - Covenant security model is completely destroyed
+// - All downstream transactions inherit the malicious code
+//
+// Implementation:
+// require(tx.outputs[0].lockingBytecode == tx.inputs[this.activeInputIndex].lockingBytecode);
+//
+// This MUST compare the EXACT bytecode, not just contract type or template.
+// Even one byte difference could introduce a critical vulnerability.
+
+// 2. TOKENCATEGORY VALIDATION
+// ----------------------------
+// What it protects:
+// - Ensures NFTs and fungible tokens remain in the covenant
+// - Prevents token category swapping attacks
+// - Maintains custody of valuable digital assets
+//
+// Without this check:
+// - Attacker can swap valuable NFT category with worthless token
+// - Token-based access controls can be bypassed
+// - Multi-token covenants can have categories mixed/stolen
+//
+// Implementation:
+// require(tx.outputs[0].tokenCategory == tx.inputs[this.activeInputIndex].tokenCategory);
+//
+// Note: This checks the CATEGORY (transaction ID of token genesis).
+// For NFTs, you may also need to validate commitment and capability.
+// For fungible tokens, you may need to validate amount.
+
+// 3. VALUE VALIDATION
+// -------------------
+// What it protects:
+// - Ensures BCH satoshi amount is preserved in covenant
+// - Prevents gradual or sudden value extraction
+// - Maintains economic value of the contract
+//
+// Without this check:
+// - Attacker can reduce output to dust (546 sats) and pocket the rest
+// - Covenant continues but with negligible value
+// - Economic security guarantees are violated
+//
+// Implementation:
+// require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+//
+// Alternative patterns:
+// - Allow value to decrease by exactly tx fee amount
+// - Allow value to increase (deposits)
+// - Require minimum value threshold
+//
+// Choose based on your specific covenant requirements.
+
+// ============================================================================
+// CRITICAL SECURITY PRINCIPLES
+// ============================================================================
+
+// PRINCIPLE 1: VALIDATE EVERYTHING
+// ---------------------------------
+// Never assume outputs will be correct just because inputs are authorized.
+// Signature validation (checkSig) only proves WHO created the transaction.
+// It does NOT prove WHAT the transaction does.
+// You must EXPLICITLY check every output property that matters.
+
+// PRINCIPLE 2: COMPARE AGAINST INPUT STATE
+// -----------------------------------------
+// Use tx.inputs[this.activeInputIndex] to access the CURRENT contract state.
+// Compare output properties against THIS input, not hardcoded values.
+// This ensures the covenant adapts to its current state correctly.
+
+// PRINCIPLE 3: EXPLICIT IS BETTER THAN IMPLICIT
+// ----------------------------------------------
+// Do not rely on "default behavior" or "assumed properties."
+// Write out every check explicitly, even if it seems redundant.
+// Code clarity prevents security bugs.
+
+// PRINCIPLE 4: FAIL CLOSED, NOT OPEN
+// -----------------------------------
+// If a validation cannot be performed (e.g., missing field), REJECT.
+// Use require() statements that MUST pass for transaction to be valid.
+// Never use optional checks or "best effort" validation.
+
+// PRINCIPLE 5: ONE OUTPUT, MANY CHECKS
+// -------------------------------------
+// Even a single covenant output needs multiple validations:
+// - lockingBytecode (code integrity)
+// - tokenCategory (asset custody)
+// - value (economic preservation)
+// - tokenAmount (for fungible tokens)
+// - nftCommitment (for NFTs with data)
+// - tokenCapability (for mutable/minting NFTs)
+//
+// Missing ANY of these can create an exploitable vulnerability.
+
+// ============================================================================
+// DEPLOYMENT CHECKLIST
+// ============================================================================
+//
+// Before deploying a covenant contract, verify:
+//
+// [ ] lockingBytecode validation is present and correct
+// [ ] tokenCategory validation matches covenant requirements
+// [ ] value validation prevents extraction attacks
+// [ ] All tx.outputs[N] indices are correct (0-indexed)
+// [ ] All tx.inputs[this.activeInputIndex] references are correct
+// [ ] Comparison operators are correct (== not = or !=)
+// [ ] require() statements will revert on failure
+// [ ] No assumptions about output ordering beyond what's checked
+// [ ] No assumptions about fee handling beyond what's checked
+// [ ] Test with malicious transactions attempting each attack vector
+//
+// REMEMBER: One missing check can compromise the entire covenant security model.
+
+// ============================================================================
+// TESTING RECOMMENDATIONS
+// ============================================================================
+//
+// Test Cases for VULNERABLE version (should FAIL in production):
+// 1. Transaction with different lockingBytecode in output[0]
+//    Expected: Transaction succeeds (VULNERABILITY DEMONSTRATED)
+//
+// 2. Transaction with different tokenCategory in output[0]
+//    Expected: Transaction succeeds (VULNERABILITY DEMONSTRATED)
+//
+// 3. Transaction with reduced value in output[0]
+//    Expected: Transaction succeeds (VULNERABILITY DEMONSTRATED)
+//
+// Test Cases for SECURE version (should PASS):
+// 1. Transaction with different lockingBytecode in output[0]
+//    Expected: Transaction REJECTED
+//
+// 2. Transaction with different tokenCategory in output[0]
+//    Expected: Transaction REJECTED
+//
+// 3. Transaction with reduced value in output[0]
+//    Expected: Transaction REJECTED
+//
+// 4. Transaction with EXACT lockingBytecode, tokenCategory, and value
+//    Expected: Transaction succeeds (valid covenant continuation)
+
+// ============================================================================
+// END OF FILE
+// ============================================================================
