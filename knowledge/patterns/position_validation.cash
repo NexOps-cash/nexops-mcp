@@ -1,0 +1,20 @@
+// PATTERN: Input Position Validation
+// ALWAYS validate your own position and other contracts' positions
+
+function myOperation() {
+    // ALWAYS validate your own position first
+    require(this.activeInputIndex == 2);
+    
+    // Define expected positions
+    // Index 0: Price oracle
+    // Index 1: Main contract
+    // Index 2: This function contract (self)
+    // Index 3: User BCH
+    
+    // Validate each position
+    require(tx.inputs[0].tokenCategory == oracleCategory + 0x01);
+    require(tx.inputs[1].tokenCategory == mainCategory + 0x01);
+    require(tx.inputs[3].tokenCategory == 0x); // Pure BCH
+    
+    // Now safe to use these indices
+}

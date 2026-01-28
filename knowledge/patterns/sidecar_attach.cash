@@ -1,0 +1,21 @@
+// PATTERN: Sidecar Attachment
+// Proves sidecar belongs to main contract
+
+contract TokenSidecar() {
+    function attach() {
+        int mainIndex = this.activeInputIndex - 1;
+        
+        // CRITICAL: Prove same-transaction origin
+        require(tx.inputs[this.activeInputIndex].outpointTransactionHash ==
+                tx.inputs[mainIndex].outpointTransactionHash);
+        
+        // CRITICAL: Prove sequential output indices
+        require(tx.inputs[this.activeInputIndex].outpointIndex ==
+                tx.inputs[mainIndex].outpointIndex + 1);
+        
+        // Self-replicate
+        require(tx.outputs[this.activeInputIndex].lockingBytecode ==
+                tx.inputs[this.activeInputIndex].lockingBytecode);
+        require(tx.outputs[this.activeInputIndex].value == 1000);
+    }
+}

@@ -1,0 +1,26 @@
+// PATTERN: Minting Authority Control
+// NEVER release minting NFTs to untrusted addresses
+
+contract MintingController(bytes32 category) {
+    function mint(int amount) {
+        // Verify this contract holds minting NFT
+        require(tx.inputs[0].tokenCategory == category + 0x02);
+        
+        // CRITICAL: Keep minting NFT in contract
+        require(tx.outputs[0].lockingBytecode == tx.inputs[0].lockingBytecode);
+        require(tx.outputs[0].tokenCategory == tx.inputs[0].tokenCategory);
+        
+        // Never send minting NFT to user addresses
+    }
+    
+    function downgrade() {
+        // After initial setup, downgrade to mutable
+        require(tx.outputs[0].tokenCategory == category + 0x01);
+    }
+    
+    function burn() {
+        // Send minting NFT to OP_RETURN to destroy it
+        require(tx.outputs[destroyIdx].lockingBytecode == 0x6a);
+        require(tx.outputs[destroyIdx].tokenCategory == category + 0x02);
+    }
+}

@@ -1,0 +1,18 @@
+// PATTERN: Output Count Security
+// CRITICAL: Include as FIRST validation in EVERY function
+
+contract SecureContract() {
+    function anyOperation() {
+        // CRITICAL: ALWAYS include this FIRST
+        require(tx.outputs.length <= 5);
+        
+        // ... rest of logic
+    }
+}
+
+// Standard Output Limits:
+// Simple transfer: 3-4
+// Swap/exchange: 5-6
+// Complex DeFi: 7-10
+// Batch operations: 15-20
+// Maximum: 50

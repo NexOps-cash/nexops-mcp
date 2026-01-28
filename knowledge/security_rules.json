@@ -1,0 +1,128 @@
+[
+  {
+    "id": "SEC-001",
+    "category": "covenant",
+    "severity": "critical",
+    "rule": "ALL self-replicating covenants MUST validate all 5 properties: lockingBytecode, tokenCategory, value, tokenAmount, and nftCommitment",
+    "description": "Missing ANY of the 5-point validation creates critical vulnerabilities allowing code injection, category substitution, value extraction, token extraction, or state manipulation"
+  },
+  {
+    "id": "SEC-002",
+    "category": "general",
+    "severity": "critical",
+    "rule": "EVERY contract function MUST limit output count as FIRST validation",
+    "description": "Without output count limits, attackers can add unauthorized outputs to mint tokens. Use require(tx.outputs.length <= N) as the first line in every function"
+  },
+  {
+    "id": "SEC-003",
+    "category": "minting",
+    "severity": "critical",
+    "rule": "Minting NFTs (capability 0x02) must NEVER be released to untrusted addresses",
+    "description": "If a minting NFT escapes to an untrusted address, the entire token system is compromised. Always keep minting authority in contract or burn it"
+  },
+  {
+    "id": "SEC-004",
+    "category": "covenant",
+    "severity": "critical",
+    "rule": "Validate lockingBytecode equality to prevent code injection: require(tx.outputs[0].lockingBytecode == tx.inputs[0].lockingBytecode)",
+    "description": "Without lockingBytecode check, attacker can substitute a different contract while preserving other properties"
+  },
+  {
+    "id": "SEC-005",
+    "category": "covenant",
+    "severity": "critical",
+    "rule": "Validate tokenCategory equality to prevent category substitution: require(tx.outputs[0].tokenCategory == tx.inputs[0].tokenCategory)",
+    "description": "Without tokenCategory check, attacker can substitute a different token category"
+  },
+  {
+    "id": "SEC-006",
+    "category": "multi-contract",
+    "severity": "critical",
+    "rule": "Every contract must validate its own input position using this.activeInputIndex",
+    "description": "Without explicit position validation, attackers can reorder inputs to bypass validation logic"
+  },
+  {
+    "id": "SEC-007",
+    "category": "multi-contract",
+    "severity": "critical",
+    "rule": "Sidecar contracts must prove same-transaction origin using outpointTransactionHash and sequential outpointIndex",
+    "description": "Prevents attacker from pairing main contract with unauthorized sidecar from different transaction"
+  },
+  {
+    "id": "SEC-008",
+    "category": "authentication",
+    "severity": "critical",
+    "rule": "Never trust a contract just because it's in the transaction - always verify tokenCategory and identifier",
+    "description": "Validate category and identifier before trusting data from other contracts"
+  },
+  {
+    "id": "SEC-009",
+    "category": "time",
+    "severity": "high",
+    "rule": "Use >= for time comparisons, not >. Always validate lockTime > 0",
+    "description": "Strict inequality (>) creates edge case vulnerabilities at exact locktime boundaries"
+  },
+  {
+    "id": "SEC-010",
+    "category": "validation",
+    "severity": "high",
+    "rule": "Always validate input parameters: amounts > 0, amounts <= maxAmount, data.length > 0, data.length <= maxLength",
+    "description": "Never trust function arguments - validate everything to prevent unexpected behavior"
+  },
+  {
+    "id": "SEC-011",
+    "category": "state",
+    "severity": "high",
+    "rule": "Use first byte of NFT commitment as type identifier to distinguish contract types sharing same tokenId",
+    "description": "Enables multiple contract types to share a token category while maintaining type safety"
+  },
+  {
+    "id": "SEC-012",
+    "category": "overflow",
+    "severity": "high",
+    "rule": "Check for overflow before using incremented counters: require(newID != 2147483647)",
+    "description": "Prevents state corruption from integer overflow in counters and IDs"
+  },
+  {
+    "id": "SEC-013",
+    "category": "tokens",
+    "severity": "high",
+    "rule": "Validate output tokenCategory to prevent unauthorized token attachment: require(tx.outputs[0].tokenCategory == 0x) for BCH-only outputs",
+    "description": "Without token validation, attacker can attach tokens to outputs that should be pure BCH"
+  },
+  {
+    "id": "SEC-014",
+    "category": "minting",
+    "severity": "high",
+    "rule": "Downgrade minting NFT to mutable (0x01) after setup, or burn to OP_RETURN (0x6a) when done",
+    "description": "Reduces attack surface by removing minting capability when no longer needed"
+  },
+  {
+    "id": "SEC-015",
+    "category": "general",
+    "severity": "medium",
+    "rule": "Document input/output positions in function headers with explicit position mapping",
+    "description": "Improves code maintainability and helps prevent position-related bugs"
+  },
+  {
+    "id": "SEC-016",
+    "category": "validation",
+    "severity": "medium",
+    "rule": "Validate state transitions: require(newState.length == oldState.length) and require(newState != oldState)",
+    "description": "Ensures state changes are intentional and maintain expected format"
+  },
+  {
+    "id": "SEC-017",
+    "category": "cryptography",
+    "severity": "medium",
+    "rule": "Validate preimage length before hashing: require(preimage.length > 0 && preimage.length <= 1024)",
+    "description": "Prevents null byte attacks and excessive resource consumption"
+  },
+  {
+    "id": "SEC-018",
+    "category": "bitwise",
+    "severity": "medium",
+    "rule": "Use bytes types for bitwise operations (&, |, ^), NOT int. Validate shift amounts: require(shiftAmount >= 0 && shiftAmount <= 64)",
+    "description": "CashScript only supports bitwise operators on bytes types. Invalid shift amounts cause unexpected results"
+  }
+]

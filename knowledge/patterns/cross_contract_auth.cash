@@ -1,0 +1,18 @@
+// PATTERN: Cross-Contract Authentication
+// NEVER trust a contract just because it's in the transaction
+
+// INSECURE - trusts any input at position 0
+function insecure() {
+    bytes data = tx.inputs[0].nftCommitment;
+    // ... uses data without verification
+}
+
+// SECURE - verifies contract identity before trusting
+function secure() {
+    // Verify category and identifier
+    require(tx.inputs[0].tokenCategory == trustedCategory + 0x01);
+    require(tx.inputs[0].nftCommitment.split(1)[0] == 0x00);
+    
+    // NOW safe to use data
+    bytes data = tx.inputs[0].nftCommitment.split(1)[1];
+}

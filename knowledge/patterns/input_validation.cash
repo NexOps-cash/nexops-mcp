@@ -1,0 +1,17 @@
+// PATTERN: Input Validation
+// ALWAYS validate all function parameters
+
+contract SecureContract(pubkey owner, int maxAmount) {
+    function spend(sig userSig, int amount, bytes data) {
+        // Validate signature
+        require(checkSig(userSig, owner));
+        
+        // Validate amount
+        require(amount > 0);
+        require(amount <= maxAmount);
+        
+        // Validate data
+        require(data.length > 0);
+        require(data.length <= 256);  // Reasonable limit
+    }
+}
