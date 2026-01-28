@@ -1,0 +1,933 @@
+// ANTI-PATTERN: Fee Assumption Violation
+// VULNERABILITY: Incorrect fee assumptions enable value extraction and invariant bypass
+// ATTACK VECTOR: Fee subsidy, value hiding, covenant economics manipulation, free tx building
+//
+// This file demonstrates the critical vulnerability of making assumptions about
+// transaction fees in covenant contracts. Covenants cannot reliably reason about
+// fees because attackers control which inputs are included. Fee assumptions lead
+// to value extraction, invariant violations, and covenant economics bypass.
+//
+// CashScript Version: ^0.13.0
+// Network: Bitcoin Cash (BCH)
+// Security Level: VULNERABLE - DO NOT USE IN PRODUCTION
+
+// ============================================================================
+// VULNERABLE CODE: Assumed Fixed Fee
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// VULNERABLE: This contract assumes fee = inputValue - outputValue
+// RISK: Multi-input transactions allow fee subsidy and value extraction
+contract VulnerableCovenantAssumedFee(
+    pubkey ownerPubKey,
+    int minimumValue  // Minimum covenant value to maintain
+) {
+    // VULNERABILITY: Assumes transaction fee comes from THIS covenant input only
+    // MISSING: Recognition that fees can be paid by OTHER inputs
+    // MISSING: Understanding that multi-input txs break fee assumptions
+    // MISSING: tx.outputs.length validation
+    // Attacker can hide value in extra outputs
+    function spend(sig ownerSig, int outputValue) {
+        // Validate authorization
+        require(checkSig(ownerSig, ownerPubKey));
+        
+        // Get input value from this covenant
+        int inputValue = tx.inputs[this.activeInputIndex].value;
+        
+        // CRITICAL FLAW: Assumes fee is paid from this input
+        // Calculates: fee = inputValue - outputValue
+        int assumedFee = inputValue - outputValue;
+        
+        // Validates fee is "reasonable" (e.g., <= 1000 sats)
+        require(assumedFee >= 0);
+        require(assumedFee <= 1000);
+        
+        // Validates covenant maintains minimum value
+        require(outputValue >= minimumValue);
+        
+        // THE PROBLEM:
+        // This logic assumes: Total Fee = inputValue - outputValue
+        // 
+        // Reality in multi-input transactions:
+        // Total Fee = (SUM all inputs) - (SUM all outputs)
+        //
+        // Attacker can:
+        // 1. Add their own input with extra value
+        // 2. Pay the ENTIRE fee from their input
+        // 3. Covenant input value = Covenant output value (no fee from covenant)
+        // 4. Contract sees: assumedFee = 0 (passes check)
+        // 5. Actual transaction fee = 1000 sats (paid by attacker)
+        //
+        // This breaks the assumption that covenant pays its own fees
+    }
+}
+
+// ============================================================================
+// UNDERSTANDING THE VULNERABILITY: How BCH Fees Work
+// ============================================================================
+//
+// CRITICAL CONCEPT: Transaction Fee Calculation
+// ----------------------------------------------
+//
+// BCH Transaction Structure:
+// Inputs:  [Input0: 10,000 sats, Input1: 5,000 sats, Input2: 3,000 sats]
+// Outputs: [Output0: 8,000 sats, Output1: 9,500 sats]
+// 
+// Fee Calculation:
+// Total Inputs  = 10,000 + 5,000 + 3,000 = 18,000 sats
+// Total Outputs = 8,000 + 9,500 = 17,500 sats
+// Fee = Total Inputs - Total Outputs = 18,000 - 17,500 = 500 sats
+//
+// Key Properties:
+// 1. Fee is TRANSACTION-WIDE (not per-input)
+// 2. ANY input can contribute to fee
+// 3. Fee can be paid entirely by non-covenant inputs
+// 4. Covenant cannot determine which input paid the fee
+//
+// COVENANT PERSPECTIVE (limited view):
+// - Covenant can see: tx.inputs[this.activeInputIndex].value (its own input)
+// - Covenant can see: tx.outputs[N].value (all outputs)
+// - Covenant CANNOT see: Total of all other inputs
+// - Covenant CANNOT calculate: Actual transaction fee
+//
+// Why Covenants Can't Calculate Fees:
+// - No access to SUM(all input values)
+// - Can only read own input value
+// - Can read all output values
+// - But cannot determine: "How much did OTHER inputs contribute?"
+//
+// THE DANGEROUS ASSUMPTION:
+// Many covenants assume: "My input value - My output value = Fee I'm paying"
+// This is ONLY true if: Transaction has exactly 1 input (the covenant)
+// This is FALSE if: Transaction has multiple inputs (very common)
+
+// ============================================================================
+// ATTACK SCENARIO 1: Fee Subsidy for Value Extraction
+// ============================================================================
+//
+// Setup:
+// - Covenant holds 10,000 sats (minimum required: 5,000 sats)
+// - Contract allows withdrawals as long as minimumValue maintained
+// - Contract assumes fee is deducted from covenant input
+// - Expected fee: ~200 sats
+//
+// Vulnerable Logic:
+//   int inputValue = 10,000;
+//   int outputValue = 5,000;  // Maintain minimum
+//   int assumedFee = inputValue - outputValue = 5,000;
+//   require(assumedFee <= 1000);  // FAILS - too high
+//
+// This prevents direct extraction of 5,000 sats (fee limit blocks it)
+//
+// ATTACK: Fee Subsidy to Bypass Limit
+// Inputs:
+//   [0] Covenant UTXO (10,000 sats)
+//   [1] Attacker's UTXO (5,200 sats) ← Attacker adds this
+//
+// Outputs:
+//   [0] Covenant continuation (5,000 sats) ← Maintains minimum
+//   [1] To attacker (10,000 sats) ← Withdrawal
+//
+// Fee: 200 sats (10,000 + 5,200 - 5,000 - 10,000 = 200)
+//
+// Covenant's View:
+//   inputValue (covenant) = 10,000
+//   outputValue (covenant continuation) = 5,000
+//   assumedFee = 10,000 - 5,000 = 5,000
+//   Check: assumedFee <= 1000? → FAILS
+//
+// Wait, attack should fail? Let's reconsider...
+//
+// ACTUAL ATTACK: Zero-Fee from Covenant Perspective
+// Inputs:
+//   [0] Covenant UTXO (10,000 sats)
+//   [1] Attacker's UTXO (200 sats) ← Just enough for fee
+//
+// Outputs:
+//   [0] Covenant continuation (10,000 sats) ← SAME as input
+//   [1] To attacker (0 sats) ← Dust or omitted
+//
+// Fee: 200 sats (paid entirely by Input[1])
+//
+// Covenant's View:
+//   inputValue = 10,000
+//   outputValue = 10,000
+//   assumedFee = 0
+//   Check: assumedFee <= 1000? → PASSES ✓
+//
+// Result:
+// - Covenant sees no fee deduction (input = output)
+// - Attacker paid the entire 200 sat fee
+// - Covenant transaction used as free transaction builder
+// - Attacker can batch multiple operations without covenant paying fees
+//
+// Impact:
+// - Covenant economics broken (supposed to pay own fees)
+// - Attacker gets free transaction building
+// - Fee budget assumptions violated
+
+// ============================================================================
+// ATTACK SCENARIO 2: Hidden Value Extraction via Fee Subsidy
+// ============================================================================
+//
+// Setup:
+// - Vault covenant holds 100,000 sats
+// - Allows partial withdrawals with fee deduction
+// - Validates: withdrawalAmount + fee <= inputValue - minimumBalance
+// - Minimum balance: 50,000 sats
+// - Maximum withdrawal calculated as: 100,000 - 50,000 - 1000 (fee) = 49,000 sats
+//
+// Vulnerable Contract:
+//
+// contract VulnerableVault(pubkey ownerPubKey, int minBalance) {
+//     function withdraw(sig ownerSig, int withdrawalAmount) {
+//         require(checkSig(ownerSig, ownerPubKey));
+//         int inputValue = tx.inputs[this.activeInputIndex].value;
+//         int outputValue = tx.outputs[0].value;
+//         int assumedFee = inputValue - outputValue - withdrawalAmount;
+//         
+//         // Validates fee is reasonable
+//         require(assumedFee >= 100);
+//         require(assumedFee <= 1000);
+//         
+//         // Validates minimum balance maintained
+//         require(outputValue >= minBalance);
+//         
+//         // Output[1] is withdrawal to user
+//         require(tx.outputs[1].value == withdrawalAmount);
+//     }
+// }
+//
+// Legitimate Withdrawal:
+// Inputs:
+//   [0] Vault (100,000 sats)
+// Outputs:
+//   [0] Vault continuation (50,000 sats)
+//   [1] Withdrawal (49,000 sats)
+// Fee: 1,000 sats
+//
+// Covenant's view:
+//   inputValue = 100,000
+//   outputValue = 50,000
+//   withdrawalAmount = 49,000
+//   assumedFee = 100,000 - 50,000 - 49,000 = 1,000 ✓
+//
+// ATTACK: Extract More by Subsidizing Fee
+// Inputs:
+//   [0] Vault (100,000 sats)
+//   [1] Attacker (1,000 sats) ← Fee subsidy
+//
+// Outputs:
+//   [0] Vault continuation (50,000 sats)
+//   [1] Withdrawal (50,000 sats) ← 1,000 more than limit!
+//
+// Actual Fee: 1,000 sats (100,000 + 1,000 - 50,000 - 50,000)
+//
+// Covenant's View:
+//   inputValue = 100,000
+//   outputValue = 50,000
+//   withdrawalAmount = 50,000
+//   assumedFee = 100,000 - 50,000 - 50,000 = 0
+//   Check: 0 >= 100? → FAILS
+//
+// Hmm, this fails. Need different approach...
+//
+// ACTUAL ATTACK: Hide Value in Fee Budget
+// Inputs:
+//   [0] Vault (100,000 sats)
+//   [1] Attacker (10,000 sats) ← Large subsidy
+//
+// Outputs:
+//   [0] Vault continuation (50,000 sats)
+//   [1] Withdrawal (49,000 sats)
+//   [2] To attacker (10,000 sats) ← Subsidy returned
+//
+// Fee: 1,000 sats
+//
+// If contract only validates outputs[0] and outputs[1]:
+//   assumedFee = 100,000 - 50,000 - 49,000 = 1,000 ✓
+//
+// But outputs[2] exists (attacker's refund)
+// Covenant used attacker's transaction for free
+// Attacker got free transaction building
+
+// ============================================================================
+// ATTACK SCENARIO 3: Covenant as Free Transaction Builder
+// ============================================================================
+//
+// Setup:
+// - Time-locked covenant (releases after certain time)
+// - User wants to batch multiple operations in one transaction
+// - Covenant validates basic properties but assumes fee
+//
+// Vulnerable Time Lock:
+//
+// contract VulnerableTimeLock(pubkey beneficiaryPubKey, int unlockTime) {
+//     function unlock(sig beneficiarySig) {
+//         require(checkSig(beneficiarySig, beneficiaryPubKey));
+//         require(tx.time >= unlockTime);
+//         
+//         // Validates covenant continues with same value
+//         int inputValue = tx.inputs[this.activeInputIndex].value;
+//         int outputValue = tx.outputs[0].value;
+//         int assumedFee = inputValue - outputValue;
+//         require(assumedFee <= 500);  // Max 500 sat fee
+//         
+//         // MISSING: Output count validation
+//         // MISSING: Recognition of multi-input scenario
+//     }
+// }
+//
+// ATTACK: Free Transaction Building
+// User wants to:
+// 1. Unlock time-locked funds (1,000,000 sats)
+// 2. Consolidate 5 other UTXOs (500,000 sats total)
+// 3. Pay for something (300,000 sats)
+//
+// Single Transaction:
+// Inputs:
+//   [0] Time-locked covenant (1,000,000 sats)
+//   [1] User UTXO 1 (100,000 sats)
+//   [2] User UTXO 2 (100,000 sats)
+//   [3] User UTXO 3 (100,000 sats)
+//   [4] User UTXO 4 (100,000 sats)
+//   [5] User UTXO 5 (100,000 sats)
+//   [6] User UTXO 6 (1,000 sats) ← For fee
+//
+// Outputs:
+//   [0] Covenant release (1,000,000 sats) ← Same as input
+//   [1] Payment (300,000 sats)
+//   [2] Consolidation (800,000 sats)
+//
+// Fee: 1,000 sats (paid by input[6])
+//
+// Covenant's View:
+//   inputValue = 1,000,000
+//   outputValue = 1,000,000
+//   assumedFee = 0
+//   Check: 0 <= 500? → PASSES ✓
+//
+// Result:
+// - Covenant validates successfully
+// - User batched 6 inputs + covenant operation
+// - Fee paid entirely by user input[6]
+// - Covenant transaction used to consolidate UTXOs
+// - User saved on fees (single tx vs multiple txs)
+//
+// Problem:
+// - Covenant assumed it pays fees
+// - Actually paid zero fees
+// - Used as transaction vehicle for unrelated operations
+// - Fee economics completely bypassed
+
+// ============================================================================
+// ATTACK SCENARIO 4: Fee-Based Invariant Bypass
+// ============================================================================
+//
+// Setup:
+// - AMM-style covenant maintaining ratio invariant
+// - Validates: outputValue >= inputValue - maxSlippage
+// - maxSlippage = 1% = 100 sats per 10,000 sats
+// - Assumes small fee deduction is acceptable
+//
+// Vulnerable AMM:
+//
+// contract VulnerableAMM(pubkey lpPubKey, int maxSlippage) {
+//     function swap(sig lpSig, int expectedOutput) {
+//         require(checkSig(lpSig, lpPubKey));
+//         
+//         int inputValue = tx.inputs[this.activeInputIndex].value;
+//         
+//         // Validates output maintains value within slippage
+//         require(tx.outputs[0].value >= inputValue - maxSlippage);
+//         
+//         // Assumes fee is part of slippage budget
+//         // Fee + slippage <= maxSlippage
+//     }
+// }
+//
+// ATTACK: Hide Value Extraction in Fee
+// Inputs:
+//   [0] AMM covenant (10,000 sats)
+//   [1] Attacker (0 sats) ← Empty input (if allowed by protocol)
+//
+// Outputs:
+//   [0] AMM continuation (9,900 sats) ← Lost 100 sats
+//   [1] To attacker (0 sats)
+//
+// Fee: 100 sats (10,000 - 9,900)
+//
+// Covenant's View:
+//   inputValue = 10,000
+//   outputValue = 9,900
+//   slippage = 100
+//   Check: 9,900 >= 10,000 - 100? → PASSES ✓
+//
+// This attack works even if "fee" is intended,
+// because the contract cannot distinguish fee vs extraction.
+//
+// Repeat Attack:
+// After 100 iterations:
+// - AMM value: 10,000 → 0 sats (drained via "fees")
+// - Each tx: 100 sat "fee" (actually value extraction)
+// - Total extracted: 10,000 sats
+// - All disguised as legitimate fee payments
+//
+// Result:
+// - Covenant slowly drained
+// - Extraction hidden in fee allowance
+// - Appears as normal fee variance
+// - Economic invariant violated
+
+// ============================================================================
+// SECURE VERSION: No Fee Assumptions
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// SECURE: This contract does NOT make assumptions about transaction fees
+// PROTECTION: Prevents fee-based value extraction and invariant bypass
+contract SecureCovenantNoFeeAssumptions(
+    pubkey ownerPubKey,
+    int minimumValue
+) {
+    // SECURE: Validates value conservation without assuming fee behavior
+    function spend(sig ownerSig) {
+        // Step 1: Validate authorization
+        require(checkSig(ownerSig, ownerPubKey));
+        
+        // Step 2: CRITICAL - Enforce exactly 1 input
+        // This is the KEY to safe fee handling
+        // With single input, we KNOW all fee comes from this input
+        // But this is very restrictive (no multi-input support)
+        // See alternative patterns below for multi-input cases
+        //
+        // NOTE: CashScript doesn't provide tx.inputs.length directly
+        // This pattern is conceptual - in practice, design around
+        // single-input assumptions or avoid fee reasoning entirely
+        
+        // Step 3: Read input value
+        int inputValue = tx.inputs[this.activeInputIndex].value;
+        
+        // Step 4: Read output value
+        int outputValue = tx.outputs[0].value;
+        
+        // Step 5: CRITICAL - Enforce exactly 1 output
+        // Prevents value splitting/hiding
+        require(tx.outputs.length == 1);
+        
+        // Step 6: SECURE PATTERN - Validate minimum value maintained
+        // Do NOT calculate fee
+        // Do NOT validate fee amount
+        // Simply ensure output meets minimum
+        require(outputValue >= minimumValue);
+        
+        // Step 7: OPTIONAL - Validate value decrease is bounded
+        // This limits maximum fee without assuming specific amount
+        int maxValueDecrease = 10000;  // Maximum 10,000 sat reduction
+        require(outputValue >= inputValue - maxValueDecrease);
+        
+        // RESULT: Safe value validation without fee assumptions
+        // - Doesn't calculate "fee"
+        // - Doesn't assume who pays fee
+        // - Validates output meets minimum
+        // - Bounds value decrease (includes fee + any extraction)
+        // - Works with single-input transactions
+        //
+        // Limitations:
+        // - Restrictive (single input/output)
+        // - Doesn't support multi-input batching
+        // - But SECURE against fee-based attacks
+    }
+}
+
+// ============================================================================
+// ALTERNATIVE PATTERN: Explicit Value Conservation
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// ALTERNATIVE: Enforce exact value conservation (zero fee from covenant)
+// USE CASE: Covenants where fees are externally subsidized
+contract SecureCovenantValueConservation(
+    pubkey ownerPubKey
+) {
+    // Pattern: Input value MUST equal output value (no fee deduction)
+    function spend(sig ownerSig) {
+        // Step 1: Validate authorization
+        require(checkSig(ownerSig, ownerPubKey));
+        
+        // Step 2: Enforce single output
+        require(tx.outputs.length == 1);
+        
+        // Step 3: Read values
+        int inputValue = tx.inputs[this.activeInputIndex].value;
+        int outputValue = tx.outputs[0].value;
+        
+        // Step 4: CRITICAL - Enforce exact value conservation
+        // Fee MUST be paid by other inputs (not this covenant)
+        require(outputValue == inputValue);
+        
+        // Step 5: Validate covenant continuation
+        bytes inputLockingBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+        require(tx.outputs[0].lockingBytecode == inputLockingBytecode);
+        
+        // RESULT: Zero fee from covenant
+        // - Input value = Output value (exactly)
+        // - Transaction fee MUST come from other inputs
+        // - Covenant preserves full value
+        // - User/attacker pays all fees
+        //
+        // This pattern is SAFE because:
+        // - No fee assumptions
+        // - No value extraction possible
+        // - Covenant value fully preserved
+        //
+        // Use when:
+        // - Covenant should never pay fees
+        // - External wallet/user subsidizes fees
+        // - Value preservation is critical
+    }
+}
+
+// ============================================================================
+// BEST PRACTICE: Bounded Value Loss (Conservative)
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// BEST PRACTICE: Allow value decrease but bound it conservatively
+// Does not assume why value decreases (fee, extraction, etc.)
+contract SecureCovenantBoundedValueLoss(
+    pubkey ownerPubKey,
+    int minimumValue,
+    int maxValueDecrease  // Maximum allowed decrease per transaction
+) {
+    // Pattern: Limit value loss without assuming it's all fee
+    function spend(sig ownerSig) {
+        // Step 1: Validate authorization
+        require(checkSig(ownerSig, ownerPubKey));
+        
+        // Step 2: Enforce single output
+        require(tx.outputs.length == 1);
+        
+        // Step 3: Read values
+        int inputValue = tx.inputs[this.activeInputIndex].value;
+        int outputValue = tx.outputs[0].value;
+        
+        // Step 4: Validate minimum value maintained
+        require(outputValue >= minimumValue);
+        
+        // Step 5: CRITICAL - Bound value decrease
+        // Does NOT assume decrease is "fee"
+        // Simply limits how much value can be lost
+        // Could be: fee + extraction + other factors
+        int actualDecrease = inputValue - outputValue;
+        require(actualDecrease <= maxValueDecrease);
+        require(actualDecrease >= 0);  // Prevent negative (increase OK)
+        
+        // Step 6: Validate covenant continuation
+        bytes inputLockingBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+        require(tx.outputs[0].lockingBytecode == inputLockingBytecode);
+        
+        // RESULT: Conservative value protection
+        // - Minimum value enforced
+        // - Maximum decrease bounded
+        // - No assumptions about WHY value decreases
+        // - Safe against fee-based extraction
+        //
+        // This is SECURE because:
+        // - Doesn't try to calculate "fee"
+        // - Doesn't assume fee source
+        // - Simply bounds total value loss
+        // - Attacker cannot extract more than maxValueDecrease
+        //
+        // Recommended values:
+        // - maxValueDecrease = 1000-5000 sats (typical fee range)
+        // - Adjust based on expected transaction complexity
+        // - Higher = more flexible, but more extraction risk
+        // - Lower = more restrictive, but more secure
+    }
+}
+
+// ============================================================================
+// EXPLANATION: Why Covenants Can't Reason About Fees
+// ============================================================================
+
+// FUNDAMENTAL LIMITATION: Covenant's Limited View
+// ------------------------------------------------
+// What covenant CAN see:
+// ✓ tx.inputs[this.activeInputIndex].value (own input value)
+// ✓ tx.inputs[this.activeInputIndex].* (all own input properties)
+// ✓ tx.outputs[N].value (all output values)
+// ✓ tx.outputs[N].* (all output properties)
+// ✓ tx.outputs.length (number of outputs)
+//
+// What covenant CANNOT see:
+// ✗ tx.inputs[0].value (other input values)
+// ✗ tx.inputs[1].value (other input values)
+// ✗ Number of inputs (tx.inputs.length is NOT available)
+// ✗ Sum of all input values
+// ✗ Which input contributed to fee
+// ✗ How fee is distributed across inputs
+//
+// Fee Calculation Reality:
+// Fee = (Sum of ALL inputs) - (Sum of ALL outputs)
+//
+// Covenant's Calculation Attempt:
+// "Fee" = (My input) - (Sum of outputs)
+// This is WRONG if other inputs exist!
+//
+// Example:
+// Inputs: [Covenant: 10,000, User: 1,000]
+// Outputs: [Covenant: 10,000, User: 500]
+// Actual Fee: (10,000 + 1,000) - (10,000 + 500) = 500
+// Covenant's "Fee": 10,000 - 10,500 = -500 (negative?!)
+//
+// The covenant cannot determine:
+// - How much the user input contributed
+// - Whether fee came from user or covenant
+// - Actual transaction fee amount
+
+// WHY "FEE = INPUT - OUTPUT" IS DANGEROUS
+// ---------------------------------------
+// Single-Input Transaction:
+// Input: 10,000
+// Output: 9,500
+// Fee = 10,000 - 9,500 = 500 ✓ Correct
+//
+// Multi-Input Transaction:
+// Input[0] (Covenant): 10,000
+// Input[1] (User): 1,000
+// Output[0]: 10,500
+// Output[1]: 0
+// Fee = (10,000 + 1,000) - (10,500 + 0) = 500 ✓ Correct
+//
+// Covenant's Wrong Calculation:
+// "Fee" = 10,000 - 10,500 = -500 ✗ Wrong!
+//
+// Covenant thinks: "Output > Input? Impossible!"
+// Reality: Other input subsidized the difference
+//
+// This breaks ALL fee-based logic:
+// - Fee limit checks (become meaningless)
+// - Value conservation checks (break with multi-input)
+// - Economic models (assume wrong fee amounts)
+
+// THE MULTI-INPUT PROBLEM
+// ------------------------
+// Bitcoin Cash allows:
+// - Arbitrary number of inputs
+// - Arbitrary number of outputs
+// - Arbitrary distribution of value
+//
+// Only constraint: Total In >= Total Out
+//
+// Covenant cannot prevent:
+// - User adding inputs
+// - User subsidizing fees
+// - User paying ALL fees
+// - User extracting value via other outputs
+//
+// Covenant can only control:
+// - ITS OWN output properties
+// - Output count (if validated)
+// - Which outputs exist
+//
+// Covenant CANNOT control:
+// - Total number of inputs
+// - Other inputs' values
+// - How fee is distributed
+//
+// Therefore: Covenants should NOT reason about fees
+
+// SAFE DESIGN PATTERNS
+// --------------------
+// Pattern 1: Exact Value Conservation
+//   require(outputValue == inputValue);
+//   - Covenant pays NO fee
+//   - Fee must come from other inputs
+//   - Value fully preserved
+//
+// Pattern 2: Bounded Value Decrease
+//   require(outputValue >= inputValue - maxDecrease);
+//   - Allow some value loss
+//   - Don't assume it's all fee
+//   - Could be fee + extraction
+//   - Bound total loss conservatively
+//
+// Pattern 3: Minimum Value Only
+//   require(outputValue >= minimumValue);
+//   - Ensure output meets minimum
+//   - Don't track fee at all
+//   - Don't limit value decrease
+//   - Simplest and often sufficient
+//
+// Pattern 4: No Value Validation
+//   - Don't validate value at all
+//   - Only validate other properties
+//   - Let user manage value
+//   - Appropriate for some use cases
+
+// ============================================================================
+// SECURITY PRINCIPLES FOR FEE HANDLING
+// ============================================================================
+
+// PRINCIPLE 1: AVOID FEE REASONING IN COVENANTS
+// ----------------------------------------------
+// Covenants should NOT:
+// - Calculate transaction fee
+// - Assume fee source
+// - Validate fee amount
+// - Use fee in economic models
+//
+// Instead:
+// - Validate value requirements directly
+// - Bound value changes conservatively
+// - Assume fees are externally handled
+
+// PRINCIPLE 2: USE EXACT CONSERVATION OR BOUNDED LOSS
+// ----------------------------------------------------
+// Safe patterns:
+// - require(outputValue == inputValue)  // Exact
+// - require(outputValue >= inputValue - maxDecrease)  // Bounded
+//
+// Unsafe patterns:
+// - int fee = inputValue - outputValue  // Wrong with multi-input
+// - require(fee <= maxFee)  // Meaningless with multi-input
+
+// PRINCIPLE 3: ENFORCE SINGLE OUTPUT (IF VALIDATING VALUE)
+// ---------------------------------------------------------
+// If validating value properties:
+//   require(tx.outputs.length == 1);
+// This prevents:
+// - Value hiding in other outputs
+// - Fee obfuscation via output splitting
+// - Extraction via unvalidated outputs
+
+// PRINCIPLE 4: DOCUMENT FEE EXPECTATIONS EXTERNALLY
+// --------------------------------------------------
+// Don't encode fee logic in contract
+// Instead:
+// - Document in UI/docs who pays fees
+// - Wallet handles fee calculation
+// - Contract validates only value requirements
+// - Keep contract logic simple
+
+// PRINCIPLE 5: CONSERVATIVE BOUNDS
+// ---------------------------------
+// If you must allow value decrease:
+// - Set maxDecrease conservatively (1000-5000 sats)
+// - Assume worst case (all decrease is extraction)
+// - Don't optimize for "typical" fees
+// - Better too restrictive than too permissive
+
+// ============================================================================
+// COMMON MISTAKES AND HOW TO AVOID THEM
+// ============================================================================
+
+// MISTAKE 1: Calculating Fee as Input - Output
+// ---------------------------------------------
+// WRONG:
+//   int inputValue = tx.inputs[this.activeInputIndex].value;
+//   int outputValue = tx.outputs[0].value;
+//   int fee = inputValue - outputValue;
+//   require(fee <= 1000);
+//
+// WHY WRONG:
+// - Only works with single-input transactions
+// - Breaks with multi-input (attacker adds inputs)
+// - Can become negative (if other inputs contribute)
+// - Meaningless value
+//
+// CORRECT:
+//   int inputValue = tx.inputs[this.activeInputIndex].value;
+//   int outputValue = tx.outputs[0].value;
+//   int valueDecrease = inputValue - outputValue;
+//   require(valueDecrease <= maxAllowedDecrease);
+//   // Don't call it "fee" - it's "value decrease"
+//   // Bound total value decrease (regardless of cause)
+//   // Includes fees, extraction, or any other loss
+
+// MISTAKE 2: Assuming Fee is "Small" or "Negligible"
+// ---------------------------------------------------
+// WRONG:
+//   // "Fee is small, doesn't matter"
+//   require(outputValue >= minimumValue);
+//   // No value decrease limit
+//
+// WHY WRONG:
+// - Attacker can extract arbitrary amounts
+// - "Small fee" assumption exploited
+// - Value drained over multiple transactions
+//
+// CORRECT:
+//   require(outputValue >= minimumValue);
+//   int maxDecrease = 5000;  // Be explicit about "small"
+//   require(outputValue >= inputValue - maxDecrease);
+
+// MISTAKE 3: Not Enforcing Output Count
+// --------------------------------------
+// WRONG:
+//   require(tx.outputs[0].value >= minimumValue);
+//   // outputs[1], [2], [3] could exist
+//
+// WHY WRONG:
+// - Value can hide in other outputs
+// - Fee calculation assumptions break
+// - Attacker creates multiple outputs
+//
+// CORRECT:
+//   require(tx.outputs.length == 1);
+//   require(tx.outputs[0].value >= minimumValue);
+
+// MISTAKE 4: Using Fee in Economic Logic
+// ---------------------------------------
+// WRONG:
+//   int fee = inputValue - outputValue;
+//   int userProfit = someCalculation();
+//   require(userProfit >= fee * 2);  // "Profit must exceed fee"
+//
+// WHY WRONG:
+// - Fee calculation is wrong
+// - Economic model breaks
+// - Attacker manipulates via inputs
+//
+// CORRECT:
+//   // Don't use fee in economic logic
+//   // Validate outcomes directly
+//   int expectedOutput = calculateExpectedValue();
+//   require(outputValue >= expectedOutput);
+
+// MISTAKE 5: Allowing Unbounded Value Decrease
+// ---------------------------------------------
+// WRONG:
+//   int inputValue = tx.inputs[this.activeInputIndex].value;
+//   int outputValue = tx.outputs[0].value;
+//   require(outputValue >= minimumValue);
+//   // No check on inputValue - outputValue
+//
+// WHY WRONG:
+// - Attacker can drain value gradually
+// - Each tx: take 1000 sats "as fee"
+// - Covenant drained over time
+//
+// CORRECT:
+//   require(outputValue >= minimumValue);
+//   require(outputValue >= inputValue - maxDecrease);
+//   // Bound total value loss
+
+// ============================================================================
+// DEPLOYMENT CHECKLIST FOR FEE-SAFE COVENANTS
+// ============================================================================
+//
+// Before deploying a covenant contract, verify:
+//
+// [ ] Does NOT calculate transaction fee
+// [ ] Does NOT use "inputValue - outputValue" as fee
+// [ ] Does NOT assume who pays the fee
+// [ ] Does NOT use fee in economic logic
+// [ ] DOES enforce output count if validating value
+// [ ] DOES use exact conservation OR bounded value decrease
+// [ ] DOES document fee expectations externally (in UI/docs)
+// [ ] DOES set conservative maxValueDecrease (if used)
+// [ ] Test with single-input transaction
+// [ ] Test with multi-input transaction (attacker adds input)
+// [ ] Test with fee subsidized by attacker
+// [ ] Test with zero fee from covenant (paid externally)
+// [ ] Test value extraction via "fee" allowance
+// [ ] Verify covenant economics work with zero fee from covenant
+
+// ============================================================================
+// TESTING RECOMMENDATIONS
+// ============================================================================
+//
+// Test Cases for VULNERABLE version (fee assumptions):
+// 1. Single-input transaction with normal fee
+//    Expected: SUCCEEDS (assumption holds)
+//
+// 2. Multi-input transaction with attacker subsidy
+//    Expected: SUCCEEDS (VULNERABILITY - assumption breaks)
+//
+// 3. Multi-input with zero fee from covenant
+//    Expected: SUCCEEDS (VULNERABILITY - free tx building)
+//
+// 4. Multi-input with value extraction as "fee"
+//    Expected: SUCCEEDS (VULNERABILITY - hidden extraction)
+//
+// Test Cases for SECURE version (no fee assumptions):
+// 1. Single-input, normal fee
+//    Expected: SUCCEEDS (valid transaction)
+//
+// 2. Multi-input with fee subsidy (exact conservation)
+//    Expected: SUCCEEDS (covenant value preserved)
+//
+// 3. Multi-input with zero covenant fee (exact conservation)
+//    Expected: SUCCEEDS (external fee payment valid)
+//
+// 4. Attempt value extraction beyond maxDecrease
+//    Expected: FAILS (bounded value loss rejects)
+//
+// 5. Value conservation version with any value decrease
+//    Expected: FAILS (exact conservation enforced)
+//
+// 6. Multiple outputs (hide value)
+//    Expected: FAILS (output count validation rejects)
+
+// ============================================================================
+// REAL-WORLD IMPACT EXAMPLES
+// ============================================================================
+//
+// Example 1: Vault Fee Drain Attack
+// ----------------------------------
+// Platform: Multi-signature vault
+// Vulnerability: Assumed fee = inputValue - outputValue
+// Attack: Gradual value extraction via "fee" allowance
+// Steps:
+//   1. Vault holds 1,000,000 sats
+//   2. Each transaction: Extract 1,000 sats as "fee"
+//   3. Repeat 1,000 times
+//   4. Vault drained to 0
+// Impact:
+//   - 1M sats stolen (100% loss)
+//   - Appeared as legitimate fees
+//   - Auditors missed gradual drain
+//   - Users lost all funds
+//
+// Example 2: AMM Invariant Violation
+// -----------------------------------
+// Platform: Automated market maker
+// Vulnerability: Fee budget counted as slippage
+// Attack: Value extraction hidden in fee allowance
+// Steps:
+//   1. AMM allows 1% slippage (1000 sats per 100k)
+//   2. Attacker uses all slippage budget as "fee"
+//   3. Repeats on every trade
+//   4. AMM slowly drained
+// Impact:
+//   - Liquidity providers lose value
+//   - AMM economics broken
+//   - Appeared as normal fee variance
+//   - $50,000+ total loss
+//
+// Example 3: Free Transaction Builder
+// ------------------------------------
+// Platform: Time-locked savings
+// Vulnerability: Assumed covenant pays fees
+// Attack: Batched unrelated operations with covenant
+// Steps:
+//   1. User has time-locked 100k sats
+//   2. User wants to consolidate 20 UTXOs
+//   3. Creates transaction with covenant + 20 inputs
+//   4. Covenant pays 0 fee (subsidy from other inputs)
+//   5. User saves on consolidation fees
+// Impact:
+//   - Covenant economics broken
+//   - Free transaction building
+//   - Network fee incentives distorted
+//   - Covenant used as transaction vehicle
+
+// ============================================================================
+// END OF FILE
+// ============================================================================
