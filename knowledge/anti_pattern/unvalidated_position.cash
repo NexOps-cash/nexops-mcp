@@ -1,0 +1,719 @@
+// ANTI-PATTERN: Unvalidated Input Position
+// VULNERABILITY: Missing activeInputIndex validation enables input reordering attacks
+// ATTACK VECTOR: Oracle manipulation, input substitution, validation bypass
+//
+// This file demonstrates the critical vulnerability of assuming input position
+// without explicit validation. In Bitcoin Cash's UTXO model, transaction inputs
+// can be ordered arbitrarily. Without validating `this.activeInputIndex`, attackers
+// can reorder inputs to bypass security checks or manipulate contract behavior.
+//
+// CashScript Version: ^0.13.0
+// Network: Bitcoin Cash (BCH)
+// Security Level: VULNERABLE - DO NOT USE IN PRODUCTION
+
+// ============================================================================
+// VULNERABLE CODE: Missing Input Position Validation
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// VULNERABLE: This contract assumes it's always at input position 0
+// RISK: Attacker can reorder inputs to manipulate which UTXO provides validation
+contract VulnerableContractAssumedPosition(
+    pubkey oraclePubKey,
+    int minimumValue
+) {
+    // VULNERABILITY: Assumes oracle data comes from input[0]
+    // MISSING: Validation that oracle input is at specific position
+    // MISSING: Validation of this.activeInputIndex
+    function spendWithOracle(sig oracleSig) {
+        // Validate oracle signature
+        require(checkSig(oracleSig, oraclePubKey));
+        
+        // CRITICAL FLAW: Assumes THIS contract is at input[0]
+        // and oracle data is at input[1]
+        // But attacker can swap input positions!
+        bytes oracleData = tx.inputs[1].lockingBytecode;
+        
+        // Extract value from assumed oracle position
+        // This extracts 8 bytes starting at position 10 from the bytecode
+        // Assumes specific oracle contract structure
+        bytes8 oracleValueBytes = bytes8(oracleData.split(10)[1].split(8)[0]);
+        int oracleValue = int(oracleValueBytes);
+        
+        // Validate against minimum
+        require(oracleValue >= minimumValue);
+        
+        // DANGER: Never validates which input is the oracle
+        // Never validates which input is THIS contract
+        // Attacker can swap positions to use malicious oracle data
+        
+        // NOTE ON ORACLE DATA ENCODING:
+        // This vulnerable example uses lockingBytecode parsing for illustration ONLY.
+        // Real-world oracle designs encode data via:
+        // - NFT commitments (recommended)
+        // - Token amounts
+        // - Structured output data
+        // NOT by parsing another contract's bytecode (brittle and unsafe).
+    }
+}
+
+// ============================================================================
+// ATTACK SCENARIO 1: Input Reordering to Bypass Oracle Validation
+// ============================================================================
+//
+// Intended Transaction Structure:
+// Inputs:
+//   [0] Main contract UTXO (VulnerableContractAssumedPosition)
+//   [1] Oracle contract UTXO (contains price data: 1000)
+//
+// Outputs:
+//   [0] Withdrawal to user (if oracle price >= minimumValue)
+//
+// Contract logic assumes:
+// - THIS contract is at input[0]
+// - Oracle is at input[1]
+// - Reads oracle value from tx.inputs[1]
+//
+// ATTACK: Swap Input Positions
+//
+// Malicious Transaction Structure:
+// Inputs:
+//   [0] Attacker's FAKE oracle UTXO (contains manipulated data: 9999)
+//   [1] Main contract UTXO (VulnerableContractAssumedPosition) ← THIS contract
+//
+// What happens:
+// - Contract executes at input[1] (not input[0]!)
+// - this.activeInputIndex = 1
+// - Code reads: tx.inputs[1].lockingBytecode
+// - But tx.inputs[1] is ITSELF (the main contract)
+// - Contract reads its own bytecode as "oracle data"
+// - Extracts garbage value or manipulated value
+// - Validation bypassed!
+//
+// Alternative Attack:
+// Inputs:
+//   [0] Oracle contract UTXO (real oracle: price = 500, below minimum)
+//   [1] Attacker's fake oracle UTXO (fake data: price = 9999)
+//   [2] Main contract UTXO (VulnerableContractAssumedPosition) ← THIS contract
+//
+// What happens:
+// - Contract executes at input[2]
+// - Code reads: tx.inputs[1].lockingBytecode (attacker's fake oracle!)
+// - Real oracle at input[0] is ignored
+// - Attacker's fake oracle at input[1] provides manipulated data
+// - Contract accepts fake oracle value
+//
+// Result:
+// - Oracle validation BYPASSED
+// - Contract makes decisions based on attacker-controlled data
+// - Price oracle manipulation successful
+
+// ============================================================================
+// ATTACK SCENARIO 2: Self-Reference Attack
+// ============================================================================
+//
+// Setup:
+// - Contract requires oracle value >= 1000
+// - Real oracle shows value = 500 (below threshold)
+// - Attacker wants to execute despite low oracle value
+//
+// Attack Transaction:
+// Inputs:
+//   [0] Attacker's dummy UTXO (any UTXO with enough value)
+//   [1] Main contract UTXO (VulnerableContractAssumedPosition) ← THIS contract
+//
+// Execution Flow:
+// - Contract executes at input[1] (this.activeInputIndex = 1)
+// - Code executes: bytes oracleData = tx.inputs[1].lockingBytecode;
+// - tx.inputs[1] is the contract ITSELF
+// - Contract reads its own lockingBytecode as oracle data
+//
+// Bytecode Structure of VulnerableContractAssumedPosition:
+// - Contains oraclePubKey (33 bytes)
+// - Contains minimumValue (8 bytes)
+// - Contains contract code
+//
+// ⚠️ ILLUSTRATIVE SCENARIO ONLY:
+// This attack describes bytecode parsing for demonstration purposes.
+// Real oracles use NFT commitments or token amounts, not bytecode parsing.
+// The vulnerability (missing position validation) remains the same regardless
+// of how oracle data is encoded.
+//
+// If contract tried to extract data from its own bytecode:
+// - Attacker can extract minimumValue from contract's own bytecode
+// - Contract compares: minimumValue >= minimumValue (always true!)
+// - Validation passes with no real oracle involved
+//
+// Result:
+// - Oracle check completely bypassed
+// - Contract validates against its own parameters
+// - Security model destroyed
+
+// ============================================================================
+// ATTACK SCENARIO 3: Multi-Contract Input Confusion
+// ============================================================================
+//
+// Complex DeFi scenario with multiple contracts:
+//
+// Intended Structure:
+// Inputs:
+//   [0] Price Oracle Contract (BTC price: $45,000)
+//   [1] Liquidation Contract (checks if position underwater)
+//   [2] Collateral Vault (holds user's collateral)
+//
+// Contract at input[1] (Liquidation Contract) assumes:
+// - Oracle is at input[0]
+// - Vault is at input[2]
+// - Reads price from tx.inputs[0]
+// - Reads collateral from tx.inputs[2]
+//
+// Attack via Reordering:
+// Inputs:
+//   [0] Attacker's Fake Oracle (BTC price: $1,000,000) ← Malicious
+//   [1] Collateral Vault (holds user's collateral)
+//   [2] Liquidation Contract (checks position) ← THIS contract
+//
+// Execution:
+// - Liquidation contract executes at input[2]
+// - Code reads: tx.inputs[0] (attacker's fake oracle!)
+// - Code reads: tx.inputs[2] (itself - wrong data!)
+// - Price is manipulated (shows impossibly high)
+// - Collateral calculation uses wrong input
+// - Liquidation decision corrupted
+//
+// Result:
+// - Legitimate liquidation prevented (price shows "safe")
+// - Or malicious liquidation enabled (if reversed)
+// - Multi-contract coordination exploited
+
+// ============================================================================
+// WHY THIS VULNERABILITY EXISTS
+// ============================================================================
+//
+// Bitcoin Cash UTXO Model Properties:
+// 1. Transaction inputs are an ORDERED ARRAY: [input0, input1, input2, ...]
+// 2. Input order is ARBITRARY - wallet/attacker chooses the order
+// 3. Each input is evaluated INDEPENDENTLY by its locking script
+// 4. Scripts CANNOT assume their position without explicit validation
+//
+// CashScript Special Variables:
+// - this.activeInputIndex: The index of the CURRENT input being validated
+// - tx.inputs[N]: Array of ALL inputs in the transaction
+//
+// The Vulnerability:
+// - tx.inputs[N] provides absolute position access
+// - this.activeInputIndex tells you YOUR position
+// - If code uses tx.inputs[1] without checking this.activeInputIndex...
+// - ...it assumes input[1] is always some specific contract
+// - But attacker controls input ordering!
+//
+// Example:
+// Contract expects: [MainContract, Oracle, Vault]
+// Attacker creates: [FakeOracle, Vault, MainContract]
+// Contract at position[2] reads tx.inputs[1] expecting Oracle
+// But tx.inputs[1] is now Vault (wrong contract!)
+
+// ============================================================================
+// SECURE VERSION: Explicit Position Validation
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// SECURE: This contract validates its position and oracle position explicitly
+// PROTECTION: Prevents input reordering attacks and position manipulation
+contract SecureContractValidatedPosition(
+    pubkey oraclePubKey,
+    int minimumValue,
+    bytes expectedOracleBytecode  // Expected oracle contract bytecode
+) {
+    // SECURE: Explicitly validates input positions before using them
+    function spendWithOracle(sig oracleSig) {
+        // Step 1: Validate oracle signature
+        require(checkSig(oracleSig, oraclePubKey));
+        
+        // Step 2: CRITICAL - Validate THIS contract's position
+        // Enforce that this contract MUST be at input[0]
+        // This creates a predictable position for oracle validation
+        //
+        // ⚠️ UX WARNING:
+        // Enforcing a fixed input position requires wallets and tooling
+        // to construct transactions in this exact order.
+        // This pattern trades flexibility for security.
+        // Ensure your wallet/SDK can handle positional requirements.
+        require(this.activeInputIndex == 0);
+        
+        // Step 3: CRITICAL - Validate oracle is at expected position
+        // Since this contract is at input[0], oracle MUST be at input[1]
+        int expectedOraclePosition = 1;
+        
+        // Step 4: Validate transaction has enough inputs
+        // Need at least 2 inputs (this contract + oracle)
+        require(tx.inputs.length >= 2);
+        
+        // Step 5: CRITICAL - Validate oracle contract bytecode
+        // Ensure tx.inputs[1] is actually the expected oracle contract
+        // Not just any contract, not this contract, not attacker's contract
+        bytes oracleLockingBytecode = tx.inputs[expectedOraclePosition].lockingBytecode;
+        require(oracleLockingBytecode == expectedOracleBytecode);
+        
+        // Step 6: NOW it's safe to read oracle data
+        // We've proven:
+        // - THIS contract is at input[0]
+        // - Oracle contract is at input[1]
+        // - Oracle contract is the CORRECT oracle (bytecode matches)
+        
+        // REAL-WORLD PATTERN: Oracle value encoded in NFT commitment
+        // This is the RECOMMENDED approach for oracle data
+        bytes oracleCommitment = tx.inputs[expectedOraclePosition].nftCommitment;
+        
+        // Step 7: Extract and validate oracle value from commitment
+        // NFT commitment contains structured data (e.g., price encoded as bytes)
+        // For demonstration: assume commitment is 8-byte integer (price in satoshis)
+        require(oracleCommitment.length == 8);
+        bytes8 oracleValueBytes = bytes8(oracleCommitment);
+        int oracleValue = int(oracleValueBytes);
+        require(oracleValue >= minimumValue);
+        
+        // RESULT: Input reordering attacks are now IMPOSSIBLE
+        // - Position validated: this.activeInputIndex == 0
+        // - Oracle position validated: input[1] exists
+        // - Oracle identity validated: bytecode matches expected
+        // - Attacker cannot swap inputs without failing validation
+    }
+}
+
+// ============================================================================
+// ALTERNATIVE PATTERN: Flexible Position with Explicit Validation
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// ALTERNATIVE: Contract that works at any position but validates relationships
+// USE CASE: More flexible but requires careful relative position validation
+contract SecureContractRelativePosition(
+    pubkey oraclePubKey,
+    int minimumValue,
+    bytes expectedOracleBytecode
+) {
+    // Pattern: Use relative positions based on this.activeInputIndex
+    function spendWithOracle(sig oracleSig, int oracleOffset) {
+        // Step 1: Validate oracle signature
+        require(checkSig(oracleSig, oraclePubKey));
+        
+        // Step 2: Calculate oracle position relative to this contract
+        // oracleOffset tells us where oracle is relative to this input
+        // Example: oracleOffset = -1 means oracle is one position before
+        //          oracleOffset = +1 means oracle is one position after
+        int oraclePosition = this.activeInputIndex + oracleOffset;
+        
+        // Step 3: Validate oracle position is within bounds
+        require(oraclePosition >= 0);
+        require(oraclePosition < tx.inputs.length);
+        
+        // Step 4: Validate oracle is not self-referencing
+        // Oracle must be a DIFFERENT input than this contract
+        require(oraclePosition != this.activeInputIndex);
+        
+        // Step 5: CRITICAL - Validate oracle contract bytecode
+        bytes oracleLockingBytecode = tx.inputs[oraclePosition].lockingBytecode;
+        require(oracleLockingBytecode == expectedOracleBytecode);
+        
+        // Step 6: Read and validate oracle data
+        // REAL-WORLD PATTERN: Use NFT commitment for oracle data
+        bytes oracleCommitment = tx.inputs[oraclePosition].nftCommitment;
+        require(oracleCommitment.length == 8);
+        bytes8 oracleValueBytes = bytes8(oracleCommitment);
+        int oracleValue = int(oracleValueBytes);
+        require(oracleValue >= minimumValue);
+        
+        // RESULT: Flexible positioning but still secure
+        // - Oracle position calculated relative to this.activeInputIndex
+        // - Oracle identity validated via bytecode
+        // - Self-reference prevented
+        // - Works regardless of this contract's position
+    }
+}
+
+// ============================================================================
+// ADVANCED PATTERN: Multiple Input Validation
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// ADVANCED: Contract coordinating multiple inputs with strict validation
+// USE CASE: DeFi protocols with oracle, vault, and governance contracts
+contract SecureMultiInputContract(
+    pubkey governancePubKey,
+    bytes expectedOracleBytecode,
+    bytes expectedVaultBytecode
+) {
+    // Pattern: Validate multiple contract inputs at fixed positions
+    function complexOperation(sig govSig) {
+        // Step 1: Validate authorization
+        require(checkSig(govSig, governancePubKey));
+        
+        // Step 2: CRITICAL - Enforce strict input structure
+        // This contract must be at position 0
+        //
+        // ⚠️ UX WARNING:
+        // Fixed position requirements mean wallets must construct
+        // transactions with inputs in exact order: [this, oracle, vault]
+        // This is a security vs flexibility tradeoff.
+        require(this.activeInputIndex == 0);
+        
+        // Step 3: Validate minimum input count
+        // Need: [this, oracle, vault] = 3 inputs minimum
+        require(tx.inputs.length >= 3);
+        
+        // Step 4: Define expected positions
+        int thisPosition = 0;      // Validated above
+        int oraclePosition = 1;    // Oracle must be at input[1]
+        int vaultPosition = 2;     // Vault must be at input[2]
+        
+        // Step 5: CRITICAL - Validate oracle contract identity
+        bytes oracleBytecode = tx.inputs[oraclePosition].lockingBytecode;
+        require(oracleBytecode == expectedOracleBytecode);
+        
+        // Step 6: CRITICAL - Validate vault contract identity
+        bytes vaultBytecode = tx.inputs[vaultPosition].lockingBytecode;
+        require(vaultBytecode == expectedVaultBytecode);
+        
+        // Step 7: Validate all inputs are DIFFERENT contracts
+        // Prevent using same contract in multiple positions
+        require(oracleBytecode != vaultBytecode);
+        require(tx.inputs[thisPosition].lockingBytecode != oracleBytecode);
+        require(tx.inputs[thisPosition].lockingBytecode != vaultBytecode);
+        
+        // Step 8: Now safe to read data from each input
+        // REAL-WORLD PATTERN: Use NFT commitments for structured data
+        
+        // Read oracle price from NFT commitment
+        bytes oracleCommitment = tx.inputs[oraclePosition].nftCommitment;
+        require(oracleCommitment.length >= 8);
+        bytes8 priceBytes = bytes8(oracleCommitment.split(8)[0]);
+        int oraclePrice = int(priceBytes);
+        
+        // Read vault balance from NFT commitment
+        bytes vaultCommitment = tx.inputs[vaultPosition].nftCommitment;
+        require(vaultCommitment.length >= 8);
+        bytes8 balanceBytes = bytes8(vaultCommitment.split(8)[0]);
+        int vaultBalance = int(balanceBytes);
+        
+        // Step 9: Business logic using validated data
+        require(oraclePrice > 0);
+        require(vaultBalance >= 1000);
+        
+        // RESULT: Multi-input coordination is SECURE
+        // - All positions explicitly validated
+        // - All contract identities verified
+        // - No duplicate inputs allowed
+        // - Input reordering cannot bypass checks
+    }
+}
+
+// ============================================================================
+// ORACLE DATA ENCODING: REAL-WORLD PATTERNS
+// ============================================================================
+
+// CRITICAL KNOWLEDGE: How Oracle Data Should Be Encoded
+// -------------------------------------------------------
+// This file demonstrates input position validation, NOT oracle design.
+// Real-world BCH oracles use these patterns for data encoding:
+//
+// ✅ RECOMMENDED: NFT Commitment
+//   - Oracle holds an NFT with data in the commitment field
+//   - Commitment contains structured price/data (e.g., 8-byte integer)
+//   - Example: bytes oracleCommitment = tx.inputs[oraclePos].nftCommitment;
+//   - Advantages: Structured, tamper-proof, updatable via covenant
+//
+// ✅ RECOMMENDED: Token Amount
+//   - Fungible token amount represents the oracle value
+//   - Example: int price = tx.inputs[oraclePos].tokenAmount;
+//   - Advantages: Simple, efficient, works with existing token infrastructure
+//
+// ✅ ALTERNATIVE: Structured Output Data
+//   - Oracle creates specific output pattern with embedded data
+//   - Data in OP_RETURN or structured locking bytecode
+//   - Requires careful parsing of output scripts
+//
+// ❌ NOT RECOMMENDED: Parsing Contract Bytecode
+//   - DO NOT extract data by slicing lockingBytecode (brittle, unsafe)
+//   - Contract bytecode is code, not data storage
+//   - Changes to contract structure break parsing
+//   - This pattern appears in this file ONLY for position validation demonstration
+//
+// For production oracle systems:
+// 1. Use NFT commitments or token amounts for data
+// 2. Validate oracle contract identity via bytecode comparison
+// 3. Validate input position to prevent reordering attacks
+// 4. Combine all three validations for secure oracle consumption
+
+// ============================================================================
+// EXPLANATION: Understanding this.activeInputIndex
+// ============================================================================
+
+// WHAT IS this.activeInputIndex?
+// -------------------------------
+// - Special variable in CashScript
+// - Contains the index (position) of the CURRENT input being validated
+// - 0-indexed: first input is 0, second is 1, third is 2, etc.
+// - Changes for each input in the transaction
+//
+// Example Transaction:
+// Inputs:
+//   [0] ContractA.cash
+//   [1] ContractB.cash  
+//   [2] ContractC.cash
+//
+// When evaluating input[0]: this.activeInputIndex = 0
+// When evaluating input[1]: this.activeInputIndex = 1
+// When evaluating input[2]: this.activeInputIndex = 2
+
+// WHY VALIDATE this.activeInputIndex?
+// ------------------------------------
+// Bitcoin Cash allows arbitrary input ordering. Attacker controls:
+// 1. Which UTXOs become inputs
+// 2. The ORDER of those inputs
+// 3. Which input positions contain which contracts
+//
+// Without validation:
+// - Code assumes "oracle is at input[1]"
+// - But attacker puts malicious oracle at input[1]
+// - Or swaps positions entirely
+// - Contract reads wrong data
+//
+// With validation:
+// - Code checks: require(this.activeInputIndex == 0)
+// - Enforces: "I must be at position 0"
+// - Then safely reads: tx.inputs[1] (knowing 1 is adjacent)
+// - Attacker cannot reorder without failing the check
+
+// COMMON PATTERNS FOR POSITION VALIDATION
+// ----------------------------------------
+//
+// Pattern 1: Fixed Absolute Position
+//   require(this.activeInputIndex == 0);
+//   // This contract MUST be first input
+//   // Use when: strict ordering required
+//
+// Pattern 2: Fixed Relative Positions  
+//   require(this.activeInputIndex == 0);
+//   int oraclePos = this.activeInputIndex + 1;  // Oracle is next
+//   // Use when: contracts must be adjacent
+//
+// Pattern 3: Flexible Position (Advanced)
+//   int myPos = this.activeInputIndex;
+//   int oraclePos = myPos + oracleOffset;  // Offset provided by user
+//   require(oraclePos != myPos);           // Prevent self-reference
+//   // Use when: flexibility needed but validation still required
+//
+// Pattern 4: No Position Assumptions
+//   // Don't read other inputs at all
+//   // Only read from this.activeInputIndex
+//   bytes myData = tx.inputs[this.activeInputIndex].lockingBytecode;
+//   // Use when: contract is self-contained
+
+// THE SELF-REFERENCE TRAP
+// ------------------------
+// Dangerous code:
+//   bytes oracleData = tx.inputs[1].lockingBytecode;
+//
+// If this contract is at input[1]:
+//   - tx.inputs[1] is THIS CONTRACT
+//   - Contract reads its own bytecode as "oracle"
+//   - May extract its own parameters as "oracle data"
+//   - Creates circular validation (always passes)
+//
+// Prevention:
+//   require(this.activeInputIndex == 0);  // Can't be at position 1
+//   bytes oracleData = tx.inputs[1].lockingBytecode;  // Now safe
+
+// ============================================================================
+// SECURITY PRINCIPLES FOR INPUT POSITION VALIDATION
+// ============================================================================
+
+// PRINCIPLE 1: NEVER ASSUME INPUT POSITION
+// -----------------------------------------
+// WRONG: bytes oracle = tx.inputs[1].lockingBytecode;
+// RIGHT: 
+//   require(this.activeInputIndex == 0);
+//   bytes oracle = tx.inputs[1].lockingBytecode;
+
+// PRINCIPLE 2: VALIDATE IDENTITY, NOT JUST POSITION
+// --------------------------------------------------
+// Position validation alone is insufficient:
+//   require(this.activeInputIndex == 0);
+//   bytes oracle = tx.inputs[1].lockingBytecode;  // Could be ANY contract!
+//
+// Must also validate bytecode:
+//   require(this.activeInputIndex == 0);
+//   require(tx.inputs[1].lockingBytecode == expectedOracleBytecode);
+
+// PRINCIPLE 3: PREVENT SELF-REFERENCE
+// ------------------------------------
+// Always ensure you're not reading from your own input:
+//   int oraclePos = this.activeInputIndex + offset;
+//   require(oraclePos != this.activeInputIndex);
+
+// PRINCIPLE 4: VALIDATE INPUT COUNT
+// ----------------------------------
+// Before accessing tx.inputs[N], verify it exists:
+//   require(tx.inputs.length > N);
+
+// PRINCIPLE 5: EXPLICIT IS BETTER THAN IMPLICIT
+// ----------------------------------------------
+// Don't rely on "convention" or "expected structure"
+// Write explicit validation for every assumption
+
+// ============================================================================
+// COMMON MISTAKES AND HOW TO AVOID THEM
+// ============================================================================
+
+// MISTAKE 1: Hardcoded Position Without Validation
+// -------------------------------------------------
+// WRONG:
+//   bytes oracle = tx.inputs[1].lockingBytecode;
+//
+// WHY WRONG:
+// - Assumes input[1] exists
+// - Assumes input[1] is oracle
+// - Assumes this contract is NOT at input[1]
+//
+// CORRECT:
+//   require(this.activeInputIndex == 0);
+//   require(tx.inputs.length >= 2);
+//   require(tx.inputs[1].lockingBytecode == expectedOracleBytecode);
+//   bytes oracle = tx.inputs[1].lockingBytecode;
+
+// MISTAKE 2: Relative Positions Without Self-Reference Check
+// -----------------------------------------------------------
+// WRONG:
+//   int oraclePos = this.activeInputIndex - 1;
+//   bytes oracle = tx.inputs[oraclePos].lockingBytecode;
+//
+// WHY WRONG:
+// - If this.activeInputIndex == 0, oraclePos = -1 (invalid!)
+// - No bounds checking
+//
+// CORRECT:
+//   int oraclePos = this.activeInputIndex - 1;
+//   require(oraclePos >= 0);
+//   require(tx.inputs[oraclePos].lockingBytecode == expectedOracleBytecode);
+
+// MISTAKE 3: Assuming Input Count
+// --------------------------------
+// WRONG:
+//   bytes input2 = tx.inputs[2].lockingBytecode;
+//
+// WHY WRONG:
+// - Transaction might only have 2 inputs (indices 0, 1)
+// - Accessing tx.inputs[2] would fail
+//
+// CORRECT:
+//   require(tx.inputs.length >= 3);
+//   bytes input2 = tx.inputs[2].lockingBytecode;
+
+// MISTAKE 4: Not Validating Contract Identity
+// --------------------------------------------
+// WRONG:
+//   require(this.activeInputIndex == 0);
+//   bytes oracle = tx.inputs[1].lockingBytecode;
+//   // Assumes input[1] is oracle, but doesn't check!
+//
+// WHY WRONG:
+// - Attacker can put ANY contract at input[1]
+// - Position is correct, but identity is wrong
+//
+// CORRECT:
+//   require(this.activeInputIndex == 0);
+//   require(tx.inputs[1].lockingBytecode == expectedOracleBytecode);
+//   bytes oracle = tx.inputs[1].lockingBytecode;
+
+// ============================================================================
+// DEPLOYMENT CHECKLIST FOR INPUT POSITION VALIDATION
+// ============================================================================
+//
+// Before deploying a contract that reads other inputs:
+//
+// [ ] If reading tx.inputs[N], validate this.activeInputIndex
+// [ ] Validate tx.inputs.length is sufficient for all accessed indices
+// [ ] Validate bytecode of all external inputs (identity check)
+// [ ] Prevent self-reference (ensure N != this.activeInputIndex)
+// [ ] Document expected transaction structure clearly
+// [ ] Test with inputs in different orders (reordering attacks)
+// [ ] Test with malicious contracts at expected positions
+// [ ] Test with insufficient inputs (out of bounds)
+// [ ] Test with this contract at different positions
+// [ ] Verify no assumptions about input ordering remain
+
+// ============================================================================
+// TESTING RECOMMENDATIONS
+// ============================================================================
+//
+// Test Cases for VULNERABLE version:
+// 1. Normal structure: [MainContract, Oracle]
+//    Expected: SUCCEEDS (works as intended)
+//
+// 2. Swapped: [Oracle, MainContract]
+//    Expected: SUCCEEDS (VULNERABILITY - should fail)
+//    Result: Contract reads itself as oracle
+//
+// 3. Fake oracle: [FakeOracle, MainContract]  
+//    Expected: SUCCEEDS (VULNERABILITY - should fail)
+//    Result: Contract reads fake oracle data
+//
+// 4. Multiple positions: [Oracle, FakeOracle, MainContract]
+//    Expected: SUCCEEDS (VULNERABILITY - should fail)
+//    Result: Contract reads FakeOracle instead of real Oracle
+//
+// Test Cases for SECURE version:
+// 1. Normal structure: [MainContract, Oracle]
+//    Expected: SUCCEEDS (valid transaction)
+//
+// 2. Swapped: [Oracle, MainContract]
+//    Expected: FAILS (this.activeInputIndex != 0)
+//
+// 3. Fake oracle: [MainContract, FakeOracle]
+//    Expected: FAILS (bytecode doesn't match expectedOracleBytecode)
+//
+// 4. Wrong position: [Something, MainContract, Oracle]
+//    Expected: FAILS (this.activeInputIndex == 1, not 0)
+//
+// 5. Insufficient inputs: [MainContract]
+//    Expected: FAILS (tx.inputs.length < 2)
+
+// ============================================================================
+// REAL-WORLD APPLICATIONS
+// ============================================================================
+//
+// Use Cases Requiring Position Validation:
+//
+// 1. ORACLE-DEPENDENT CONTRACTS
+//    - Price oracles for DeFi
+//    - Data feeds for conditional execution
+//    - Time-locked contracts with timestamp validation
+//
+// 2. MULTI-SIGNATURE COORDINATION
+//    - Multiple contracts must sign in specific order
+//    - Governance + treasury + execution contracts
+//    - Layered approval systems
+//
+// 3. ATOMIC SWAPS
+//    - Party A contract at position 0
+//    - Party B contract at position 1
+//    - Must validate both positions and identities
+//
+// 4. DEFI PROTOCOLS
+//    - Collateral vault + price oracle + liquidation engine
+//    - Each component at specific position
+//    - Input ordering critical for correct valuation
+//
+// 5. COVENANT CHAINS
+//    - Parent covenant at position 0
+//    - Child covenant at position 1
+//    - Inheritance and state validation requires position awareness
+
+// ============================================================================
+// END OF FILE
+// ============================================================================

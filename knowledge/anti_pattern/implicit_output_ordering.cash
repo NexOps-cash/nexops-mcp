@@ -1,0 +1,1145 @@
+// ANTI-PATTERN: Implicit Output Ordering
+// VULNERABILITY: Assuming output order without semantic validation enables output reordering attacks
+// ATTACK VECTOR: Output role swap, value theft, covenant bypass, semantic confusion
+//
+// This file demonstrates the critical vulnerability of assuming outputs appear in a
+// specific order without validating their semantic roles. Attackers can reorder outputs,
+// swap covenant continuations with attacker-controlled outputs, and redirect value by
+// exploiting index-based assumptions instead of semantic validation.
+//
+// CashScript Version: ^0.13.0
+// Network: Bitcoin Cash (BCH)
+// Security Level: VULNERABLE - DO NOT USE IN PRODUCTION
+
+// ============================================================================
+// VULNERABLE CODE: Implicit Output Ordering
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// VULNERABLE: This contract assumes outputs appear in a specific order
+// RISK: Attacker can reorder outputs to bypass validation and steal value
+contract VulnerableCovenantImplicitOrder(
+    pubkey ownerPubKey,
+    int minimumValue
+) {
+    // VULNERABILITY: Assumes output[0] is covenant, output[1] is withdrawal
+    // MISSING: Semantic validation of output roles
+    // MISSING: Output count enforcement
+    // MISSING: Validation that output[0] is actually the covenant continuation
+    function withdraw(sig ownerSig, int withdrawalAmount) {
+        // Validate authorization
+        require(checkSig(ownerSig, ownerPubKey));
+        
+        // Get input value
+        int inputValue = tx.inputs[this.activeInputIndex].value;
+        
+        // CRITICAL FLAW: Assumes output[0] is the covenant continuation
+        // Does NOT validate lockingBytecode or semantic role
+        int covenantOutputValue = tx.outputs[0].value;
+        
+        // Validates covenant maintains minimum value
+        require(covenantOutputValue >= minimumValue);
+        
+        // CRITICAL FLAW: Assumes output[1] is the withdrawal
+        // Does NOT validate this output exists or goes to correct recipient
+        require(tx.outputs[1].value == withdrawalAmount);
+        
+        // Validates total value conservation (with fee allowance)
+        int totalOutput = covenantOutputValue + withdrawalAmount;
+        require(totalOutput <= inputValue);
+        require(inputValue - totalOutput <= 1000);  // Max 1000 sat fee
+        
+        // THE PROBLEM:
+        // This logic assumes:
+        // - output[0] is always the covenant continuation
+        // - output[1] is always the withdrawal to legitimate recipient
+        //
+        // Reality:
+        // - BCH does NOT enforce output order
+        // - Attacker controls output order in transaction construction
+        // - Attacker can swap outputs to redirect value
+        //
+        // Attacker can:
+        // 1. Create output[0] = attacker-controlled script (looks like covenant)
+        // 2. Create output[1] = actual covenant continuation
+        // 3. Contract validates output[0].value >= minimumValue (passes)
+        // 4. Contract validates output[1].value == withdrawalAmount (passes)
+        // 5. But output[0] goes to attacker, output[1] continues covenant
+        // 6. Attacker steals covenant value by swapping output positions
+    }
+}
+
+// ============================================================================
+// UNDERSTANDING THE VULNERABILITY: BCH Output Ordering
+// ============================================================================
+//
+// CRITICAL CONCEPT: Outputs Have No Guaranteed Order
+// ---------------------------------------------------
+//
+// BCH Transaction Structure:
+// {
+//   inputs: [...],
+//   outputs: [
+//     { value: 10000, lockingBytecode: 0x... },  // Index 0
+//     { value: 5000,  lockingBytecode: 0x... },  // Index 1
+//     { value: 3000,  lockingBytecode: 0x... }   // Index 2
+//   ]
+// }
+//
+// Key Properties:
+// 1. Output order is ARBITRARY (wallet/attacker chooses)
+// 2. Output indices are POSITIONAL (0, 1, 2, ...)
+// 3. Output semantics are NOT enforced by protocol
+// 4. Transaction is valid as long as: sum(inputs) >= sum(outputs)
+//
+// COVENANT PERSPECTIVE (what it can see):
+// - tx.outputs[0].value (value at index 0)
+// - tx.outputs[0].lockingBytecode (script at index 0)
+// - tx.outputs[1].value (value at index 1)
+// - tx.outputs[1].lockingBytecode (script at index 1)
+// - tx.outputs.length (total number of outputs)
+//
+// WHAT COVENANT CANNOT ASSUME:
+// - Which output is "the covenant continuation"
+// - Which output is "the withdrawal"
+// - Which output is "the fee change"
+// - That outputs appear in any particular order
+//
+// THE DANGEROUS ASSUMPTION:
+// Many covenants assume: "output[0] is always X, output[1] is always Y"
+// This is ONLY true if: Covenant validates the semantic role of each output
+// This is FALSE if: Covenant only checks index-based properties
+//
+// Example of Unsafe Thinking:
+// "Output 0 is the covenant, so I'll check output[0].value >= minimum"
+// "Output 1 is the withdrawal, so I'll check output[1].value == amount"
+//
+// Why This Fails:
+// Attacker can create:
+// - output[0] = attacker script with minimum value
+// - output[1] = covenant continuation with withdrawal amount
+// Contract sees correct VALUES at expected INDICES
+// But MEANINGS are swapped - attacker gets covenant value
+
+// ============================================================================
+// ATTACK SCENARIO 1: Output Role Swap (Covenant vs Withdrawal)
+// ============================================================================
+//
+// Setup:
+// - Covenant holds 100,000 sats (minimum: 50,000 sats)
+// - User requests withdrawal of 30,000 sats
+// - Contract assumes output[0] = covenant, output[1] = withdrawal
+// - Contract validates values but NOT lockingBytecode
+//
+// Legitimate Transaction (Expected):
+// Inputs:
+//   [0] Covenant (100,000 sats)
+//
+// Outputs:
+//   [0] Covenant continuation (69,000 sats) ← Covenant script
+//   [1] Withdrawal to user (30,000 sats) ← User's address
+//
+// Fee: 1,000 sats
+//
+// Covenant's Validation:
+//   output[0].value = 69,000 >= 50,000 ✓ (minimum maintained)
+//   output[1].value = 30,000 ✓ (withdrawal amount correct)
+//   totalOutput = 99,000 <= 100,000 ✓ (value conservation)
+//   Transaction SUCCEEDS
+//
+// ATTACK: Swap Output Positions
+// Inputs:
+//   [0] Covenant (100,000 sats)
+//
+// Outputs:
+//   [0] Attacker's script (50,000 sats) ← ATTACKER CONTROLLED
+//   [1] Covenant continuation (49,000 sats) ← Covenant script
+//
+// Fee: 1,000 sats
+//
+// Covenant's Validation:
+//   output[0].value = 50,000 >= 50,000 ✓ (minimum check passes!)
+//   output[1].value = 49,000 (no withdrawal amount check in this variant)
+//   
+// Wait, this doesn't match the withdrawal check. Let me fix:
+//
+// ACTUAL ATTACK: Precise Value Swap
+// Outputs:
+//   [0] Attacker's script (69,000 sats) ← ATTACKER gets covenant value!
+//   [1] Covenant continuation (30,000 sats) ← Covenant continues with withdrawal amount
+//
+// Fee: 1,000 sats
+//
+// Covenant's Validation:
+//   output[0].value = 69,000 >= 50,000 ✓ (assumes this is covenant)
+//   output[1].value = 30,000 == 30,000 ✓ (assumes this is withdrawal)
+//   totalOutput = 99,000 <= 100,000 ✓
+//   Transaction SUCCEEDS ✓
+//
+// Result:
+// - Contract validated successfully
+// - output[0] has correct value (69,000) but WRONG script (attacker's)
+// - output[1] has correct value (30,000) but WRONG script (covenant's)
+// - Attacker received 69,000 sats (covenant's continuation value)
+// - Covenant continues with only 30,000 sats (withdrawal amount)
+// - Covenant drained by 39,000 sats (69,000 - 30,000)
+//
+// Impact:
+// - Value theft: 39,000 sats stolen
+// - Covenant value reduced below intended amount
+// - User thinks withdrawal succeeded
+// - But covenant lost more value than withdrawal amount
+// - Attacker exploited index-based assumption
+
+// ============================================================================
+// ATTACK SCENARIO 2: Output Shadowing (Valid Output Exists, Wrong Index)
+// ============================================================================
+//
+// Setup:
+// - Vault with time-locked withdrawal
+// - Contract validates output[0] is covenant continuation
+// - Contract validates output[1] is withdrawal after time lock
+// - But does NOT enforce output count
+//
+// Vulnerable Contract:
+//
+// contract VulnerableTimedVault(pubkey ownerPubKey, int unlockTime, int minValue) {
+//     function withdraw(sig ownerSig, int amount) {
+//         require(checkSig(ownerSig, ownerPubKey));
+//         require(tx.time >= unlockTime);
+//         
+//         // Validates output[0] maintains minimum
+//         require(tx.outputs[0].value >= minValue);
+//         
+//         // Validates output[1] is withdrawal
+//         require(tx.outputs[1].value == amount);
+//         
+//         // MISSING: Output count validation
+//         // MISSING: Semantic validation of output roles
+//     }
+// }
+//
+// ATTACK: Add Shadow Outputs
+// Inputs:
+//   [0] Vault (100,000 sats)
+//
+// Outputs:
+//   [0] Attacker's script (50,000 sats) ← Satisfies minimum check
+//   [1] Attacker's script (40,000 sats) ← Satisfies withdrawal check
+//   [2] Covenant continuation (9,000 sats) ← REAL covenant (ignored!)
+//
+// Fee: 1,000 sats
+//
+// Covenant's Validation:
+//   output[0].value = 50,000 >= minValue ✓ (assumes covenant)
+//   output[1].value = 40,000 == amount ✓ (assumes withdrawal)
+//   Transaction SUCCEEDS ✓
+//
+// Result:
+// - output[0] and output[1] validated successfully
+// - BUT both are attacker-controlled scripts
+// - output[2] (real covenant) exists but wasn't validated
+// - Attacker stole 90,000 sats (50,000 + 40,000)
+// - Covenant continues with only 9,000 sats
+// - Completely bypassed covenant logic
+//
+// Impact:
+// - Near-total value theft (90% stolen)
+// - Covenant continuation exists but severely depleted
+// - Contract's validation was meaningless
+// - Attacker added extra outputs to shadow real covenant
+
+// ============================================================================
+// ATTACK SCENARIO 3: Multi-Output Confusion with Attacker-Added Outputs
+// ============================================================================
+//
+// Setup:
+// - AMM-style covenant with two token pools
+// - Contract assumes output[0] = pool A, output[1] = pool B
+// - Validates pool ratios but not semantic roles
+// - Allows multiple outputs for "change" or "fees"
+//
+// Vulnerable AMM:
+//
+// contract VulnerableAMM(bytes20 poolAHash, bytes20 poolBHash, int ratio) {
+//     function swap(int amountA, int amountB) {
+//         // Validates pool A maintains ratio
+//         require(tx.outputs[0].value >= amountA);
+//         
+//         // Validates pool B maintains ratio
+//         require(tx.outputs[1].value >= amountB);
+//         
+//         // Validates ratio invariant
+//         require(tx.outputs[0].value * ratio == tx.outputs[1].value);
+//         
+//         // MISSING: Validation that output[0] is actually pool A
+//         // MISSING: Validation that output[1] is actually pool B
+//         // MISSING: Output count enforcement
+//     }
+// }
+//
+// ATTACK: Reorder Pools with Extra Outputs
+// Inputs:
+//   [0] Pool A (100,000 sats)
+//   [1] Pool B (100,000 sats)
+//
+// Outputs:
+//   [0] Attacker script (100,000 sats) ← Satisfies amountA check
+//   [1] Attacker script (100,000 sats) ← Satisfies amountB check
+//   [2] Pool A continuation (50,000 sats) ← Real pool (ignored!)
+//   [3] Pool B continuation (48,000 sats) ← Real pool (ignored!)
+//
+// Fee: 2,000 sats
+//
+// Covenant's Validation:
+//   output[0].value = 100,000 >= amountA ✓
+//   output[1].value = 100,000 >= amountB ✓
+//   100,000 * ratio == 100,000 ✓ (ratio maintained)
+//   Transaction SUCCEEDS ✓
+//
+// Result:
+// - Both pools validated at expected indices
+// - But both are attacker-controlled scripts
+// - Real pools (output[2], output[3]) exist but weren't checked
+// - Attacker stole 200,000 sats total
+// - AMM pools continue with depleted liquidity
+// - Invariant maintained on WRONG outputs
+//
+// Impact:
+// - Liquidity theft: 200,000 sats stolen
+// - AMM continues but severely damaged
+// - Ratio checks were meaningless (checked wrong outputs)
+// - Downstream contracts expecting pool outputs will break
+
+// ============================================================================
+// ATTACK SCENARIO 4: Covenant Bypass via Index Confusion
+// ============================================================================
+//
+// Setup:
+// - DAO treasury with spending limits
+// - Contract validates output[0] is treasury continuation
+// - Contract validates output[1] is approved spending
+// - Assumes only 2 outputs exist
+//
+// Vulnerable DAO Treasury:
+//
+// contract VulnerableDAOTreasury(
+//     pubkey daoKeyA,
+//     pubkey daoKeyB,
+//     int spendingLimit
+// ) {
+//     function spend(sig sigA, sig sigB, int spendAmount) {
+//         // Multi-sig validation
+//         require(checkSig(sigA, daoKeyA));
+//         require(checkSig(sigB, daoKeyB));
+//         
+//         // Validates spending limit
+//         require(spendAmount <= spendingLimit);
+//         
+//         int inputValue = tx.inputs[this.activeInputIndex].value;
+//         
+//         // Validates treasury continues
+//         require(tx.outputs[0].value >= inputValue - spendAmount - 1000);
+//         
+//         // Validates spending amount
+//         require(tx.outputs[1].value == spendAmount);
+//         
+//         // MISSING: Semantic validation
+//         // MISSING: Output count enforcement
+//     }
+// }
+//
+// ATTACK: Add Attacker Output at Index 0
+// Inputs:
+//   [0] Treasury (1,000,000 sats)
+//
+// Outputs:
+//   [0] Attacker script (989,000 sats) ← Satisfies treasury check!
+//   [1] Legitimate spend (10,000 sats) ← Satisfies spend check
+//   [2] Treasury continuation (0 sats) ← Real treasury (ignored!)
+//
+// Fee: 1,000 sats
+//
+// Covenant's Validation:
+//   spendAmount = 10,000 <= spendingLimit ✓
+//   output[0].value = 989,000 >= 1,000,000 - 10,000 - 1,000 ✓
+//   output[1].value = 10,000 == spendAmount ✓
+//   Transaction SUCCEEDS ✓
+//
+// Result:
+// - Appears to be legitimate 10,000 sat spend
+// - But output[0] is attacker script, not treasury
+// - Attacker stole 989,000 sats
+// - Real treasury (output[2]) gets nothing
+// - DAO thinks small spend happened
+// - Actually lost entire treasury
+//
+// Impact:
+// - Catastrophic theft: 98.9% of treasury stolen
+// - Appeared as legitimate governance action
+// - Spending limit completely bypassed
+// - DAO treasury destroyed
+
+// ============================================================================
+// SECURE VERSION: Explicit Semantic Validation
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// SECURE: This contract validates SEMANTIC ROLES of outputs, not just indices
+// PROTECTION: Prevents output reordering, role swap, and value theft
+contract SecureCovenantSemanticValidation(
+    pubkey ownerPubKey,
+    int minimumValue
+) {
+    // SECURE: Validates each output's semantic role explicitly
+    function withdraw(sig ownerSig, int withdrawalAmount, bytes20 recipientPkh) {
+        // Step 1: Validate authorization
+        require(checkSig(ownerSig, ownerPubKey));
+        
+        // Step 2: CRITICAL - Enforce exactly 2 outputs
+        // This prevents shadow outputs and hidden value extraction
+        require(tx.outputs.length == 2);
+        
+        // Step 3: Get input value and own locking bytecode
+        int inputValue = tx.inputs[this.activeInputIndex].value;
+        bytes inputLockingBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+        
+        // Step 4: CRITICAL - Identify which output is covenant continuation
+        // Search for output with matching lockingBytecode
+        // This is SEMANTIC validation (what it IS, not where it IS)
+        bool foundCovenant = false;
+        int covenantOutputValue = 0;
+        
+        // Check output[0]
+        if (tx.outputs[0].lockingBytecode == inputLockingBytecode) {
+            foundCovenant = true;
+            covenantOutputValue = tx.outputs[0].value;
+        }
+        // Check output[1]
+        else if (tx.outputs[1].lockingBytecode == inputLockingBytecode) {
+            foundCovenant = true;
+            covenantOutputValue = tx.outputs[1].value;
+        }
+        
+        // Enforce covenant continuation exists
+        require(foundCovenant);
+        
+        // Step 5: Validate covenant maintains minimum value
+        require(covenantOutputValue >= minimumValue);
+        
+        // Step 6: CRITICAL - Validate withdrawal output
+        // Build expected withdrawal locking bytecode (P2PKH)
+        bytes20 expectedRecipientPkh = recipientPkh;
+        bytes expectedWithdrawalBytecode = new LockingBytecodeP2PKH(expectedRecipientPkh);
+        
+        // Find withdrawal output by semantic validation
+        bool foundWithdrawal = false;
+        int withdrawalOutputValue = 0;
+        
+        // Check output[0]
+        if (tx.outputs[0].lockingBytecode == expectedWithdrawalBytecode) {
+            foundWithdrawal = true;
+            withdrawalOutputValue = tx.outputs[0].value;
+        }
+        // Check output[1]
+        else if (tx.outputs[1].lockingBytecode == expectedWithdrawalBytecode) {
+            foundWithdrawal = true;
+            withdrawalOutputValue = tx.outputs[1].value;
+        }
+        
+        // Enforce withdrawal output exists
+        require(foundWithdrawal);
+        
+        // Step 7: Validate withdrawal amount
+        require(withdrawalOutputValue == withdrawalAmount);
+        
+        // Step 8: Validate value conservation
+        int totalOutput = covenantOutputValue + withdrawalOutputValue;
+        require(totalOutput <= inputValue);
+        require(inputValue - totalOutput <= 1000);  // Max 1000 sat fee
+        
+        // RESULT: Output order is IRRELEVANT
+        // - Covenant continuation identified by lockingBytecode match
+        // - Withdrawal identified by recipient address match
+        // - Values validated on SEMANTIC outputs, not index assumptions
+        // - Attacker cannot swap output positions
+        //
+        // This is SECURE because:
+        // - Each output validated by WHAT IT IS (semantic role)
+        // - Not by WHERE IT IS (index position)
+        // - Output order controlled by attacker doesn't matter
+        // - Covenant continuation always found and validated
+        // - Withdrawal always sent to correct recipient
+    }
+}
+
+// ============================================================================
+// ALTERNATIVE PATTERN: Index-Based with Explicit Role Validation
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// ALTERNATIVE: Use fixed indices BUT validate semantic roles
+// USE CASE: When output order is part of protocol specification
+contract SecureCovenantIndexWithSemantics(
+    pubkey ownerPubKey,
+    int minimumValue
+) {
+    // Pattern: Fix output order AND validate semantic correctness
+    function withdraw(sig ownerSig, int withdrawalAmount, bytes20 recipientPkh) {
+        // Step 1: Validate authorization
+        require(checkSig(ownerSig, ownerPubKey));
+        
+        // Step 2: CRITICAL - Enforce exactly 2 outputs
+        require(tx.outputs.length == 2);
+        
+        // Step 3: Get input properties
+        int inputValue = tx.inputs[this.activeInputIndex].value;
+        bytes inputLockingBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+        
+        // Step 4: CRITICAL - Validate output[0] IS the covenant
+        // Not just "has the right value" but "has the right SCRIPT"
+        require(tx.outputs[0].lockingBytecode == inputLockingBytecode);
+        
+        // Step 5: Validate covenant value
+        require(tx.outputs[0].value >= minimumValue);
+        
+        // Step 6: CRITICAL - Validate output[1] IS the withdrawal
+        // Build expected recipient locking bytecode
+        bytes expectedWithdrawalBytecode = new LockingBytecodeP2PKH(recipientPkh);
+        require(tx.outputs[1].lockingBytecode == expectedWithdrawalBytecode);
+        
+        // Step 7: Validate withdrawal amount
+        require(tx.outputs[1].value == withdrawalAmount);
+        
+        // Step 8: Validate value conservation
+        int totalOutput = tx.outputs[0].value + tx.outputs[1].value;
+        require(totalOutput <= inputValue);
+        require(inputValue - totalOutput <= 1000);
+        
+        // RESULT: Fixed order with semantic validation
+        // - Output order IS enforced (covenant at [0], withdrawal at [1])
+        // - BUT each output's semantic role is validated
+        // - Attacker cannot swap outputs (semantic checks fail)
+        // - Attacker cannot use wrong scripts (lockingBytecode checks fail)
+        //
+        // This is SECURE because:
+        // - Output count enforced (exactly 2)
+        // - Output[0] validated as covenant (lockingBytecode match)
+        // - Output[1] validated as withdrawal (recipient address match)
+        // - Index-based assumptions backed by semantic validation
+        //
+        // Use when:
+        // - Protocol specifies fixed output order
+        // - External tools expect specific indices
+        // - BUT always validate semantic roles too
+    }
+}
+
+// ============================================================================
+// BEST PRACTICE: Multi-Output with Full Semantic Validation
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// BEST PRACTICE: Support multiple outputs with complete semantic validation
+// Allows flexible output count while ensuring all outputs validated
+contract SecureCovenantMultiOutputSemantic(
+    pubkey ownerPubKey,
+    int minimumValue
+) {
+    // Pattern: Allow multiple outputs, validate each semantically
+    function withdrawMulti(
+        sig ownerSig,
+        int withdrawalAmount1,
+        bytes20 recipient1Pkh,
+        int withdrawalAmount2,
+        bytes20 recipient2Pkh
+    ) {
+        // Step 1: Validate authorization
+        require(checkSig(ownerSig, ownerPubKey));
+        
+        // Step 2: CRITICAL - Enforce exactly 3 outputs
+        // 1 covenant + 2 withdrawals
+        require(tx.outputs.length == 3);
+        
+        // Step 3: Get input properties
+        int inputValue = tx.inputs[this.activeInputIndex].value;
+        bytes inputLockingBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+        
+        // Step 4: Build expected output scripts
+        bytes expectedRecipient1Bytecode = new LockingBytecodeP2PKH(recipient1Pkh);
+        bytes expectedRecipient2Bytecode = new LockingBytecodeP2PKH(recipient2Pkh);
+        
+        // Step 5: CRITICAL - Find and validate each output semantically
+        // Initialize found flags and values
+        bool foundCovenant = false;
+        bool foundWithdrawal1 = false;
+        bool foundWithdrawal2 = false;
+        int covenantValue = 0;
+        int withdrawal1Value = 0;
+        int withdrawal2Value = 0;
+        
+        // Check all outputs for their semantic roles
+        // Output 0
+        if (tx.outputs[0].lockingBytecode == inputLockingBytecode) {
+            foundCovenant = true;
+            covenantValue = tx.outputs[0].value;
+        } else if (tx.outputs[0].lockingBytecode == expectedRecipient1Bytecode) {
+            foundWithdrawal1 = true;
+            withdrawal1Value = tx.outputs[0].value;
+        } else if (tx.outputs[0].lockingBytecode == expectedRecipient2Bytecode) {
+            foundWithdrawal2 = true;
+            withdrawal2Value = tx.outputs[0].value;
+        }
+        
+        // Output 1
+        if (tx.outputs[1].lockingBytecode == inputLockingBytecode) {
+            require(!foundCovenant);  // Prevent duplicate covenant output
+            foundCovenant = true;
+            covenantValue = tx.outputs[1].value;
+        } else if (tx.outputs[1].lockingBytecode == expectedRecipient1Bytecode) {
+            require(!foundWithdrawal1);  // Prevent duplicate withdrawal
+            foundWithdrawal1 = true;
+            withdrawal1Value = tx.outputs[1].value;
+        } else if (tx.outputs[1].lockingBytecode == expectedRecipient2Bytecode) {
+            require(!foundWithdrawal2);  // Prevent duplicate withdrawal
+            foundWithdrawal2 = true;
+            withdrawal2Value = tx.outputs[1].value;
+        }
+        
+        // Output 2
+        if (tx.outputs[2].lockingBytecode == inputLockingBytecode) {
+            require(!foundCovenant);
+            foundCovenant = true;
+            covenantValue = tx.outputs[2].value;
+        } else if (tx.outputs[2].lockingBytecode == expectedRecipient1Bytecode) {
+            require(!foundWithdrawal1);
+            foundWithdrawal1 = true;
+            withdrawal1Value = tx.outputs[2].value;
+        } else if (tx.outputs[2].lockingBytecode == expectedRecipient2Bytecode) {
+            require(!foundWithdrawal2);
+            foundWithdrawal2 = true;
+            withdrawal2Value = tx.outputs[2].value;
+        }
+        
+        // Step 6: Enforce all required outputs found
+        require(foundCovenant);
+        require(foundWithdrawal1);
+        require(foundWithdrawal2);
+        
+        // Step 7: Validate values
+        require(covenantValue >= minimumValue);
+        require(withdrawal1Value == withdrawalAmount1);
+        require(withdrawal2Value == withdrawalAmount2);
+        
+        // Step 8: Validate value conservation
+        int totalOutput = covenantValue + withdrawal1Value + withdrawal2Value;
+        require(totalOutput <= inputValue);
+        require(inputValue - totalOutput <= 1000);
+        
+        // RESULT: Complete semantic validation
+        // - All outputs validated by WHAT they are
+        // - Output order completely irrelevant
+        // - Duplicate outputs prevented
+        // - All required outputs enforced
+        //
+        // This is the MOST SECURE pattern for multi-output scenarios
+    }
+}
+
+// ============================================================================
+// EXPLANATION: Why Index-Based Meaning Is Unsafe
+// ============================================================================
+
+// FUNDAMENTAL PROBLEM: Indices Are Positional, Not Semantic
+// ----------------------------------------------------------
+// 
+// What an output index tells you:
+// ✓ Position in the outputs array (0, 1, 2, ...)
+// ✓ Which output to read properties from
+//
+// What an output index DOES NOT tell you:
+// ✗ What the output represents (covenant? withdrawal? fee?)
+// ✗ What script controls the output
+// ✗ Whether the output serves intended purpose
+// ✗ Whether attacker swapped output positions
+//
+// Example of Index-Based Assumption:
+// "Output 0 is the covenant continuation"
+// 
+// Reality:
+// - Output 0 is just the FIRST output in the array
+// - It could be covenant script
+// - It could be attacker script
+// - It could be withdrawal script
+// - Contract must CHECK what it is, not ASSUME
+//
+// Why Attackers Can Exploit This:
+// 1. Attacker constructs transaction
+// 2. Attacker controls output order
+// 3. Attacker can place ANY output at ANY index
+// 4. If contract only checks index, not semantics...
+// 5. Attacker swaps positions to redirect value
+
+// SEMANTIC VALIDATION vs INDEX VALIDATION
+// ----------------------------------------
+//
+// Index Validation (UNSAFE):
+//   require(tx.outputs[0].value >= minimumValue);
+//   // Assumes output[0] is covenant
+//   // But doesn't verify it!
+//
+// Semantic Validation (SAFE):
+//   bytes inputBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+//   require(tx.outputs[0].lockingBytecode == inputBytecode);
+//   require(tx.outputs[0].value >= minimumValue);
+//   // Verifies output[0] IS the covenant
+//   // By checking it has covenant script
+//
+// The difference:
+// - Index validation: "output at position 0 has property X"
+// - Semantic validation: "output at position 0 IS the covenant"
+//
+// Why semantic validation is required:
+// - Attacker can put wrong script at any position
+// - Only lockingBytecode check proves semantic role
+// - Value/amount checks are insufficient
+// - Must verify WHAT the output is, not just its properties
+
+// THE OUTPUT SEARCH PATTERN
+// --------------------------
+// Secure contracts search for outputs by semantic role:
+//
+// bool foundCovenant = false;
+// int covenantValue = 0;
+//
+// // Check each output for covenant script
+// if (tx.outputs[0].lockingBytecode == expectedCovenantScript) {
+//     foundCovenant = true;
+//     covenantValue = tx.outputs[0].value;
+// } else if (tx.outputs[1].lockingBytecode == expectedCovenantScript) {
+//     foundCovenant = true;
+//     covenantValue = tx.outputs[1].value;
+// }
+// // ... check all outputs
+//
+// require(foundCovenant);  // Enforce covenant exists
+// require(covenantValue >= minimum);  // Validate its value
+//
+// This pattern:
+// - Searches ALL outputs for semantic role
+// - Finds covenant regardless of position
+// - Validates properties AFTER finding correct output
+// - Makes output order irrelevant
+// - Prevents position-based attacks
+
+// ============================================================================
+// SECURITY PRINCIPLES FOR OUTPUT VALIDATION
+// ============================================================================
+
+// PRINCIPLE 1: VALIDATE SEMANTICS, NOT JUST INDICES
+// --------------------------------------------------
+// Unsafe:
+//   require(tx.outputs[0].value >= minimum);
+//
+// Safe:
+//   require(tx.outputs[0].lockingBytecode == expectedScript);
+//   require(tx.outputs[0].value >= minimum);
+//
+// Always validate:
+// 1. Output count (tx.outputs.length)
+// 2. LockingBytecode of each output (semantic role)
+// 3. Value of each output (after semantic validation)
+// 4. TokenCategory/amount if using tokens
+
+// PRINCIPLE 2: ENFORCE OUTPUT COUNT
+// ----------------------------------
+// ALWAYS enforce exact output count:
+//   require(tx.outputs.length == expectedCount);
+//
+// This prevents:
+// - Shadow outputs (extra attacker outputs)
+// - Hidden value extraction
+// - Output confusion attacks
+//
+// If variable output count needed:
+//   require(tx.outputs.length >= minCount);
+//   require(tx.outputs.length <= maxCount);
+//   // Then validate each possible output semantically
+
+// PRINCIPLE 3: SEARCH FOR OUTPUTS BY SEMANTIC ROLE
+// -------------------------------------------------
+// Don't assume output positions
+// Search for outputs by what they ARE:
+//
+// For covenant continuation:
+//   bytes covenantScript = tx.inputs[this.activeInputIndex].lockingBytecode;
+//   // Search outputs for matching script
+//
+// For recipient address:
+//   bytes recipientScript = new LockingBytecodeP2PKH(recipientPkh);
+//   // Search outputs for matching script
+//
+// For token outputs:
+//   bytes32 expectedCategory = ...;
+//   // Search outputs for matching tokenCategory
+
+// PRINCIPLE 4: PREVENT DUPLICATE OUTPUTS
+// ---------------------------------------
+// When finding outputs semantically, prevent duplicates:
+//
+// bool foundCovenant = false;
+// if (output[0] is covenant) {
+//     foundCovenant = true;
+// }
+// if (output[1] is covenant) {
+//     require(!foundCovenant);  // Prevent duplicate
+//     foundCovenant = true;
+// }
+//
+// This prevents:
+// - Split value attacks (two partial covenant outputs)
+// - Confusion about which output to use
+// - Value hiding in duplicate outputs
+
+// PRINCIPLE 5: VALIDATE ALL EXPECTED OUTPUTS EXIST
+// -------------------------------------------------
+// After searching, enforce all required outputs found:
+//
+// require(foundCovenant);
+// require(foundWithdrawal);
+// require(foundRecipient);
+//
+// This ensures:
+// - Transaction has all required outputs
+// - No missing outputs
+// - No unexpected output configurations
+
+// ============================================================================
+// VALIDATION ORDER GUIDANCE
+// ============================================================================
+
+// RECOMMENDED VALIDATION ORDER:
+// -----------------------------
+// 1. Validate authorization (signatures)
+// 2. Enforce output count (tx.outputs.length)
+// 3. Get input properties (value, lockingBytecode)
+// 4. Build expected output scripts (covenant, recipients)
+// 5. Search for outputs by semantic role
+// 6. Enforce all required outputs found
+// 7. Validate output values
+// 8. Validate value conservation
+// 9. Additional constraints (time locks, etc.)
+//
+// Why this order:
+// - Authorization first (fail fast on invalid sig)
+// - Output count prevents shadow attacks early
+// - Semantic search finds correct outputs
+// - Value validation on CORRECT outputs
+// - Value conservation ensures no hidden extraction
+
+// EXAMPLE VALIDATION SEQUENCE:
+// ----------------------------
+// function spend(sig s, int amount, bytes20 recipient) {
+//     // 1. Authorization
+//     require(checkSig(s, ownerPubKey));
+//     
+//     // 2. Output count
+//     require(tx.outputs.length == 2);
+//     
+//     // 3. Input properties
+//     bytes covenant = tx.inputs[this.activeInputIndex].lockingBytecode;
+//     int inputValue = tx.inputs[this.activeInputIndex].value;
+//     
+//     // 4. Expected scripts
+//     bytes recipientScript = new LockingBytecodeP2PKH(recipient);
+//     
+//     // 5. Find outputs
+//     bool foundCov = false;
+//     bool foundRecip = false;
+//     int covValue = 0;
+//     int recipValue = 0;
+//     
+//     if (tx.outputs[0].lockingBytecode == covenant) {
+//         foundCov = true;
+//         covValue = tx.outputs[0].value;
+//     } else if (tx.outputs[0].lockingBytecode == recipientScript) {
+//         foundRecip = true;
+//         recipValue = tx.outputs[0].value;
+//     }
+//     
+//     if (tx.outputs[1].lockingBytecode == covenant) {
+//         require(!foundCov);
+//         foundCov = true;
+//         covValue = tx.outputs[1].value;
+//     } else if (tx.outputs[1].lockingBytecode == recipientScript) {
+//         require(!foundRecip);
+//         foundRecip = true;
+//         recipValue = tx.outputs[1].value;
+//     }
+//     
+//     // 6. Enforce found
+//     require(foundCov);
+//     require(foundRecip);
+//     
+//     // 7. Validate values
+//     require(recipValue == amount);
+//     require(covValue >= minimumValue);
+//     
+//     // 8. Value conservation
+//     require(covValue + recipValue <= inputValue);
+// }
+
+// ============================================================================
+// COMMON MISTAKES AND HOW TO AVOID THEM
+// ============================================================================
+
+// MISTAKE 1: Validating Values Without Semantics
+// -----------------------------------------------
+// WRONG:
+//   require(tx.outputs[0].value >= minimumValue);
+//   require(tx.outputs[1].value == withdrawalAmount);
+//   // Validates values but not WHAT the outputs are
+//
+// WHY WRONG:
+// - Attacker can swap output positions
+// - output[0] could be attacker script with minimum value
+// - output[1] could be covenant with withdrawal amount
+// - Values check out, but meanings are swapped
+//
+// CORRECT:
+//   bytes covenant = tx.inputs[this.activeInputIndex].lockingBytecode;
+//   bytes recipient = new LockingBytecodeP2PKH(recipientPkh);
+//   
+//   require(tx.outputs[0].lockingBytecode == covenant);
+//   require(tx.outputs[0].value >= minimumValue);
+//   
+//   require(tx.outputs[1].lockingBytecode == recipient);
+//   require(tx.outputs[1].value == withdrawalAmount);
+
+// MISTAKE 2: Not Enforcing Output Count
+// --------------------------------------
+// WRONG:
+//   require(tx.outputs[0].lockingBytecode == covenant);
+//   require(tx.outputs[1].lockingBytecode == recipient);
+//   // What if output[2], [3], [4] exist?
+//
+// WHY WRONG:
+// - Attacker can add extra outputs
+// - Value can hide in unvalidated outputs
+// - Shadow outputs can confuse external tools
+//
+// CORRECT:
+//   require(tx.outputs.length == 2);
+//   require(tx.outputs[0].lockingBytecode == covenant);
+//   require(tx.outputs[1].lockingBytecode == recipient);
+
+// MISTAKE 3: Assuming Fixed Output Order
+// ---------------------------------------
+// WRONG:
+//   // "Covenant is always output[0]"
+//   require(tx.outputs[0].lockingBytecode == covenant);
+//   require(tx.outputs[1].lockingBytecode == recipient);
+//
+// WHY WRONG (if not backed by semantic validation):
+// - This is actually CORRECT if semantic validation included
+// - But if you ONLY check values, order assumption fails
+// - The fix is: always validate semantics too
+//
+// CORRECT (two approaches):
+// Approach A: Fix order + validate semantics
+//   require(tx.outputs.length == 2);
+//   require(tx.outputs[0].lockingBytecode == covenant);
+//   require(tx.outputs[1].lockingBytecode == recipient);
+//
+// Approach B: Search for outputs (order-independent)
+//   // Find covenant output (could be at any index)
+//   // Find recipient output (could be at any index)
+//   // Validate both exist and have correct properties
+
+// MISTAKE 4: Not Preventing Duplicate Outputs
+// --------------------------------------------
+// WRONG:
+//   bool found = false;
+//   if (tx.outputs[0].lockingBytecode == covenant) found = true;
+//   if (tx.outputs[1].lockingBytecode == covenant) found = true;
+//   require(found);
+//   // Allows TWO covenant outputs!
+//
+// WHY WRONG:
+// - Value could split between two covenant outputs
+// - Unclear which is "the" continuation
+// - Could break assumptions in later logic
+//
+// CORRECT:
+//   bool found = false;
+//   if (tx.outputs[0].lockingBytecode == covenant) {
+//       found = true;
+//   }
+//   if (tx.outputs[1].lockingBytecode == covenant) {
+//       require(!found);  // Prevent duplicate
+//       found = true;
+//   }
+
+// MISTAKE 5: Only Validating One Output
+// --------------------------------------
+// WRONG:
+//   require(tx.outputs[0].lockingBytecode == covenant);
+//   require(tx.outputs[0].value >= minimum);
+//   // Doesn't validate withdrawal output at all
+//
+// WHY WRONG:
+// - Attacker can create any output[1]
+// - Value can go anywhere
+// - Withdrawal not validated
+//
+// CORRECT:
+//   require(tx.outputs[0].lockingBytecode == covenant);
+//   require(tx.outputs[0].value >= minimum);
+//   
+//   require(tx.outputs[1].lockingBytecode == expectedRecipient);
+//   require(tx.outputs[1].value == withdrawalAmount);
+//   
+//   // Validate ALL outputs
+
+// ============================================================================
+// DEPLOYMENT CHECKLIST FOR OUTPUT-SAFE COVENANTS
+// ============================================================================
+//
+// Before deploying a covenant contract, verify:
+//
+// [ ] DOES enforce exact output count (tx.outputs.length)
+// [ ] DOES validate lockingBytecode of ALL outputs
+// [ ] DOES validate values AFTER semantic validation
+// [ ] Does NOT assume output order without semantic checks
+// [ ] Does NOT validate only subset of outputs
+// [ ] DOES prevent duplicate outputs (if using search pattern)
+// [ ] DOES enforce all required outputs exist
+// [ ] DOES validate covenant continuation exists and correct
+// [ ] DOES validate recipient outputs go to correct addresses
+// [ ] DOES validate value conservation across all outputs
+// [ ] Test with outputs in expected order
+// [ ] Test with outputs in REVERSED order
+// [ ] Test with SWAPPED outputs (covenant vs withdrawal)
+// [ ] Test with EXTRA shadow outputs
+// [ ] Test with MISSING required outputs
+// [ ] Test with DUPLICATE outputs
+// [ ] Verify semantic validation catches all position swaps
+
+// ============================================================================
+// TESTING RECOMMENDATIONS
+// ============================================================================
+//
+// Test Cases for VULNERABLE version (index assumptions):
+// 1. Outputs in expected order (covenant[0], withdrawal[1])
+//    Expected: SUCCEEDS (assumption holds)
+//
+// 2. Outputs swapped (withdrawal[0], covenant[1])
+//    Expected: SUCCEEDS (VULNERABILITY - value theft)
+//
+// 3. Shadow outputs (attacker[0], attacker[1], covenant[2])
+//    Expected: SUCCEEDS (VULNERABILITY - theft via shadows)
+//
+// 4. Extra outputs beyond expected count
+//    Expected: SUCCEEDS (VULNERABILITY - hidden value)
+//
+// Test Cases for SECURE version (semantic validation):
+// 1. Outputs in expected order
+//    Expected: SUCCEEDS (valid transaction)
+//
+// 2. Outputs swapped
+//    Expected: SUCCEEDS (order irrelevant with semantic validation)
+//
+// 3. Wrong script at output[0] (attacker script)
+//    Expected: FAILS (lockingBytecode check rejects)
+//
+// 4. Extra shadow outputs
+//    Expected: FAILS (output count check rejects)
+//
+// 5. Missing covenant output
+//    Expected: FAILS (covenant search fails)
+//
+// 6. Missing withdrawal output
+//    Expected: FAILS (recipient search fails)
+//
+// 7. Duplicate covenant outputs
+//    Expected: FAILS (duplicate prevention rejects)
+//
+// 8. Covenant output with wrong value
+//    Expected: FAILS (value check rejects after finding covenant)
+
+// ============================================================================
+// REAL-WORLD IMPACT EXAMPLES
+// ============================================================================
+//
+// Example 1: DAO Treasury Bypass
+// -------------------------------
+// Platform: Decentralized organization treasury
+// Vulnerability: Assumed output[0] is treasury continuation
+// Attack: Placed attacker output at index 0
+// Steps:
+//   1. DAO treasury holds 10M sats
+//   2. Legitimate spend request for 100k sats
+//   3. Attacker swaps output order
+//   4. output[0] = attacker script (9.9M sats)
+//   5. output[1] = legitimate spend (100k sats)
+//   6. output[2] = treasury continuation (0 sats)
+//   7. Contract validates output[0] value (passes)
+//   8. Contract validates output[1] value (passes)
+//   9. Attacker steals 9.9M sats
+// Impact:
+//   - 99% of treasury stolen
+//   - Appeared as legitimate governance action
+//   - Organization destroyed
+//   - $100,000+ loss (at BCH prices)
+//
+// Example 2: AMM Pool Drain
+// --------------------------
+// Platform: Automated market maker
+// Vulnerability: Assumed output[0] = poolA, output[1] = poolB
+// Attack: Swapped pool outputs with attacker outputs
+// Steps:
+//   1. AMM has poolA (500k sats) and poolB (500k sats)
+//   2. User initiates swap
+//   3. Attacker crafts transaction:
+//      - output[0] = attacker script (500k)
+//      - output[1] = attacker script (500k)
+//      - output[2] = poolA continuation (100k)
+//      - output[3] = poolB continuation (100k)
+//   4. Contract validates output[0] and output[1] values
+//   5. Invariant checks pass on wrong outputs
+//   6. Attacker steals 800k sats from pools
+// Impact:
+//   - 80% liquidity theft
+//   - AMM continues but severely damaged
+//   - Liquidity providers lose funds
+//   - $80,000+ loss
+//
+// Example 3: Vault Shadowing Attack
+// ----------------------------------
+// Platform: Time-locked savings vault
+// Vulnerability: No output count enforcement
+// Attack: Added shadow outputs at expected indices
+// Steps:
+//   1. Vault holds 1M sats (time lock expired)
+//   2. User withdraws funds
+//   3. Attacker adds shadow outputs:
+//      - output[0] = attacker script (900k) ← "vault"
+//      - output[1] = attacker script (99k) ← "withdrawal"
+//      - output[2] = real vault (0 sats)
+//   4. Contract sees output[0] and output[1]
+//   5. Values validated at expected indices
+//   6. output[2] ignored (not checked)
+//   7. Attacker steals 999k sats
+// Impact:
+//   - Near-total fund theft (99.9%)
+//   - User lost their savings
+//   - Vault destroyed
+//   - $100,000+ loss
+
+// ============================================================================
+// END OF FILE
+// ============================================================================

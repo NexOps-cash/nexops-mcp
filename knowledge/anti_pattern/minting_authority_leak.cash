@@ -1,0 +1,714 @@
+// ANTI-PATTERN: Minting Authority Leak
+// VULNERABILITY: Unrestricted minting outputs enable unauthorized token creation
+// ATTACK VECTOR: Minting to arbitrary recipients, supply inflation, governance bypass
+//
+// This file demonstrates the critical vulnerability of failing to restrict where
+// newly minted tokens can be sent. Without explicit validation of minting outputs,
+// attackers can mint unlimited tokens to themselves, inflating supply and
+// destroying token economic guarantees.
+//
+// CashScript Version: ^0.13.0
+// Network: Bitcoin Cash (BCH)
+// Security Level: VULNERABLE - DO NOT USE IN PRODUCTION
+
+// ============================================================================
+// VULNERABLE CODE: Unrestricted Minting Output
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// VULNERABLE: This contract allows minting but doesn't control WHO receives minted tokens
+// RISK: Anyone with minting authority can mint tokens to themselves, inflating supply
+contract VulnerableMintingNoRecipientControl(
+    pubkey mintAuthorityPubKey
+) {
+    // VULNERABILITY: Validates minting authority but not minting recipient
+    // MISSING: Validation of where minted tokens are sent
+    // MISSING: Validation of minting output lockingBytecode
+    // MISSING: Supply limit enforcement
+    function mint(sig authSig, int mintAmount) {
+        // Validate minting authority signature
+        require(checkSig(authSig, mintAuthorityPubKey));
+        
+        // Validate mint amount is positive
+        require(mintAmount > 0);
+        
+        // CRITICAL FLAW: No validation of outputs
+        // Contract never checks:
+        // - WHERE the minted tokens go (output[1] recipient)
+        // - HOW MANY outputs are created
+        // - WHAT ELSE happens in the transaction
+        //
+        // Attacker with mintAuthorityPubKey can:
+        // - Mint tokens to their own address
+        // - Mint unlimited amounts (no supply cap)
+        // - Create multiple minting outputs
+        // - Bypass all intended token distribution rules
+    }
+}
+
+// ============================================================================
+// ATTACK SCENARIO 1: Direct Minting to Attacker Address
+// ============================================================================
+//
+// Setup:
+// - Token contract holds minting capability NFT
+// - Intended use: Mint tokens only to DAO treasury
+// - Attacker compromises mintAuthorityPubKey (insider, leaked key, etc.)
+//
+// Legitimate Minting (intended behavior):
+// Inputs:
+//   [0] Minting contract UTXO (holds minting capability NFT)
+//
+// Outputs:
+//   [0] Minting contract continuation (preserves minting capability)
+//   [1] 1,000 tokens to DAO treasury address (intended recipient)
+//
+// ATTACK: Mint to Self Instead
+// Inputs:
+//   [0] Minting contract UTXO (holds minting capability NFT)
+//   [1] Valid signature from mintAuthorityPubKey (compromised)
+//
+// Outputs:
+//   [0] Minting contract continuation (preserves minting capability)
+//   [1] 1,000,000 tokens to ATTACKER's personal address ← UNAUTHORIZED
+//
+// Result:
+// - Contract validates signature ✓
+// - Contract validates mint amount > 0 ✓
+// - Contract NEVER validates output[1] recipient
+// - Attacker receives 1 million tokens
+// - Token supply inflated without authorization
+// - DAO treasury receives nothing
+//
+// Why it works:
+// - Contract has minting capability in output[0]
+// - BCH consensus allows minting tokens in ANY output using that capability
+// - Contract never checks: tx.outputs[1].lockingBytecode == treasuryBytecode
+// - Attacker is authorized to TRIGGER minting, but not WHERE to mint
+// - Authorization confusion: signature proves WHO, not WHAT
+
+// ============================================================================
+// ATTACK SCENARIO 2: Unlimited Supply Inflation
+// ============================================================================
+//
+// Setup:
+// - Token intended to have maximum supply of 21,000,000
+// - Minting contract should enforce supply cap
+// - No supply tracking implemented
+//
+// Attack Transaction #1:
+// Inputs:
+//   [0] Minting contract UTXO
+// Outputs:
+//   [0] Minting contract continuation
+//   [1] 10,000,000 tokens to attacker address
+// Result: 10M tokens minted ✓
+//
+// Attack Transaction #2:
+// Inputs:
+//   [0] Minting contract UTXO (from previous tx)
+// Outputs:
+//   [0] Minting contract continuation
+//   [1] 10,000,000 tokens to attacker address
+// Result: Another 10M tokens minted ✓
+//
+// Attack Transaction #3:
+// Inputs:
+//   [0] Minting contract UTXO (from previous tx)
+// Outputs:
+//   [0] Minting contract continuation
+//   [1] 10,000,000 tokens to attacker address
+// Result: Another 10M tokens minted ✓
+//
+// Total minted: 30,000,000 tokens (exceeds 21M cap)
+//
+// Why it works:
+// - Contract never tracks total minted supply
+// - Contract never validates against maximum supply
+// - Each transaction independently validates (no state accumulation)
+// - Attacker can repeat minting indefinitely
+// - Token economic model destroyed (hyperinflation)
+
+// ============================================================================
+// ATTACK SCENARIO 3: Multi-Output Minting Abuse
+// ============================================================================
+//
+// Setup:
+// - Contract intended to mint to single authorized recipient per transaction
+// - No output count validation
+//
+// Attack Transaction:
+// Inputs:
+//   [0] Minting contract UTXO (holds minting capability NFT)
+//
+// Outputs:
+//   [0] Minting contract continuation (preserves minting capability)
+//   [1] 1,000,000 tokens to attacker address #1
+//   [2] 1,000,000 tokens to attacker address #2
+//   [3] 1,000,000 tokens to attacker address #3
+//   [4] 1,000,000 tokens to attacker address #4
+//   [5] 1,000,000 tokens to attacker address #5
+//
+// Result:
+// - Single transaction mints 5,000,000 tokens
+// - All to attacker-controlled addresses
+// - Contract validates signature once
+// - No limit on number of minting outputs
+// - Massive supply inflation in single transaction
+//
+// Why it works:
+// - Contract never checks: require(tx.outputs.length == 2);
+// - Minting capability in output[0] allows minting in outputs[1..N]
+// - No validation of how many tokens are minted total
+// - Each output can receive arbitrary amounts
+
+// ============================================================================
+// ATTACK SCENARIO 4: Governance Bypass via Unauthorized Distribution
+// ============================================================================
+//
+// Setup:
+// - Token has governance model (holders vote on proposals)
+// - Minting is supposed to follow governance decisions
+// - DAO voted to mint 100,000 tokens to community treasury
+// - Attacker has mintAuthorityPubKey but must follow DAO decisions
+//
+// Legitimate Minting (following governance):
+// - DAO votes: "Mint 100,000 tokens to community treasury"
+// - Minting authority executes as approved
+//
+// Attack (governance bypass):
+// Inputs:
+//   [0] Minting contract UTXO
+//
+// Outputs:
+//   [0] Minting contract continuation
+//   [1] 100,000 tokens to community treasury (as voted) ✓
+//   [2] 900,000 tokens to attacker's address (NOT voted) ✗
+//
+// Result:
+// - Governance decision "followed" (100k to treasury)
+// - But 900k additional tokens minted to attacker
+// - Total: 1M tokens instead of 100k
+// - Governance process undermined
+// - Attacker accumulates 90% of mint for themselves
+//
+// Why it works:
+// - Contract validates authority signature
+// - Contract doesn't validate ONLY authorized outputs exist
+// - Attacker adds unauthorized outputs
+// - Governance cannot enforce on-chain restrictions
+
+// ============================================================================
+// SECURE VERSION: Explicit Minting Output Control
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// SECURE: This contract restricts minting to specific authorized recipients
+// PROTECTION: Prevents unauthorized minting, supply inflation, governance bypass
+contract SecureMintingWithRecipientControl(
+    pubkey mintAuthorityPubKey,
+    bytes authorizedRecipientBytecode,  // Only this address can receive minted tokens
+    int maxSupply,                       // Maximum total supply allowed
+    int currentSupply                    // Current minted supply (tracked in covenant)
+) {
+    // SECURE: Validates authority, recipient, amount, and supply limits
+    function mint(sig authSig, int mintAmount) {
+        // Step 1: Validate minting authority
+        require(checkSig(authSig, mintAuthorityPubKey));
+        
+        // Step 2: Validate mint amount
+        require(mintAmount > 0);
+        require(mintAmount <= 1000000);  // Maximum per-mint limit (prevent abuse)
+        
+        // Step 3: CRITICAL - Validate total supply doesn't exceed maximum
+        int newSupply = currentSupply + mintAmount;
+        require(newSupply <= maxSupply);
+        
+        // Step 4: CRITICAL - Enforce exactly 2 outputs
+        // [0] Minting contract continuation (with updated supply)
+        // [1] Minted tokens to authorized recipient ONLY
+        require(tx.outputs.length == 2);
+        
+        // Step 5: CRITICAL - Validate output[0] is covenant continuation
+        bytes thisLockingBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+        require(tx.outputs[0].lockingBytecode == thisLockingBytecode);
+        
+        // Step 6: CRITICAL - Validate output[0] preserves minting capability
+        bytes thisTokenCategory = tx.inputs[this.activeInputIndex].tokenCategory;
+        require(tx.outputs[0].tokenCategory == thisTokenCategory);
+        
+        // Step 7: CRITICAL - Validate output[0] updates supply tracking
+        // The new contract must have updated currentSupply parameter
+        // This requires contract bytecode to encode the new supply value
+        // (Implementation detail: contract template updated with newSupply)
+        
+        // Step 8: CRITICAL - Validate output[1] recipient is AUTHORIZED
+        // Only the pre-approved recipient address can receive minted tokens
+        require(tx.outputs[1].lockingBytecode == authorizedRecipientBytecode);
+        
+        // Step 9: CRITICAL - Validate output[1] receives correct token category
+        require(tx.outputs[1].tokenCategory == thisTokenCategory);
+        
+        // Step 10: CRITICAL - Validate output[1] receives exact mint amount
+        require(tx.outputs[1].tokenAmount == mintAmount);
+        
+        // Step 11: Validate output[1] has no minting capability
+        // Minted tokens should be immutable (no further minting from them)
+        require(tx.outputs[1].nftCommitment == 0x);
+        require(tx.outputs[1].tokenCapability == 0x);  // No capability = immutable
+        
+        // RESULT: Minting is now FULLY CONTROLLED
+        // - Only authorized signer can trigger minting
+        // - Only authorized recipient can receive tokens
+        // - Only specific amount can be minted per transaction
+        // - Total supply is tracked and limited
+        // - No unauthorized outputs possible
+        // - Minted tokens cannot mint further (no capability leak)
+    }
+}
+
+// ============================================================================
+// ADVANCED PATTERN: Multi-Recipient Minting with Explicit Distribution
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// ADVANCED: Controlled minting to multiple recipients with explicit validation
+// USE CASE: Airdrops, vesting schedules, multi-party distribution
+contract SecureMintingMultiRecipient(
+    pubkey mintAuthorityPubKey,
+    bytes recipient1Bytecode,
+    bytes recipient2Bytecode,
+    bytes recipient3Bytecode,
+    int maxSupply,
+    int currentSupply
+) {
+    // Pattern: Mint to multiple recipients with ALL recipients validated
+    function mintToMultiple(
+        sig authSig,
+        int amount1,
+        int amount2,
+        int amount3
+    ) {
+        // Step 1: Validate authority
+        require(checkSig(authSig, mintAuthorityPubKey));
+        
+        // Step 2: Validate all amounts are positive
+        require(amount1 > 0);
+        require(amount2 > 0);
+        require(amount3 > 0);
+        
+        // Step 3: CRITICAL - Validate total minted amount
+        int totalMinted = amount1 + amount2 + amount3;
+        int newSupply = currentSupply + totalMinted;
+        require(newSupply <= maxSupply);
+        
+        // Step 4: CRITICAL - Enforce exactly 4 outputs
+        // [0] Minting contract continuation
+        // [1] Tokens to recipient 1
+        // [2] Tokens to recipient 2
+        // [3] Tokens to recipient 3
+        require(tx.outputs.length == 4);
+        
+        // Step 5: Validate covenant continuation (output[0])
+        bytes thisLockingBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+        require(tx.outputs[0].lockingBytecode == thisLockingBytecode);
+        
+        bytes thisTokenCategory = tx.inputs[this.activeInputIndex].tokenCategory;
+        require(tx.outputs[0].tokenCategory == thisTokenCategory);
+        
+        // Step 6: CRITICAL - Validate output[1] recipient and amount
+        require(tx.outputs[1].lockingBytecode == recipient1Bytecode);
+        require(tx.outputs[1].tokenCategory == thisTokenCategory);
+        require(tx.outputs[1].tokenAmount == amount1);
+        require(tx.outputs[1].tokenCapability == 0x);  // No minting capability
+        
+        // Step 7: CRITICAL - Validate output[2] recipient and amount
+        require(tx.outputs[2].lockingBytecode == recipient2Bytecode);
+        require(tx.outputs[2].tokenCategory == thisTokenCategory);
+        require(tx.outputs[2].tokenAmount == amount2);
+        require(tx.outputs[2].tokenCapability == 0x);
+        
+        // Step 8: CRITICAL - Validate output[3] recipient and amount
+        require(tx.outputs[3].lockingBytecode == recipient3Bytecode);
+        require(tx.outputs[3].tokenCategory == thisTokenCategory);
+        require(tx.outputs[3].tokenAmount == amount3);
+        require(tx.outputs[3].tokenCapability == 0x);
+        
+        // RESULT: Multi-recipient minting is SECURE
+        // - All recipients are pre-authorized
+        // - All amounts are explicit and validated
+        // - Total supply is tracked
+        // - No unauthorized recipients possible
+        // - No capability leak to minted tokens
+    }
+}
+
+// ============================================================================
+// BEST PRACTICE: Supply-Tracking Minting Covenant
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// BEST PRACTICE: Full supply tracking with NFT commitment
+// This pattern stores supply in NFT commitment rather than contract parameters
+contract SecureMintingSupplyTracking(
+    pubkey mintAuthorityPubKey,
+    bytes authorizedRecipientBytecode,
+    int maxSupply
+) {
+    // Pattern: Track minted supply in NFT commitment for accurate on-chain state
+    function mint(sig authSig, int mintAmount) {
+        // Step 1: Validate authority
+        require(checkSig(authSig, mintAuthorityPubKey));
+        
+        // Step 2: Validate mint amount
+        require(mintAmount > 0);
+        
+        // Step 3: CRITICAL - Read current supply from NFT commitment
+        // NFT commitment contains 8-byte integer representing total minted supply
+        bytes currentSupplyCommitment = tx.inputs[this.activeInputIndex].nftCommitment;
+        require(currentSupplyCommitment.length == 8);
+        int currentSupply = int(bytes8(currentSupplyCommitment));
+        
+        // Step 4: CRITICAL - Calculate and validate new supply
+        int newSupply = currentSupply + mintAmount;
+        require(newSupply <= maxSupply);
+        require(newSupply > currentSupply);  // Overflow protection
+        
+        // Step 5: CRITICAL - Enforce exactly 2 outputs
+        require(tx.outputs.length == 2);
+        
+        // Step 6: Validate covenant continuation (output[0])
+        bytes thisLockingBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+        require(tx.outputs[0].lockingBytecode == thisLockingBytecode);
+        
+        bytes thisTokenCategory = tx.inputs[this.activeInputIndex].tokenCategory;
+        require(tx.outputs[0].tokenCategory == thisTokenCategory);
+        
+        // Step 7: CRITICAL - Validate output[0] updates supply in commitment
+        // New commitment must contain updated supply value
+        bytes newSupplyCommitment = bytes8(newSupply);
+        require(tx.outputs[0].nftCommitment == newSupplyCommitment);
+        
+        // Step 8: Validate output[0] preserves minting capability
+        bytes thisCapability = tx.inputs[this.activeInputIndex].tokenCapability;
+        require(tx.outputs[0].tokenCapability == thisCapability);
+        
+        // Step 9: CRITICAL - Validate output[1] recipient
+        require(tx.outputs[1].lockingBytecode == authorizedRecipientBytecode);
+        
+        // Step 10: CRITICAL - Validate output[1] token properties
+        require(tx.outputs[1].tokenCategory == thisTokenCategory);
+        require(tx.outputs[1].tokenAmount == mintAmount);
+        require(tx.outputs[1].tokenCapability == 0x);  // No minting capability
+        require(tx.outputs[1].nftCommitment == 0x);    // No commitment needed
+        
+        // RESULT: Supply tracking is ON-CHAIN and ENFORCEABLE
+        // - Current supply stored in NFT commitment (verifiable)
+        // - New supply validated against maximum
+        // - Supply updated atomically with minting
+        // - No way to mint beyond maximum supply
+        // - Supply history trackable on blockchain
+    }
+}
+
+// ============================================================================
+// EXPLANATION: Why Minting Output Control Is Critical
+// ============================================================================
+
+// MINTING CAPABILITY MECHANICS
+// -----------------------------
+// In Bitcoin Cash CashToken protocol:
+// - NFTs can have a "minting" capability
+// - An input with minting capability can create NEW tokens in outputs
+// - Tokens can be created in ANY output (not just covenant continuation)
+// - Minting capability persists until explicitly removed or not passed forward
+//
+// Without Output Control:
+// - Contract validates WHO can mint (signature check)
+// - Contract does NOT validate WHERE tokens are minted
+// - Attacker creates outputs minting to their own address
+// - Token distribution completely uncontrolled
+//
+// With Output Control:
+// - Contract validates WHO can mint (signature check)
+// - Contract validates WHERE tokens go (output lockingBytecode)
+// - Contract validates HOW MANY tokens minted (output tokenAmount)
+// - Contract enforces supply limits and distribution rules
+
+// THE AUTHORIZATION VS DISTRIBUTION CONFUSION
+// --------------------------------------------
+// Common mistake: Confusing authorization with distribution control
+//
+// WRONG ASSUMPTION:
+// "If only authorized signer can call mint(), tokens are controlled"
+//
+// REALITY:
+// - Signature proves WHO triggered the mint
+// - Signature does NOT prove WHERE tokens go
+// - Signer can create ANY outputs they want
+// - Contract must explicitly validate outputs
+//
+// CORRECT PATTERN:
+// 1. Validate WHO can mint (signature)
+// 2. Validate WHERE tokens go (output lockingBytecode)
+// 3. Validate HOW MANY tokens created (output tokenAmount)
+// 4. Validate supply limits (currentSupply + mintAmount <= maxSupply)
+
+// SUPPLY TRACKING CHALLENGES
+// ---------------------------
+// Problem: Covenants are stateless (each validation is independent)
+// Solution: Store state in NFT commitment or contract parameters
+//
+// Pattern A: Supply in Contract Parameters (Parameterized Covenant)
+//   - Contract deployed with currentSupply parameter
+//   - Each mint creates new contract instance with updated supply
+//   - Requires re-deploying contract code with new parameters
+//   - More complex but keeps all state in bytecode
+//
+// Pattern B: Supply in NFT Commitment (Recommended)
+//   - Contract reads currentSupply from NFT commitment
+//   - Each mint updates commitment with new supply
+//   - Simpler, more efficient, cleaner separation of code and state
+//   - State is easily readable on-chain
+//
+// Pattern C: Off-Chain Supply Tracking (Weak)
+//   - Track supply in external database
+//   - Contract validates against off-chain data
+//   - Vulnerable to database manipulation
+//   - NOT RECOMMENDED for critical supply limits
+
+// CAPABILITY LEAK PREVENTION
+// ---------------------------
+// Critical: Minted tokens must NOT receive minting capability
+//
+// WRONG:
+//   // Output[1] receives tokens with minting capability
+//   require(tx.outputs[1].tokenCapability == tx.inputs[this.activeInputIndex].tokenCapability);
+//
+// WHY WRONG:
+// - Recipient receives minting capability
+// - Recipient can mint MORE tokens themselves
+// - Minting authority proliferates uncontrollably
+// - Supply limits become unenforceable
+//
+// CORRECT:
+//   // Output[1] receives immutable tokens (no capability)
+//   require(tx.outputs[1].tokenCapability == 0x);
+//
+// Only the minting COVENANT should hold minting capability.
+// All minted tokens to users should be immutable (no capability).
+
+// ============================================================================
+// SECURITY PRINCIPLES FOR MINTING CONTRACTS
+// ============================================================================
+
+// PRINCIPLE 1: VALIDATE ALL MINTING OUTPUTS
+// ------------------------------------------
+// Every output that receives minted tokens MUST be validated:
+// - lockingBytecode (recipient address)
+// - tokenCategory (correct token type)
+// - tokenAmount (correct quantity)
+// - tokenCapability (must be 0x / immutable)
+// - nftCommitment (usually 0x for fungible tokens)
+
+// PRINCIPLE 2: ENFORCE OUTPUT COUNT
+// ----------------------------------
+// Always: require(tx.outputs.length == N);
+// Where N is the EXACT expected count
+// Prevents unauthorized additional minting outputs
+
+// PRINCIPLE 3: TRACK TOTAL SUPPLY
+// --------------------------------
+// Maintain cumulative supply counter
+// Validate: newSupply = currentSupply + mintAmount
+// Enforce: newSupply <= maxSupply
+// Update: Store newSupply in commitment or parameters
+
+// PRINCIPLE 4: PREVENT CAPABILITY LEAK
+// -------------------------------------
+// Minting capability must NEVER leak to minted tokens
+// Always: require(tx.outputs[N].tokenCapability == 0x);
+// Only covenant continuation should have capability
+
+// PRINCIPLE 5: EXPLICIT RECIPIENT AUTHORIZATION
+// ----------------------------------------------
+// Never mint to arbitrary addresses
+// Always validate: tx.outputs[N].lockingBytecode == authorizedBytecode
+// Pre-authorize recipients in contract or via governance
+
+// PRINCIPLE 6: PER-MINT LIMITS
+// -----------------------------
+// Even with total supply limits, enforce per-mint maximums
+// Prevents: Single transaction minting entire supply
+// Example: require(mintAmount <= maxPerMint);
+
+// PRINCIPLE 7: SEPARATE AUTHORITY FROM DISTRIBUTION
+// --------------------------------------------------
+// Authority to TRIGGER mint ≠ Authority to RECEIVE tokens
+// Validate both independently
+// Don't assume signer should receive tokens
+
+// ============================================================================
+// COMMON MISTAKES AND HOW TO AVOID THEM
+// ============================================================================
+
+// MISTAKE 1: Signature-Only Validation
+// -------------------------------------
+// WRONG:
+//   function mint(sig authSig, int amount) {
+//       require(checkSig(authSig, mintAuthorityPubKey));
+//       // No output validation
+//   }
+//
+// CORRECT:
+//   function mint(sig authSig, int amount) {
+//       require(checkSig(authSig, mintAuthorityPubKey));
+//       require(tx.outputs.length == 2);
+//       require(tx.outputs[1].lockingBytecode == authorizedRecipient);
+//       require(tx.outputs[1].tokenAmount == amount);
+//   }
+
+// MISTAKE 2: No Supply Tracking
+// ------------------------------
+// WRONG:
+//   function mint(sig authSig, int amount) {
+//       require(checkSig(authSig, mintAuthorityPubKey));
+//       require(amount > 0);
+//       // Can be called infinite times
+//   }
+//
+// CORRECT:
+//   function mint(sig authSig, int amount) {
+//       int currentSupply = int(bytes8(tx.inputs[this.activeInputIndex].nftCommitment));
+//       int newSupply = currentSupply + amount;
+//       require(newSupply <= maxSupply);
+//       require(tx.outputs[0].nftCommitment == bytes8(newSupply));
+//   }
+
+// MISTAKE 3: Capability Leak
+// ---------------------------
+// WRONG:
+//   // Minted tokens receive minting capability
+//   require(tx.outputs[1].tokenCapability == tx.inputs[this.activeInputIndex].tokenCapability);
+//
+// CORRECT:
+//   // Minted tokens are immutable
+//   require(tx.outputs[1].tokenCapability == 0x);
+//   // Only covenant keeps capability
+//   require(tx.outputs[0].tokenCapability == tx.inputs[this.activeInputIndex].tokenCapability);
+
+// MISTAKE 4: Unconstrained Output Count
+// --------------------------------------
+// WRONG:
+//   require(tx.outputs[1].lockingBytecode == recipient);
+//   // But outputs[2], [3], [4]... could exist with unauthorized minting
+//
+// CORRECT:
+//   require(tx.outputs.length == 2);  // EXACTLY 2 outputs
+//   require(tx.outputs[1].lockingBytecode == recipient);
+
+// MISTAKE 5: No Per-Mint Maximum
+// -------------------------------
+// WRONG:
+//   require(newSupply <= maxSupply);
+//   // But mintAmount could be = maxSupply in one transaction
+//
+// CORRECT:
+//   require(mintAmount <= maxPerMint);  // E.g., 1M per mint
+//   require(newSupply <= maxSupply);
+
+// ============================================================================
+// DEPLOYMENT CHECKLIST FOR MINTING CONTRACTS
+// ============================================================================
+//
+// Before deploying a minting contract, verify:
+//
+// [ ] Minting authority validated via signature check
+// [ ] Output count enforced: require(tx.outputs.length == N)
+// [ ] Every minting output recipient validated (lockingBytecode)
+// [ ] Every minting output amount validated (tokenAmount)
+// [ ] Every minting output has NO capability (tokenCapability == 0x)
+// [ ] Covenant continuation preserves minting capability
+// [ ] Total supply tracked (in commitment or parameters)
+// [ ] Total supply limit enforced (newSupply <= maxSupply)
+// [ ] Per-mint limit enforced (mintAmount <= maxPerMint)
+// [ ] Supply overflow protection (newSupply > currentSupply check)
+// [ ] Token category preserved across all outputs
+// [ ] No unauthorized outputs possible
+// [ ] Supply tracking mechanism tested (commitment update)
+// [ ] Governance integration if applicable
+// [ ] Emergency pause mechanism considered
+
+// ============================================================================
+// TESTING RECOMMENDATIONS
+// ============================================================================
+//
+// Test Cases for VULNERABLE version (demonstrates vulnerability):
+// 1. Mint to authorized recipient
+//    Expected: SUCCEEDS (normal operation)
+//
+// 2. Mint to ATTACKER address (unauthorized)
+//    Expected: SUCCEEDS (VULNERABILITY - should fail but doesn't)
+//
+// 3. Mint multiple times beyond intended supply
+//    Expected: SUCCEEDS (VULNERABILITY - no supply tracking)
+//
+// 4. Mint to multiple unauthorized recipients in one transaction
+//    Expected: SUCCEEDS (VULNERABILITY - no output count limit)
+//
+// Test Cases for SECURE version (should PASS):
+// 1. Mint to authorized recipient with valid amount
+//    Expected: SUCCEEDS (valid minting)
+//
+// 2. Mint to unauthorized recipient
+//    Expected: FAILS (output[1].lockingBytecode validation rejects)
+//
+// 3. Mint beyond maximum supply
+//    Expected: FAILS (newSupply > maxSupply check rejects)
+//
+// 4. Mint with extra outputs
+//    Expected: FAILS (tx.outputs.length != 2 check rejects)
+//
+// 5. Mint with capability leak to recipient
+//    Expected: FAILS (tokenCapability validation rejects)
+//
+// 6. Mint without updating supply commitment
+//    Expected: FAILS (commitment validation rejects)
+//
+// 7. Multiple mints reaching exactly maxSupply
+//    Expected: Last valid mint SUCCEEDS, next mint FAILS
+
+// ============================================================================
+// REAL-WORLD IMPACT
+// ============================================================================
+//
+// Historical Lessons (adapted from other blockchain incidents):
+//
+// Scenario: DAO Token without recipient control
+// - Intended: 100M token supply for governance
+// - Attack: Insider with mint key mints 900M tokens to self
+// - Result: Attacker has 90% voting power, controls DAO
+// - Impact: Governance compromised, project destroyed
+//
+// Scenario: Stablecoin without supply tracking
+// - Intended: 1:1 backed stablecoin with collateral
+// - Attack: Repeated minting without limit enforcement
+// - Result: 10x more tokens than collateral exists
+// - Impact: De-pegging, bank run, total collapse
+//
+// Scenario: NFT project with capability leak
+// - Intended: Limited edition NFT collection (1000 max)
+// - Attack: Minted NFTs retain minting capability
+// - Result: NFT holders mint more NFTs, flooding market
+// - Impact: Scarcity destroyed, value collapse
+//
+// LESSON: Minting control is not just authorization.
+// It requires explicit validation of recipients, amounts, and capabilities.
+
+// ============================================================================
+// END OF FILE
+// ============================================================================

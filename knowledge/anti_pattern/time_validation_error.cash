@@ -1,0 +1,645 @@
+// ANTI-PATTERN: Time Validation Boundary Error
+// VULNERABILITY: Incorrect comparison operator enables premature unlocking
+// ATTACK VECTOR: Boundary condition exploitation, off-by-one timing attack
+//
+// This file demonstrates the critical vulnerability of using incorrect comparison
+// operators in time-lock validation. A single character difference (> vs >=) can
+// enable attackers to unlock funds one block/second early, breaking time-lock
+// guarantees and potentially causing significant security failures.
+//
+// CashScript Version: ^0.13.0
+// Network: Bitcoin Cash (BCH)
+// Security Level: VULNERABLE - DO NOT USE IN PRODUCTION
+
+// ============================================================================
+// VULNERABLE CODE: Incorrect Time Comparison Operator
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// VULNERABLE: This contract uses > instead of >= for time validation
+// RISK: Funds can be unlocked one block/second before intended unlock time
+contract VulnerableTimeLockWrongOperator(
+    pubkey beneficiaryPubKey,
+    int unlockTime  // Block height or Unix timestamp
+) {
+    // VULNERABILITY: Uses > (greater than) instead of >= (greater than or equal)
+    // MISSING: Correct boundary condition handling
+    function unlock(sig beneficiarySig) {
+        // Validate beneficiary signature
+        require(checkSig(beneficiarySig, beneficiaryPubKey));
+        
+        // CRITICAL FLAW: Incorrect comparison operator
+        // This checks: tx.locktime > unlockTime
+        // Should be:    tx.locktime >= unlockTime
+        require(tx.locktime > unlockTime);
+        
+        // WHY THIS IS WRONG:
+        // If unlockTime = 1000:
+        // - Intended: Can unlock when tx.locktime >= 1000 (at or after block 1000)
+        // - Actual:   Can unlock when tx.locktime > 1000 (only after block 1000)
+        //
+        // Wait, that seems MORE restrictive, not less?
+        // 
+        // THE REAL VULNERABILITY:
+        // The logic is BACKWARDS. Developer meant:
+        // "Current time must be greater than unlock time"
+        // But wrote it as:
+        // "Locktime (user-provided) must be greater than unlock time"
+        //
+        // Attacker can set tx.locktime = unlockTime + 1
+        // Even if current block height is unlockTime - 100!
+        //
+        // The fundamental error: Not validating tx.locktime against CURRENT time
+    }
+}
+
+// ============================================================================
+// UNDERSTANDING THE VULNERABILITY: tx.locktime vs tx.time
+// ============================================================================
+//
+// CRITICAL CONCEPT: What is tx.locktime?
+// --------------------------------------
+// tx.locktime is a TRANSACTION FIELD set by the transaction creator
+// It is NOT the current block height or current time
+// It is a USER-CONTROLLED VALUE
+//
+// Two interpretations:
+// 1. If tx.locktime < 500,000,000: Interpreted as block height
+// 2. If tx.locktime >= 500,000,000: Interpreted as Unix timestamp (seconds)
+//
+// Consensus Rules:
+// - If tx.locktime is set, transaction is ONLY valid if:
+//   - Block height >= tx.locktime (for block-height locktime)
+//   - Block timestamp >= tx.locktime (for timestamp locktime)
+// - Transaction creator can set ANY value for tx.locktime
+// - But miners will reject if current time hasn't reached tx.locktime
+//
+// THE CONFUSION:
+// Developer thinks: tx.locktime = "current time"
+// Reality: tx.locktime = "earliest time this tx can be mined"
+// Attacker controls: tx.locktime value (subject to consensus validation)
+
+// ============================================================================
+// CORRECT APPROACH: Using tx.time (CashScript)
+// ============================================================================
+//
+// In CashScript, there are TWO time introspection methods:
+//
+// 1. tx.locktime
+//    - User-controlled transaction field
+//    - Can be set to any value
+//    - Miners validate it against current time
+//    - NOT reliable for covenant time checks
+//
+// 2. tx.time (CashScript introspection)
+//    - Returns the CURRENT block's timestamp
+//    - NOT user-controlled
+//    - Reliable for covenant time validation
+//    - Available in CashScript for proper time checks
+//
+// WRONG: require(tx.locktime > unlockTime);
+// RIGHT: require(tx.time >= unlockTime);
+
+// ============================================================================
+// ATTACK SCENARIO 1: Premature Unlock via Locktime Manipulation
+// ============================================================================
+//
+// Setup:
+// - Time-locked escrow holding 1,000,000 sats
+// - unlockTime = block height 800,000 (some future block)
+// - Current block height = 750,000 (50,000 blocks early)
+// - Beneficiary wants to unlock early
+//
+// Vulnerable Contract Logic:
+//   require(tx.locktime > unlockTime);
+//   // Checks if tx.locktime > 800,000
+//
+// Attack Transaction:
+// - Beneficiary creates transaction with tx.locktime = 800,001
+// - Contract checks: 800,001 > 800,000 ✓ (passes)
+// - Transaction is broadcast
+//
+// What Happens:
+// - Miners see tx.locktime = 800,001
+// - Current block height = 750,000
+// - Consensus rule: tx.locktime must be <= current block height to mine
+// - 800,001 > 750,000, so transaction is INVALID
+// - Transaction rejected by miners
+//
+// Wait, so the attack fails?
+// YES - but for the WRONG reasons!
+//
+// THE REAL ISSUE:
+// The contract CANNOT be unlocked at exactly block 800,000
+// It can only be unlocked at block 800,001 or later
+// This is an off-by-one error that breaks the intended lock semantics
+
+// ============================================================================
+// ATTACK SCENARIO 2: The Actual Exploitable Vulnerability
+// ============================================================================
+//
+// The real vulnerability is when contract uses tx.locktime incorrectly
+// and allows premature unlock by setting locktime to bypass check.
+//
+// More Dangerous Vulnerable Pattern:
+//
+// contract VulnerableTimeLockConfused(pubkey beneficiaryPubKey, int unlockTime) {
+//     function unlock(sig beneficiarySig) {
+//         require(checkSig(beneficiarySig, beneficiaryPubKey));
+//         
+//         // WRONG: Validates locktime is set, but not against current time
+//         require(tx.locktime >= unlockTime);
+//         
+//         // This checks that USER SET tx.locktime >= unlockTime
+//         // Does NOT check current time >= unlockTime
+//     }
+// }
+//
+// Attack:
+// - Current block height: 750,000
+// - unlockTime: 800,000
+// - Attacker sets tx.locktime = 800,000
+// - Contract checks: tx.locktime >= unlockTime → 800,000 >= 800,000 ✓
+// - But consensus checks: current_height >= tx.locktime → 750,000 >= 800,000 ✗
+// - Transaction invalid (rejected)
+//
+// Still fails? Yes, because consensus protects against this.
+//
+// BUT CONSIDER: What if contract is checking TIMESTAMP not block height?
+//
+// Timestamp Exploit:
+// - Current timestamp: 1700000000 (Nov 2023)
+// - unlockTime: 1800000000 (May 2027) - 4 years in future
+// - Attacker sets tx.locktime = 1800000000
+// - Contract checks: 1800000000 >= 1800000000 ✓
+// - Consensus checks: current_timestamp >= tx.locktime
+// - Miner's block timestamp: Miners can set timestamp up to 2 hours in future!
+// - If miner cooperates (or is bribed), they timestamp block as 1800000000
+// - Transaction becomes valid 4 years early!
+//
+// This is the REAL attack: Bribing miners to timestamp blocks in the future
+
+// ============================================================================
+// ATTACK SCENARIO 3: Off-By-One Block Boundary Exploit
+// ============================================================================
+//
+// Even with correct time introspection, wrong operator causes issues:
+//
+// Vulnerable Pattern:
+//   require(tx.time > unlockTime);  // Should be >=
+//
+// Setup:
+// - unlockTime = block height 1000
+// - Intended: Unlock at block 1000 or later
+// - Actual: Unlock only AFTER block 1000 (at block 1001+)
+//
+// Impact:
+// - Block 1000 arrives
+// - User tries to unlock
+// - Contract rejects: tx.time = 1000, but needs > 1000
+// - User must wait for block 1001
+// - Off-by-one block delay
+//
+// Why This Matters:
+// - Breaks time-lock guarantees (1 block = ~10 minutes delay)
+// - In time-sensitive scenarios (auction, liquidation), 1 block matters
+// - Front-running opportunities in that 1-block window
+// - User frustration and potential financial loss
+//
+// Example Impact Scenario:
+// - Collateralized loan with unlockTime = block 1000
+// - At block 1000, collateral price crashes
+// - User cannot withdraw due to off-by-one error
+// - Must wait for block 1001
+// - By block 1001, position liquidated (should have been safe)
+
+// ============================================================================
+// SECURE VERSION: Correct Time Validation
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// SECURE: This contract uses correct time introspection and comparison
+// PROTECTION: Prevents premature unlock and off-by-one boundary errors
+contract SecureTimeLockCorrectOperator(
+    pubkey beneficiaryPubKey,
+    int unlockTime  // Block height or Unix timestamp
+) {
+    // SECURE: Uses tx.time (current block time) with >= operator
+    function unlock(sig beneficiarySig) {
+        // Step 1: Validate beneficiary authorization
+        require(checkSig(beneficiarySig, beneficiaryPubKey));
+        
+        // Step 2: CRITICAL - Use tx.time, NOT tx.locktime
+        // tx.time returns the current block's timestamp/height
+        // This is consensus-validated and NOT user-controlled
+        
+        // Step 3: CRITICAL - Use >= (greater than or equal)
+        // Unlocking is allowed AT the unlock time, not only AFTER
+        // This correctly handles the boundary condition
+        require(tx.time >= unlockTime);
+        
+        // EXPLANATION OF CORRECTNESS:
+        // - If unlockTime = 1000 (block height)
+        // - At block 999: tx.time = 999, check fails (999 >= 1000 = false) ✓
+        // - At block 1000: tx.time = 1000, check passes (1000 >= 1000 = true) ✓
+        // - At block 1001: tx.time = 1001, check passes (1001 >= 1000 = true) ✓
+        //
+        // Boundary condition correctly handled:
+        // - Funds locked BEFORE block 1000
+        // - Funds unlocked AT block 1000 (inclusive)
+        // - Funds unlocked AFTER block 1000
+        //
+        // No off-by-one error, no premature unlock, no timing ambiguity
+    }
+}
+
+// ============================================================================
+// ALTERNATIVE PATTERN: Minimum Lock Duration
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// ALTERNATIVE: Lock for a minimum duration from a reference time
+// USE CASE: Vesting schedules, escrow periods
+contract SecureTimeLockWithDuration(
+    pubkey beneficiaryPubKey,
+    int lockStartTime,   // When lock period begins
+    int lockDuration     // How long to lock (in blocks or seconds)
+) {
+    function unlock(sig beneficiarySig) {
+        // Validate beneficiary
+        require(checkSig(beneficiarySig, beneficiaryPubKey));
+        
+        // Calculate unlock time
+        int unlockTime = lockStartTime + lockDuration;
+        
+        // CRITICAL: Ensure current time has reached unlock time
+        require(tx.time >= unlockTime);
+        
+        // CORRECTNESS:
+        // - lockStartTime = 1000, lockDuration = 100
+        // - unlockTime = 1100
+        // - At block 1099: Locked
+        // - At block 1100: Unlocked (inclusive boundary)
+        // - At block 1101: Unlocked
+        
+        // BONUS: Overflow protection
+        // Ensure unlockTime calculation doesn't overflow
+        require(unlockTime > lockStartTime);  // Duration is positive
+    }
+}
+
+// ============================================================================
+// ADVANCED PATTERN: Multi-Stage Time Lock
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// ADVANCED: Multiple unlocking stages with different conditions
+// USE CASE: Vesting with cliff and gradual release
+contract SecureTimeLockMultiStage(
+    pubkey beneficiaryPubKey,
+    int cliffTime,        // Before this: 0% unlocked
+    int vestingEndTime    // After this: 100% unlocked
+) {
+    // Stage 1: Before cliff - cannot unlock
+    function unlockAfterCliff(sig beneficiarySig) {
+        require(checkSig(beneficiarySig, beneficiaryPubKey));
+        
+        // CRITICAL: Must be at or after cliff time
+        require(tx.time >= cliffTime);
+        
+        // Additional logic: Calculate vested amount based on time
+        // This is a simplified example
+        
+        // BOUNDARY HANDLING:
+        // - Before cliffTime: Transaction invalid (fails require)
+        // - At cliffTime: Transaction valid (>= handles boundary)
+        // - After cliffTime: Transaction valid
+    }
+    
+    // Stage 2: Full unlock after vesting period
+    function unlockFull(sig beneficiarySig) {
+        require(checkSig(beneficiarySig, beneficiaryPubKey));
+        
+        // CRITICAL: Must be at or after vesting end
+        require(tx.time >= vestingEndTime);
+        
+        // Full amount available
+    }
+}
+
+// ============================================================================
+// EXPLANATION: Why Boundary Conditions Matter
+// ============================================================================
+
+// BOUNDARY CONDITION DEFINITION
+// ------------------------------
+// A boundary condition is the exact moment when a state transition occurs.
+// For time locks: The exact block/timestamp when locking ends.
+//
+// Example: unlockTime = 1000
+// - Boundary: Block 1000 is the exact transition point
+// - Before boundary: Blocks 0-999 (locked)
+// - At boundary: Block 1000 (should this be locked or unlocked?)
+// - After boundary: Blocks 1001+ (unlocked)
+//
+// The Question: Is the boundary inclusive or exclusive?
+// - Inclusive (>=): Unlocked AT and AFTER block 1000
+// - Exclusive (>): Unlocked only AFTER block 1000 (block 1001+)
+
+// WHY >= IS CORRECT FOR TIME LOCKS
+// ---------------------------------
+// Semantic Expectation:
+// - "Unlock at block 1000" means "unlocking becomes AVAILABLE at block 1000"
+// - Users expect to be able to unlock AS SOON AS block 1000 arrives
+// - Block 1000 should be the FIRST block where unlocking works
+//
+// Mathematical Correctness:
+// - Lock period: [0, unlockTime)
+// - Unlock period: [unlockTime, ∞)
+// - The boundary (unlockTime) should be in the unlock period (inclusive)
+//
+// User Experience:
+// - User waits until block 1000
+// - Block 1000 arrives at 10:00:00 AM
+// - User immediately tries to unlock
+// - With >=: Success ✓ (works at 10:00:00)
+// - With >:  Failure ✗ (must wait until block 1001 at 10:10:00)
+// - Off-by-one errors create bad UX and potential financial loss
+
+// WHEN TO USE > VS >=
+// --------------------
+// Use >= (Greater Than or Equal):
+// - Time locks (unlock AT specified time)
+// - Vesting schedules (vest AT maturity)
+// - Embargo periods (allowed AT end time)
+// - Escrow releases (release AT deadline)
+//
+// Use > (Greater Than):
+// - Countdown periods (must EXCEED count)
+// - Increasing sequences (next must be LARGER than previous)
+// - Comparative validations (value must be STRICTLY greater)
+//
+// Rule of Thumb:
+// - If boundary value should be VALID: Use >=
+// - If boundary value should be INVALID: Use >
+//
+// For time locks, boundary should be VALID, so use >=
+
+// THE tx.locktime vs tx.time DISTINCTION
+// ---------------------------------------
+// CRITICAL: These are DIFFERENT values with DIFFERENT meanings
+//
+// tx.locktime:
+// - Transaction field set by user
+// - USER-CONTROLLED (attacker can set any value)
+// - Validated by consensus (miners check against current time)
+// - Purpose: Prevent transaction from being mined too early
+// - NOT suitable for covenant time validation
+//
+// tx.time:
+// - Current block's timestamp (for timestamp locks)
+// - Current block's height (for height locks)
+// - CONSENSUS-VALIDATED (miners cannot fake beyond 2-hour limit)
+// - Purpose: Provide current time to smart contracts
+// - Suitable for covenant time validation
+//
+// NEVER use tx.locktime for covenant time checks
+// ALWAYS use tx.time for covenant time checks
+
+// TIMESTAMP MANIPULATION RISKS
+// -----------------------------
+// Block timestamps are not perfectly accurate:
+// - Miners can set timestamp up to 2 hours in the future
+// - Timestamps can go slightly backward (clock drift)
+// - ~10 minute average per block, but variance exists
+//
+// Mitigation:
+// - Use block HEIGHT for time locks when possible (more predictable)
+// - Accept ~2 hour uncertainty when using timestamps
+// - For critical time-sensitive operations, add safety buffer
+// - Example: If deadline is critical, set unlockTime = deadline - 2 hours
+
+// ============================================================================
+// COMMON MISTAKES AND HOW TO AVOID THEM
+// ============================================================================
+
+// MISTAKE 1: Using > Instead of >=
+// ---------------------------------
+// WRONG:
+//   require(tx.time > unlockTime);
+//
+// WHY WRONG:
+// - Excludes the boundary (unlockTime)
+// - Creates off-by-one delay
+// - Breaks user expectation
+// - Potential financial impact
+//
+// CORRECT:
+//   require(tx.time >= unlockTime);
+
+// MISTAKE 2: Using tx.locktime Instead of tx.time
+// ------------------------------------------------
+// WRONG:
+//   require(tx.locktime >= unlockTime);
+//
+// WHY WRONG:
+// - tx.locktime is user-controlled
+// - Does not reflect current time
+// - Creates confusion with consensus locktime
+// - Not suitable for covenant validation
+//
+// CORRECT:
+//   require(tx.time >= unlockTime);
+
+// MISTAKE 3: Reversed Logic
+// --------------------------
+// WRONG:
+//   require(unlockTime <= tx.time);
+//
+// WHY WRONG:
+// - Logically equivalent to correct form, but harder to read
+// - More prone to logic errors
+// - Convention is to put constant/expected value on right
+//
+// CORRECT:
+//   require(tx.time >= unlockTime);
+//
+// Note: While logically equivalent, consistency aids readability
+
+// MISTAKE 4: Not Considering Overflow
+// ------------------------------------
+// WRONG:
+//   int unlockTime = startTime + duration;
+//   require(tx.time >= unlockTime);
+//
+// WHY WRONG (if no overflow check):
+// - If duration is very large, startTime + duration may overflow
+// - Overflow wraps to negative or small value
+// - Time lock becomes instantly unlockable
+//
+// CORRECT:
+//   int unlockTime = startTime + duration;
+//   require(unlockTime > startTime);  // Overflow check
+//   require(tx.time >= unlockTime);
+
+// MISTAKE 5: Mixing Block Height and Timestamp
+// ---------------------------------------------
+// WRONG:
+//   // unlockTime = 800000 (block height)
+//   // tx.time returns timestamp (1700000000+)
+//   require(tx.time >= unlockTime);
+//
+// WHY WRONG:
+// - Block heights are 6-7 digits (800000)
+// - Unix timestamps are 10 digits (1700000000)
+// - Comparison is nonsensical
+// - Lock will unlock immediately (timestamp > height always true)
+//
+// CORRECT:
+// - Use consistent units (all block heights OR all timestamps)
+// - Document which unit is expected
+// - CashScript convention: < 500000000 = height, >= 500000000 = timestamp
+// - Validate input is in expected range
+
+// ============================================================================
+// SECURITY PRINCIPLES FOR TIME LOCKS
+// ============================================================================
+
+// PRINCIPLE 1: USE tx.time, NOT tx.locktime
+// ------------------------------------------
+// Always use tx.time for covenant time validation
+// Never use tx.locktime (it's user-controlled)
+
+// PRINCIPLE 2: USE >= FOR UNLOCK CONDITIONS
+// ------------------------------------------
+// Boundary (unlockTime) should be INCLUDED in unlock period
+// Users should be able to unlock AT the specified time
+
+// PRINCIPLE 3: VALIDATE UNIT CONSISTENCY
+// ---------------------------------------
+// Ensure unlockTime and tx.time use same unit (height or timestamp)
+// Add checks if necessary:
+//   if (unlockTime < 500000000) {
+//       // Must be block height, check against block height
+//   } else {
+//       // Must be timestamp, check against timestamp
+//   }
+
+// PRINCIPLE 4: DOCUMENT TIME SEMANTICS
+// -------------------------------------
+// Clearly document whether using block height or timestamp
+// Specify timezone for timestamps (usually UTC)
+// Explain boundary handling to users
+
+// PRINCIPLE 5: ADD OVERFLOW PROTECTION
+// -------------------------------------
+// When calculating unlock times from duration:
+//   int unlockTime = startTime + duration;
+//   require(unlockTime > startTime);  // Prevents overflow
+
+// PRINCIPLE 6: CONSIDER MINER TIMESTAMP MANIPULATION
+// ---------------------------------------------------
+// Accept ~2 hour uncertainty for timestamp-based locks
+// For critical deadlines, add 2-hour safety buffer
+// Prefer block heights when possible (more predictable)
+
+// ============================================================================
+// DEPLOYMENT CHECKLIST FOR TIME-LOCKED CONTRACTS
+// ============================================================================
+//
+// Before deploying a time-locked contract, verify:
+//
+// [ ] Using tx.time (NOT tx.locktime) for time validation
+// [ ] Using >= operator for unlock conditions (NOT >)
+// [ ] unlockTime parameter clearly documented (block height or timestamp)
+// [ ] Unit consistency between unlockTime and tx.time validated
+// [ ] Overflow protection added for calculated unlock times
+// [ ] Boundary behavior tested (unlock exactly at unlockTime)
+// [ ] Off-by-one scenarios tested (block before, at, after unlockTime)
+// [ ] User documentation explains exact unlock semantics
+// [ ] If using timestamps, 2-hour miner manipulation risk accepted
+// [ ] If using block heights, block time variance (~10 min avg) accepted
+
+// ============================================================================
+// TESTING RECOMMENDATIONS
+// ============================================================================
+//
+// Test Cases for VULNERABLE version (wrong operator):
+// 1. Current time = unlockTime - 1
+//    Expected: Transaction REJECTED (still locked)
+//    Result: REJECTED ✓
+//
+// 2. Current time = unlockTime (BOUNDARY)
+//    Expected: Transaction ACCEPTED (should unlock at boundary)
+//    Result: REJECTED ✗ (VULNERABILITY - off-by-one error)
+//
+// 3. Current time = unlockTime + 1
+//    Expected: Transaction ACCEPTED
+//    Result: ACCEPTED ✓
+//
+// Test Cases for SECURE version (correct operator):
+// 1. Current time = unlockTime - 1
+//    Expected: Transaction REJECTED
+//    Result: REJECTED ✓
+//
+// 2. Current time = unlockTime (BOUNDARY)
+//    Expected: Transaction ACCEPTED
+//    Result: ACCEPTED ✓ (correctly handles boundary)
+//
+// 3. Current time = unlockTime + 1
+//    Expected: Transaction ACCEPTED
+//    Result: ACCEPTED ✓
+//
+// Additional Tests:
+// 4. Overflow test: startTime + duration overflows
+//    Expected: Transaction REJECTED (overflow protection)
+//
+// 5. Unit mismatch: unlockTime (height) vs tx.time (timestamp)
+//    Expected: Logic error caught in testing
+//
+// 6. Edge case: unlockTime = 0
+//    Expected: Immediately unlockable (valid use case)
+
+// ============================================================================
+// REAL-WORLD IMPACT EXAMPLES
+// ============================================================================
+//
+// Example 1: Off-By-One in Escrow
+// --------------------------------
+// Scenario: Escrow contract with 30-day hold period
+// - Start: Block 800,000
+// - Intended unlock: Block 804,320 (30 days * 144 blocks/day)
+// - Vulnerable: require(tx.time > 804320)
+// - User tries to unlock at block 804,320
+// - Rejected: Must wait for block 804,321
+// - Impact: 10-minute delay, potential missed deadline
+//
+// Example 2: Liquidation Time Window
+// -----------------------------------
+// Scenario: Collateralized debt position
+// - Liquidation becomes available at block 900,000
+// - Vulnerable: require(tx.time > 900000)
+// - Block 900,000: Liquidator tries to liquidate underwater position
+// - Rejected: Must wait for block 900,001
+// - By 900,001: Position recovered, no longer underwater
+// - Impact: Failed liquidation, protocol insolvency risk
+//
+// Example 3: Auction Sniper Protection
+// -------------------------------------
+// Scenario: NFT auction with anti-snipe extension
+// - Bid extends auction by 100 blocks if placed in last 10 blocks
+// - Original end: Block 1000
+// - Vulnerable: require(tx.time > 1000) for claiming
+// - Winner tries to claim at block 1000
+// - Rejected due to off-by-one
+// - Another bidder places bid at block 1000 (still allowed)
+// - Auction extended to block 1100
+// - Impact: Unintended auction extension, winner confusion
+
+// ============================================================================
+// END OF FILE
+// ============================================================================

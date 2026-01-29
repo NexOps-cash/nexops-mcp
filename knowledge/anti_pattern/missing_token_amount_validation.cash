@@ -1,0 +1,775 @@
+// ANTI-PATTERN: Missing Token Amount Validation
+// VULNERABILITY: Unvalidated tokenAmount enables token duplication and value extraction
+// ATTACK VECTOR: Token inflation, amount manipulation, accounting bypass, supply violation
+//
+// This file demonstrates the critical vulnerability of failing to validate
+// tokenAmount on transaction outputs. While developers often validate tokenCategory
+// (which token), they frequently forget to validate tokenAmount (how many tokens).
+// This oversight enables attackers to duplicate tokens, inflate amounts, and
+// violate supply constraints without any minting authority.
+//
+// CashScript Version: ^0.13.0
+// Network: Bitcoin Cash (BCH)
+// Security Level: VULNERABLE - DO NOT USE IN PRODUCTION
+
+// ============================================================================
+// VULNERABLE CODE: Missing Token Amount Validation
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// VULNERABLE: This contract validates token category but NOT token amount
+// RISK: Attackers can change tokenAmount values to duplicate or extract tokens
+contract VulnerableTokenTransferNoAmountValidation(
+    pubkey ownerPubKey,
+    bytes tokenCategory,
+    bytes recipientBytecode
+) {
+    // VULNERABILITY: Validates category and recipient but not amount
+    // MISSING: Explicit tokenAmount validation
+    // MISSING: Token conservation check (input amount == output amount)
+    function transfer(sig ownerSig) {
+        // Validate authorization
+        require(checkSig(ownerSig, ownerPubKey));
+        
+        // Validate output recipient
+        require(tx.outputs[0].lockingBytecode == recipientBytecode);
+        
+        // Validate output has correct token category
+        require(tx.outputs[0].tokenCategory == tokenCategory);
+        
+        // CRITICAL FLAW: Never validates tx.outputs[0].tokenAmount
+        // Contract assumes:
+        // - "If category is correct, amount must be correct"
+        // - "Consensus will enforce amount conservation"
+        // - "Tokens can't be duplicated without minting capability"
+        //
+        // Reality:
+        // - Category check only validates WHICH token
+        // - Amount can be ANY value attacker chooses
+        // - Consensus does NOT enforce amount conservation across inputs/outputs
+        // - Tokens CAN be duplicated by manipulating output amounts
+        //
+        // Attacker can:
+        // - Inflate output tokenAmount beyond input amount
+        // - Split tokens across multiple outputs (if no output count check)
+        // - Create tokens from nothing (if no input tracking)
+        // - Violate supply constraints
+    }
+}
+
+// ============================================================================
+// UNDERSTANDING THE VULNERABILITY: Consensus vs Covenant Validation
+// ============================================================================
+//
+// CRITICAL CONCEPT: What BCH Consensus DOES and DOES NOT Validate
+// ----------------------------------------------------------------
+// 
+// BCH Consensus Rules for CashTokens:
+// ✓ DOES validate: Sum of input tokenAmounts >= Sum of output tokenAmounts (per category)
+// ✓ DOES validate: Cannot create tokens without minting capability
+// ✓ DOES validate: tokenCategory matches genesis transaction
+// ✓ DOES validate: Minting capability is properly transferred
+//
+// ✗ DOES NOT validate: Output tokenAmount matches contract expectations
+// ✗ DOES NOT validate: Specific distribution of tokens across outputs
+// ✗ DOES NOT validate: Individual output amounts (only total conservation)
+//
+// THE VULNERABILITY:
+// If contract has: Input with 1000 tokens
+// Consensus allows:
+//   - Output[0]: 1000 tokens ✓ (total = 1000)
+//   - Output[0]: 500 tokens + Output[1]: 500 tokens ✓ (total = 1000)
+//   - Output[0]: 0 tokens + Output[1]: 1000 tokens ✓ (total = 1000)
+//   - Output[0]: 10,000 tokens ✗ (total = 10,000 > input, INVALID)
+//
+// But if contract only checks tokenCategory on output[0]:
+//   - Attacker can set output[0].tokenAmount = 0
+//   - Attacker routes all 1000 tokens to output[1] (unvalidated)
+//   - Contract sees: output[0].tokenCategory == expected ✓
+//   - Contract never checks: output[0].tokenAmount
+//   - Result: Recipient gets 0 tokens instead of 1000!
+
+// ============================================================================
+// ATTACK SCENARIO 1: Token Amount Inflation via Multi-Output Distribution
+// ============================================================================
+//
+// Setup:
+// - Contract holds 1,000 fungible tokens
+// - Intended: Transfer 1,000 tokens to authorized recipient
+// - Contract validates tokenCategory but not tokenAmount
+//
+// Legitimate Transaction (intended):
+// Inputs:
+//   [0] Contract UTXO (5,000 sats + 1,000 tokens of category 0xAABB...)
+//
+// Outputs:
+//   [0] 5,000 sats + 1,000 tokens to recipient (0xAABB...)
+//
+// ATTACK: Inflate Recipient Amount, Steal Remainder
+// Inputs:
+//   [0] Contract UTXO (5,000 sats + 1,000 tokens of category 0xAABB...)
+//   [1] Attacker's UTXO (1,000 sats, no tokens)
+//
+// Outputs:
+//   [0] 5,000 sats + 100 tokens to recipient (0xAABB...) ← REDUCED
+//       - lockingBytecode: recipientBytecode ✓ (passes check)
+//       - tokenCategory: 0xAABB... ✓ (passes check)
+//       - tokenAmount: 100 ✗ (NOT CHECKED - reduced from 1,000!)
+//   
+//   [1] 1,000 sats + 900 tokens to attacker's address (0xAABB...)
+//       - Attacker steals remaining 900 tokens
+//       - Contract never validates this output
+//
+// Result:
+// - Consensus validates: 1,000 input tokens = 100 + 900 output tokens ✓
+// - Contract validates: output[0] has correct category ✓
+// - Contract NEVER validates: output[0] has correct amount
+// - Recipient receives only 100 tokens instead of 1,000
+// - Attacker steals 900 tokens (90% theft)
+//
+// Why it works:
+// - Contract only checks: tx.outputs[0].tokenCategory == tokenCategory
+// - Never checks: tx.outputs[0].tokenAmount == expectedAmount
+// - Never checks: tx.outputs.length (allows extra outputs)
+// - Attacker freely distributes tokens across outputs
+
+// ============================================================================
+// ATTACK SCENARIO 2: Complete Token Theft via Zero-Amount Output
+// ============================================================================
+//
+// Setup:
+// - DeFi vault holds 100,000 fungible tokens
+// - Withdrawal function checks category but not amount
+// - User entitled to withdraw their tokens
+//
+// Vulnerable Vault Contract:
+//
+// contract VulnerableVault(pubkey userPubKey, bytes tokenCategory) {
+//     function withdraw(sig userSig, bytes userAddress) {
+//         require(checkSig(userSig, userPubKey));
+//         require(tx.outputs[0].lockingBytecode == userAddress);
+//         require(tx.outputs[0].tokenCategory == tokenCategory);
+//         // MISSING: tokenAmount validation
+//         // MISSING: output count validation
+//     }
+// }
+//
+// Attack Transaction:
+// Inputs:
+//   [0] Vault UTXO (10,000 sats + 100,000 tokens)
+//
+// Outputs:
+//   [0] 546 sats + 0 tokens to user address (category 0xAABB...)
+//       - lockingBytecode: userAddress ✓
+//       - tokenCategory: 0xAABB... ✓
+//       - tokenAmount: 0 ✗ (ZERO - but not checked!)
+//   
+//   [1] 9,454 sats + 100,000 tokens to attacker's address
+//       - All tokens stolen
+//
+// Result:
+// - User receives 0 tokens (just dust BCH)
+// - Attacker receives all 100,000 tokens
+// - Vault drained completely
+// - User has no recourse
+//
+// Consensus Validation:
+// - Input: 100,000 tokens
+// - Outputs: 0 + 100,000 = 100,000 tokens ✓ (conservation holds)
+// - Transaction valid from consensus perspective
+//
+// Why it works:
+// - tokenCategory check passes (output[0] has correct category)
+// - But tokenAmount = 0 (empty token output, just has category set)
+// - BCH allows outputs with category but zero amount
+// - Contract never validates amount > 0 or amount == expected
+
+// ============================================================================
+// ATTACK SCENARIO 3: Accounting Bypass in Token Escrow
+// ============================================================================
+//
+// Setup:
+// - Escrow holds tokens for atomic swap
+// - Party A deposits 5,000 tokens
+// - Party B should receive 5,000 tokens after conditions met
+// - Contract tracks expected amount but doesn't validate output
+//
+// Vulnerable Escrow:
+//
+// contract VulnerableEscrow(
+//     pubkey partyAPubKey,
+//     pubkey partyBPubKey,
+//     bytes tokenCategory,
+//     int expectedAmount  // 5,000 tokens
+// ) {
+//     function release(sig partyASig, bytes partyBAddress) {
+//         require(checkSig(partyASig, partyAPubKey));
+//         require(tx.outputs[0].lockingBytecode == partyBAddress);
+//         require(tx.outputs[0].tokenCategory == tokenCategory);
+//         // Contract KNOWS expectedAmount = 5,000
+//         // But never validates: tx.outputs[0].tokenAmount == expectedAmount
+//     }
+// }
+//
+// Attack by Party A (malicious depositor):
+// Inputs:
+//   [0] Escrow UTXO (5,000 sats + 5,000 tokens)
+//
+// Outputs:
+//   [0] 546 sats + 1,000 tokens to Party B (category correct)
+//   [1] 4,454 sats + 4,000 tokens to Party A (refund)
+//
+// Result:
+// - Party B receives only 1,000 tokens (instead of 5,000)
+// - Party A recovers 4,000 tokens (80% refund)
+// - Escrow guarantee violated
+// - Atomic swap fails (Party B loses 80% of value)
+//
+// Impact:
+// - Trust in escrow destroyed
+// - Party B suffers financial loss
+// - Reputation damage
+// - Legal liability
+
+// ============================================================================
+// ATTACK SCENARIO 4: NFT vs Fungible Token Confusion
+// ============================================================================
+//
+// Setup:
+// - Contract intended for NFT transfer (tokenAmount should be 0 for NFTs)
+// - Attacker converts to fungible token representation
+//
+// NFT Properties:
+// - tokenCategory: 0xNFT... (specific NFT collection)
+// - tokenAmount: 0 (NFTs have no "amount", just commitment/capability)
+// - nftCommitment: <NFT data>
+// - tokenCapability: varies
+//
+// Fungible Token Properties:
+// - tokenCategory: 0xFUNG... (fungible token)
+// - tokenAmount: N (quantity of tokens)
+// - nftCommitment: 0x (empty)
+// - tokenCapability: 0x (immutable)
+//
+// Vulnerable NFT Contract:
+//
+// contract VulnerableNFT(pubkey ownerPubKey, bytes nftCategory) {
+//     function transfer(sig ownerSig, bytes recipient) {
+//         require(checkSig(ownerSig, ownerPubKey));
+//         require(tx.outputs[0].lockingBytecode == recipient);
+//         require(tx.outputs[0].tokenCategory == nftCategory);
+//         // Assumes NFT (tokenAmount = 0)
+//         // But never validates tokenAmount == 0
+//     }
+// }
+//
+// Attack: Convert NFT to Fungible Tokens
+// If attacker has minting capability for the category:
+// Inputs:
+//   [0] Contract UTXO (NFT with category 0xNFT..., amount 0)
+//   [1] Minting UTXO (same category, minting capability)
+//
+// Outputs:
+//   [0] NFT to recipient (category 0xNFT..., amount 0)
+//   [1] 1,000,000 fungible tokens (category 0xNFT..., amount 1,000,000)
+//
+// Result:
+// - NFT transferred correctly (output[0] validated)
+// - But 1,000,000 fungible tokens also created
+// - Same tokenCategory, different tokenAmount
+// - NFT collection polluted with fungible tokens
+// - Category semantics violated
+//
+// Note: This requires minting capability, but demonstrates why
+// tokenAmount validation matters even for "NFT-only" contracts
+
+// ============================================================================
+// SECURE VERSION: Explicit Token Amount Validation
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// SECURE: This contract validates tokenCategory AND tokenAmount
+// PROTECTION: Prevents token duplication, amount manipulation, and theft
+contract SecureTokenTransferWithAmountValidation(
+    pubkey ownerPubKey,
+    bytes tokenCategory,
+    bytes recipientBytecode,
+    int expectedAmount  // Exact number of tokens to transfer
+) {
+    // SECURE: Validates category, amount, recipient, and output count
+    function transfer(sig ownerSig) {
+        // Step 1: Validate authorization
+        require(checkSig(ownerSig, ownerPubKey));
+        
+        // Step 2: CRITICAL - Enforce exactly 1 output
+        // Prevents token splitting across multiple outputs
+        // Ensures all tokens go to validated recipient
+        require(tx.outputs.length == 1);
+        
+        // Step 3: Validate output recipient
+        require(tx.outputs[0].lockingBytecode == recipientBytecode);
+        
+        // Step 4: CRITICAL - Validate token category
+        // Ensures correct token type (which token)
+        require(tx.outputs[0].tokenCategory == tokenCategory);
+        
+        // Step 5: CRITICAL - Validate token amount
+        // Ensures correct token quantity (how many tokens)
+        // This is the key protection against amount manipulation
+        require(tx.outputs[0].tokenAmount == expectedAmount);
+        
+        // Step 6: Validate no minting capability leak
+        // Tokens transferred should be immutable
+        require(tx.outputs[0].tokenCapability == 0x);
+        
+        // RESULT: Complete token transfer validation
+        // - Category validated (correct token type)
+        // - Amount validated (correct quantity)
+        // - Recipient validated (correct destination)
+        // - Output count validated (no splitting)
+        // - Capability validated (no minting leak)
+        //
+        // Attacks now IMPOSSIBLE:
+        // - Token amount inflation: BLOCKED (amount check)
+        // - Token theft via zero-amount: BLOCKED (amount check)
+        // - Token splitting: BLOCKED (output count check)
+        // - Wrong token type: BLOCKED (category check)
+        // - Capability leak: BLOCKED (capability check)
+    }
+}
+
+// ============================================================================
+// ADVANCED PATTERN: Input-Output Amount Conservation
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// ADVANCED: Covenant that preserves exact token amounts from input to output
+// USE CASE: Token covenants, vesting, escrow, custody
+contract SecureTokenCovenantAmountConservation(
+    pubkey ownerPubKey
+) {
+    // Pattern: Preserve exact token amounts across covenant transitions
+    function transfer(sig ownerSig) {
+        // Step 1: Validate authorization
+        require(checkSig(ownerSig, ownerPubKey));
+        
+        // Step 2: Enforce exactly 1 output
+        require(tx.outputs.length == 1);
+        
+        // Step 3: Read input token properties
+        bytes inputTokenCategory = tx.inputs[this.activeInputIndex].tokenCategory;
+        int inputTokenAmount = tx.inputs[this.activeInputIndex].tokenAmount;
+        bytes inputLockingBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+        
+        // Step 4: CRITICAL - Validate output preserves token category
+        require(tx.outputs[0].tokenCategory == inputTokenCategory);
+        
+        // Step 5: CRITICAL - Validate output preserves token amount
+        // This enforces conservation: output amount MUST equal input amount
+        // No tokens can be created, destroyed, or stolen
+        require(tx.outputs[0].tokenAmount == inputTokenAmount);
+        
+        // Step 6: Validate covenant continuation
+        require(tx.outputs[0].lockingBytecode == inputLockingBytecode);
+        
+        // Step 7: Validate BCH amount preservation
+        int inputValue = tx.inputs[this.activeInputIndex].value;
+        require(tx.outputs[0].value == inputValue);
+        
+        // RESULT: Perfect token and BCH conservation
+        // - Input tokenAmount = Output tokenAmount (exact preservation)
+        // - Input tokenCategory = Output tokenCategory (no substitution)
+        // - Input value = Output value (BCH preserved)
+        // - Covenant continues with identical state
+        // - No value leakage possible
+    }
+}
+
+// ============================================================================
+// BEST PRACTICE: Multi-Output with Explicit Amount Distribution
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// BEST PRACTICE: Contract distributing tokens to multiple recipients
+// Validates EVERY output amount explicitly
+contract SecureTokenDistributionMultiOutput(
+    pubkey ownerPubKey,
+    bytes tokenCategory,
+    bytes recipient1Bytecode,
+    bytes recipient2Bytecode,
+    int amount1,  // Exact amount for recipient 1
+    int amount2   // Exact amount for recipient 2
+) {
+    // Pattern: Split tokens across multiple outputs with full validation
+    function distribute(sig ownerSig) {
+        // Step 1: Validate authorization
+        require(checkSig(ownerSig, ownerPubKey));
+        
+        // Step 2: CRITICAL - Enforce exactly 2 outputs
+        require(tx.outputs.length == 2);
+        
+        // Step 3: Calculate total tokens being distributed
+        int totalDistributed = amount1 + amount2;
+        
+        // Step 4: Validate output[0] - First recipient
+        require(tx.outputs[0].lockingBytecode == recipient1Bytecode);
+        require(tx.outputs[0].tokenCategory == tokenCategory);
+        require(tx.outputs[0].tokenAmount == amount1);  // Exact amount
+        require(tx.outputs[0].tokenCapability == 0x);
+        
+        // Step 5: Validate output[1] - Second recipient
+        require(tx.outputs[1].lockingBytecode == recipient2Bytecode);
+        require(tx.outputs[1].tokenCategory == tokenCategory);
+        require(tx.outputs[1].tokenAmount == amount2);  // Exact amount
+        require(tx.outputs[1].tokenCapability == 0x);
+        
+        // Step 6: OPTIONAL - Validate against input amount
+        // Ensure we're not distributing more than we have
+        int inputTokenAmount = tx.inputs[this.activeInputIndex].tokenAmount;
+        require(totalDistributed <= inputTokenAmount);
+        
+        // Step 7: STRICT VERSION - Require exact conservation
+        // require(totalDistributed == inputTokenAmount);
+        // This ensures no tokens are lost or destroyed
+        
+        // RESULT: Controlled multi-output distribution
+        // - Each output amount explicitly validated
+        // - Total distribution tracked
+        // - No unauthorized recipients
+        // - No amount manipulation
+        // - Full accounting transparency
+    }
+}
+
+// ============================================================================
+// EXPLANATION: Why Token Amount Validation Is Critical
+// ============================================================================
+
+// THE CATEGORY vs AMOUNT DISTINCTION
+// -----------------------------------
+// Many developers think: "If I validate tokenCategory, tokens are secured"
+//
+// WRONG ASSUMPTION:
+// - tokenCategory only identifies WHICH token (like checking coin type)
+// - tokenAmount specifies HOW MANY tokens (like checking coin quantity)
+// - Category check alone is like verifying "yes, these are dollars"
+// - But not checking if it's $1 or $1,000,000
+//
+// CORRECT UNDERSTANDING:
+// - tokenCategory: "This output contains XYZ tokens" (identity)
+// - tokenAmount: "This output contains 1,000 XYZ tokens" (quantity)
+// - BOTH must be validated for complete security
+//
+// Analogy:
+// - Checking only category = checking the currency type (USD vs EUR)
+// - Checking only amount = checking the number (1000) but not currency
+// - Need both = checking "1000 USD" (complete specification)
+
+// WHY CONSENSUS DOESN'T PROTECT YOU
+// ----------------------------------
+// BCH consensus validates token conservation ACROSS THE ENTIRE TRANSACTION:
+//   Sum(input amounts) >= Sum(output amounts) per category
+//
+// But consensus does NOT validate:
+// - How tokens are DISTRIBUTED across outputs
+// - Which SPECIFIC output gets which amount
+// - Whether amounts match CONTRACT EXPECTATIONS
+//
+// Example:
+// Input: 1000 tokens
+// Valid consensus scenarios:
+//   - Output[0]: 1000 → OK
+//   - Output[0]: 500, Output[1]: 500 → OK
+//   - Output[0]: 0, Output[1]: 1000 → OK (but probably wrong for contract!)
+//   - Output[0]: 999, Output[1]: 1 → OK (but probably theft!)
+//
+// Contract MUST specify which output gets which amount
+// Consensus won't enforce contract's intent
+
+// FUNGIBLE vs NON-FUNGIBLE TOKENS
+// --------------------------------
+// Fungible Tokens (FT):
+// - tokenAmount > 0 (represents quantity)
+// - Divisible and interchangeable
+// - Amount matters (1000 tokens vs 1 token)
+// - MUST validate tokenAmount
+//
+// Non-Fungible Tokens (NFT):
+// - tokenAmount == 0 (always zero for NFTs)
+// - Unique, identified by commitment and capability
+// - Amount doesn't vary (always 0)
+// - Should validate tokenAmount == 0 to prevent FT pollution
+//
+// Edge Case: Categories can have BOTH FTs and NFTs
+// - Same category can have NFTs (amount=0) and FTs (amount>0)
+// - Contract must specify which type expected
+// - Validate amount accordingly
+
+// TOKEN AMOUNT VALIDATION LAYERS
+// -------------------------------
+// Layer 1: Category Check (which token)
+//   require(tx.outputs[N].tokenCategory == expectedCategory);
+//
+// Layer 2: Amount Check (how many tokens)
+//   require(tx.outputs[N].tokenAmount == expectedAmount);
+//
+// Layer 3: Conservation Check (total preserved)
+//   require(sumOutputAmounts == sumInputAmounts);
+//
+// Layer 4: Distribution Check (correct allocation)
+//   require(output[0].amount == amount1);
+//   require(output[1].amount == amount2);
+//
+// For security, implement ALL applicable layers
+
+// ============================================================================
+// SECURITY PRINCIPLES FOR TOKEN AMOUNT VALIDATION
+// ============================================================================
+
+// PRINCIPLE 1: ALWAYS VALIDATE BOTH CATEGORY AND AMOUNT
+// ------------------------------------------------------
+// Never validate category without amount (for fungible tokens)
+// Both are required for complete token specification
+// Example:
+//   require(tx.outputs[0].tokenCategory == expectedCategory);
+//   require(tx.outputs[0].tokenAmount == expectedAmount);
+
+// PRINCIPLE 2: VALIDATE EVERY OUTPUT
+// -----------------------------------
+// If transaction has N outputs with tokens, validate all N
+// Partial validation (e.g., only output[0]) allows theft via others
+// Use output count enforcement + individual validation
+
+// PRINCIPLE 3: ENFORCE CONSERVATION FOR COVENANTS
+// ------------------------------------------------
+// For token covenants, input amount should equal output amount
+// Prevents value leakage across covenant transitions
+// Example:
+//   int inputAmount = tx.inputs[this.activeInputIndex].tokenAmount;
+//   require(tx.outputs[0].tokenAmount == inputAmount);
+
+// PRINCIPLE 4: ZERO-AMOUNT CHECK FOR NFTS
+// ----------------------------------------
+// For NFT-only contracts, explicitly require amount == 0
+// Prevents fungible token pollution
+// Example:
+//   require(tx.outputs[0].tokenAmount == 0);  // NFT, not FT
+
+// PRINCIPLE 5: VALIDATE TOTAL DISTRIBUTION
+// -----------------------------------------
+// For multi-output distributions, validate sum equals input
+// Prevents over-distribution or under-distribution
+// Example:
+//   int total = amount1 + amount2 + amount3;
+//   require(total == inputAmount);
+
+// PRINCIPLE 6: USE EXACT EQUALITY, NOT RANGES
+// --------------------------------------------
+// Use == for amount checks, not >= or <=
+// Ranges allow manipulation within bounds
+// Example:
+//   require(tx.outputs[0].tokenAmount == 1000);  // Exact
+//   // NOT: require(tx.outputs[0].tokenAmount >= 1000);  // Allows >1000
+
+// ============================================================================
+// COMMON MISTAKES AND HOW TO AVOID THEM
+// ============================================================================
+
+// MISTAKE 1: Validating Category Without Amount
+// ----------------------------------------------
+// WRONG:
+//   function transfer(sig ownerSig) {
+//       require(checkSig(ownerSig, ownerPubKey));
+//       require(tx.outputs[0].tokenCategory == tokenCategory);
+//       // Missing: tokenAmount validation
+//   }
+//
+// CORRECT:
+//   function transfer(sig ownerSig) {
+//       require(checkSig(ownerSig, ownerPubKey));
+//       require(tx.outputs[0].tokenCategory == tokenCategory);
+//       require(tx.outputs[0].tokenAmount == expectedAmount);
+//   }
+
+// MISTAKE 2: Using >= Instead of == for Amount
+// ---------------------------------------------
+// WRONG:
+//   require(tx.outputs[0].tokenAmount >= 1000);
+//
+// WHY WRONG:
+// - Allows output to have MORE than expected (e.g., 10,000 tokens)
+// - If multiple outputs, attacker can inflate one, reduce another
+// - Breaks accounting invariants
+//
+// CORRECT:
+//   require(tx.outputs[0].tokenAmount == 1000);  // Exact amount
+
+// MISTAKE 3: Not Checking Output Count
+// -------------------------------------
+// WRONG:
+//   require(tx.outputs[0].tokenAmount == 1000);
+//   // Output[1], [2], [3] could exist with more tokens
+//
+// CORRECT:
+//   require(tx.outputs.length == 1);  // Enforce single output
+//   require(tx.outputs[0].tokenAmount == 1000);
+
+// MISTAKE 4: Forgetting Conservation in Multi-Output
+// ---------------------------------------------------
+// WRONG:
+//   require(tx.outputs[0].tokenAmount == 500);
+//   require(tx.outputs[1].tokenAmount == 500);
+//   // But input might have 2000 tokens!
+//
+// CORRECT:
+//   int total = 500 + 500;
+//   int inputAmount = tx.inputs[this.activeInputIndex].tokenAmount;
+//   require(total == inputAmount);
+//   require(tx.outputs[0].tokenAmount == 500);
+//   require(tx.outputs[1].tokenAmount == 500);
+
+// MISTAKE 5: Not Validating Zero for NFTs
+// ----------------------------------------
+// WRONG (for NFT contract):
+//   require(tx.outputs[0].tokenCategory == nftCategory);
+//   // Assumes amount is 0, but doesn't check
+//
+// CORRECT:
+//   require(tx.outputs[0].tokenCategory == nftCategory);
+//   require(tx.outputs[0].tokenAmount == 0);  // Explicitly NFT
+
+// MISTAKE 6: Overflow in Amount Arithmetic
+// -----------------------------------------
+// WRONG:
+//   int total = amount1 + amount2 + amount3;
+//   // Could overflow if amounts are very large
+//
+// CORRECT:
+//   int total = amount1 + amount2 + amount3;
+//   require(total >= amount1);  // Overflow check
+//   require(total >= amount2);
+//   require(total >= amount3);
+
+// ============================================================================
+// DEPLOYMENT CHECKLIST FOR TOKEN AMOUNT VALIDATION
+// ============================================================================
+//
+// Before deploying a token contract, verify:
+//
+// [ ] Output count validation: require(tx.outputs.length == N)
+// [ ] Every token output has tokenCategory validation
+// [ ] Every token output has tokenAmount validation
+// [ ] For fungible tokens: Amount is exact value (use ==, not >=)
+// [ ] For NFTs: Amount is explicitly 0
+// [ ] For multi-output: Sum of amounts validated against input
+// [ ] Conservation enforced for covenants (input == output amounts)
+// [ ] No capability leak: require(tokenCapability == 0x)
+// [ ] Overflow protection for amount arithmetic
+// [ ] Test with zero-amount outputs (theft scenario)
+// [ ] Test with inflated amounts (duplication scenario)
+// [ ] Test with multi-output splitting (distribution scenario)
+// [ ] Test with wrong amounts (< or > expected)
+// [ ] Document expected amounts clearly in contract/UI
+
+// ============================================================================
+// TESTING RECOMMENDATIONS
+// ============================================================================
+//
+// Test Cases for VULNERABLE version (no amount validation):
+// 1. Transfer with correct category and amount
+//    Expected: SUCCEEDS (normal operation)
+//
+// 2. Transfer with correct category but ZERO amount
+//    Expected: SUCCEEDS (VULNERABILITY - theft)
+//
+// 3. Transfer with correct category but REDUCED amount
+//    Expected: SUCCEEDS (VULNERABILITY - partial theft)
+//
+// 4. Multi-output with tokens split (extra output)
+//    Expected: SUCCEEDS (VULNERABILITY - splitting attack)
+//
+// 5. Transfer with inflated amount (if possible via other inputs)
+//    Expected: SUCCEEDS or FAILS (depends on inputs)
+//
+// Test Cases for SECURE version (with amount validation):
+// 1. Transfer with correct category and amount
+//    Expected: SUCCEEDS (valid transfer)
+//
+// 2. Transfer with correct category but ZERO amount
+//    Expected: FAILS (amount validation rejects)
+//
+// 3. Transfer with correct category but WRONG amount
+//    Expected: FAILS (amount validation rejects)
+//
+// 4. Multi-output attempt (extra outputs)
+//    Expected: FAILS (output count validation rejects)
+//
+// 5. Conservation test: input=1000, outputs sum to 999
+//    Expected: FAILS (conservation check rejects)
+//
+// 6. Conservation test: input=1000, outputs sum to 1001
+//    Expected: FAILS (consensus rejects - can't create tokens)
+//
+// 7. NFT with amount > 0
+//    Expected: FAILS (amount validation rejects)
+
+// ============================================================================
+// REAL-WORLD IMPACT EXAMPLES
+// ============================================================================
+//
+// Example 1: DEX Token Theft via Zero-Amount Output
+// --------------------------------------------------
+// Platform: Decentralized exchange for BCH tokens
+// Vulnerability: Swap contract validates category but not amount
+// Attack: User swaps 1000 TokenA for TokenB, receives 0 TokenB
+// Steps:
+//   1. User deposits 1000 TokenA
+//   2. Attacker crafts swap transaction
+//   3. Output[0]: 0 TokenB to user (category correct, amount=0)
+//   4. Output[1]: 1000 TokenB to attacker (from swap reserves)
+// Impact:
+//   - User loses 1000 TokenA, receives nothing
+//   - DEX loses 1000 TokenB from reserves
+//   - Reputation destroyed
+//   - Financial loss: $50,000+ (if token valuable)
+//
+// Example 2: Vesting Contract Amount Manipulation
+// ------------------------------------------------
+// Scenario: Employee token vesting (4-year schedule)
+// Vulnerability: Vesting release validates category but not amount
+// Attack: Employee claims full vesting early with reduced amounts
+// Steps:
+//   1. Vesting contract holds 40,000 tokens (1000/month for 40 months)
+//   2. After month 1, employee should claim 1,000 tokens
+//   3. Employee crafts transaction:
+//      - Output[0]: 100 tokens to self (reduced)
+//      - Output[1]: 39,900 tokens to employee's second address
+//   4. Vesting contract validates category ✓, never checks amount
+// Impact:
+//   - Employee claims 40,000 tokens after 1 month
+//   - Company loses 39,000 tokens of unvested equity
+//   - Vesting schedule completely bypassed
+//
+// Example 3: NFT Marketplace Fungible Token Pollution
+// ----------------------------------------------------
+// Platform: NFT marketplace (NFT-only)
+// Vulnerability: Transfer validates category, assumes amount=0
+// Attack: Attacker creates fungible tokens with same category
+// Steps:
+//   1. Attacker has minting capability for NFT category
+//   2. Creates 1,000,000 fungible tokens (amount>0, same category)
+//   3. Lists on marketplace as "NFT" (category matches)
+//   4. Buyers expect NFT (amount=0), receive fungible tokens (amount=1M)
+// Impact:
+//   - NFT collection polluted with fungible tokens
+//   - Buyers confused (expected NFT, got FT)
+//   - Collection semantics violated
+//   - Marketplace trust destroyed
+
+// ============================================================================
+// END OF FILE
+// ============================================================================

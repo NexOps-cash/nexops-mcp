@@ -1,0 +1,716 @@
+// ANTI-PATTERN: Missing Token Category Validation
+// VULNERABILITY: Unvalidated outputs allow token attachment/substitution attacks
+// ATTACK VECTOR: Token attachment to BCH-only outputs, token substitution, token theft
+//
+// This file demonstrates the critical vulnerability of failing to validate
+// tokenCategory on transaction outputs. Without explicit validation, attackers
+// can attach unwanted tokens to outputs, substitute valuable tokens with
+// worthless ones, or break BCH-only output assumptions.
+//
+// CashScript Version: ^0.13.0
+// Network: Bitcoin Cash (BCH)
+// Security Level: VULNERABLE - DO NOT USE IN PRODUCTION
+
+// ============================================================================
+// VULNERABLE CODE: Missing Token Category Validation
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// VULNERABLE: This contract validates BCH value but not token category
+// RISK: Outputs can receive unexpected tokens, breaking BCH-only assumptions
+contract VulnerableBCHOnlyNoTokenValidation(
+    pubkey ownerPubKey,
+    bytes recipientBytecode  // Intended BCH-only recipient
+) {
+    // VULNERABILITY: Validates value and recipient but not tokenCategory
+    // MISSING: Explicit tokenCategory validation
+    // MISSING: Enforcement that output has NO tokens
+    function sendBCH(sig ownerSig, int amount) {
+        // Validate authorization
+        require(checkSig(ownerSig, ownerPubKey));
+        
+        // Validate amount is positive
+        require(amount > 0);
+        
+        // Validate output recipient
+        require(tx.outputs[0].lockingBytecode == recipientBytecode);
+        
+        // Validate output value
+        require(tx.outputs[0].value == amount);
+        
+        // CRITICAL FLAW: Never validates tx.outputs[0].tokenCategory
+        // Attacker can:
+        // - Attach tokens to the BCH-only output
+        // - Send unwanted/spam tokens to recipient
+        // - Break recipient's BCH-only assumption
+        // - Cause recipient wallet to reject/mishandle output
+        // - Create UTXO pollution
+    }
+}
+
+// ============================================================================
+// ATTACK SCENARIO 1: Token Attachment to BCH-Only Output
+// ============================================================================
+//
+// Setup:
+// - Contract intended to send pure BCH (no tokens)
+// - Recipient expects BCH-only UTXO
+// - Recipient's wallet/system only handles BCH (no token support)
+//
+// Legitimate Transaction (intended):
+// Inputs:
+//   [0] Contract UTXO (10,000 sats, no tokens)
+//   [1] User's signature input
+//
+// Outputs:
+//   [0] 5,000 sats to recipient (BCH only, no tokens) ✓
+//   [1] Change back to user
+//
+// ATTACK: Attach Tokens to BCH Output
+// Inputs:
+//   [0] Contract UTXO (10,000 sats, no tokens)
+//   [1] Attacker's UTXO (1,000 sats + 1,000,000 SPAM tokens)
+//
+// Outputs:
+//   [0] 5,000 sats + 1,000,000 SPAM tokens to recipient ✗
+//       - lockingBytecode: recipientBytecode ✓ (passes check)
+//       - value: 5,000 ✓ (passes check)
+//       - tokenCategory: 0xAABBCCDD... (SPAM token) ✗ (NOT CHECKED!)
+//       - tokenAmount: 1,000,000
+//
+// Result:
+// - Contract validates: recipient and amount are correct ✓
+// - Contract NEVER checks: tokenCategory
+// - Output receives unwanted tokens
+// - Recipient's BCH-only wallet may:
+//   - Reject the UTXO (unspendable funds)
+//   - Miscount balance (counts only BCH, ignores tokens)
+//   - Crash/error on token-containing UTXO
+//   - Require manual intervention to handle
+//
+// Impact:
+// - Recipient cannot use funds (wallet incompatibility)
+// - UTXO pollution (unwanted tokens attached)
+// - Potential loss of BCH (if wallet rejects UTXO entirely)
+// - Denial of service (recipient cannot receive clean BCH)
+
+// ============================================================================
+// ATTACK SCENARIO 2: Token Substitution Attack
+// ============================================================================
+//
+// Setup:
+// - Contract intended to send specific valuable NFT
+// - NFT category: 0x1111... (valuable digital art, worth $10,000)
+// - Recipient expects this specific NFT
+//
+// Vulnerable Contract (assumes token preservation but doesn't validate):
+//
+// contract VulnerableNFTTransfer(pubkey ownerPubKey, bytes recipientBytecode) {
+//     function transfer(sig ownerSig) {
+//         require(checkSig(ownerSig, ownerPubKey));
+//         require(tx.outputs[0].lockingBytecode == recipientBytecode);
+//         require(tx.outputs[0].value >= 1000);  // Minimum BCH
+//         
+//         // CRITICAL FLAW: Never validates tokenCategory
+//         // Assumes input NFT will go to output, but doesn't enforce it
+//     }
+// }
+//
+// Legitimate Transaction (intended):
+// Inputs:
+//   [0] Contract UTXO (1,000 sats + NFT category 0x1111...)
+//
+// Outputs:
+//   [0] 1,000 sats + NFT category 0x1111... to recipient ✓
+//
+// ATTACK: Substitute with Worthless Token
+// Inputs:
+//   [0] Contract UTXO (1,000 sats + valuable NFT 0x1111...)
+//   [1] Attacker's UTXO (1,000 sats + worthless token 0x2222...)
+//
+// Outputs:
+//   [0] 1,000 sats + worthless token 0x2222... to recipient ✗
+//       - lockingBytecode: recipientBytecode ✓ (passes check)
+//       - value: 1,000 ✓ (passes check)
+//       - tokenCategory: 0x2222... ✗ (NOT CHECKED - wrong token!)
+//   
+//   [1] 1,000 sats + valuable NFT 0x1111... to attacker's address
+//       - Attacker keeps the valuable NFT
+//
+// Result:
+// - Recipient receives worthless token instead of valuable NFT
+// - Attacker steals valuable NFT worth $10,000
+// - Recipient has no recourse (transaction is "valid")
+//
+// Impact:
+// - Direct theft of valuable digital asset
+// - Recipient loses $10,000 NFT, receives worthless token
+// - Trust in contract destroyed
+// - Legal/financial liability for contract deployer
+
+// ============================================================================
+// ATTACK SCENARIO 3: UTXO Pollution Attack
+// ============================================================================
+//
+// Setup:
+// - Payment processor sends BCH to merchants
+// - Merchants expect clean BCH UTXOs
+// - Processor handles high volume (1000s of payments/day)
+//
+// Attack: Spam Token Distribution
+// - Attacker creates worthless spam token (category 0xSPAM...)
+// - Mints 100,000,000 spam tokens (costs ~546 sats)
+// - For each payment processed:
+//   - Payment to merchant includes spam tokens
+//   - Merchant receives: expected BCH + unwanted spam tokens
+//
+// Impact on 1000 merchants:
+// - Each merchant receives 100,000 spam tokens
+// - Each merchant's UTXO set polluted
+// - Wallets slow down (must track spam tokens)
+// - Database bloat (storing spam token data)
+// - User confusion ("what are these tokens?")
+// - Support burden (explaining/removing spam)
+// - Potential wallet crashes (poor token handling)
+//
+// Economic Impact:
+// - Merchants must spend extra fees to "clean" UTXOs
+// - Loss of customer trust (payments contain spam)
+// - Development time fixing token filtering
+// - Potential service downtime
+//
+// Attacker Cost: ~546 sats + transaction fees
+// Victim Cost: 1000s of dollars in cleanup, lost productivity
+
+// ============================================================================
+// ATTACK SCENARIO 4: Wallet Compatibility Breaking
+// ============================================================================
+//
+// Setup:
+// - Mobile wallet only supports BCH (no token support)
+// - User expects to receive clean BCH
+// - Contract sends "BCH payment"
+//
+// Attack: Force Token on Non-Compatible Wallet
+// Inputs:
+//   [0] Contract UTXO (10,000 sats)
+//   [1] Attacker's token UTXO (tokens)
+//
+// Outputs:
+//   [0] 10,000 sats + tokens to user's mobile wallet address
+//
+// Result:
+// - Mobile wallet sees UTXO with tokens
+// - Wallet doesn't understand token format
+// - Possible outcomes:
+//   1. Wallet crashes when parsing UTXO
+//   2. Wallet ignores UTXO (funds appear lost)
+//   3. Wallet shows error state
+//   4. Wallet counts BCH but cannot spend UTXO (token handling issue)
+//
+// Impact:
+// - User cannot access their BCH
+// - Funds effectively locked (until wallet upgrade)
+// - Poor user experience
+// - Support tickets, refund requests
+// - Damage to merchant/service reputation
+
+// ============================================================================
+// SECURE VERSION: Explicit Token Category Validation
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// SECURE: This contract explicitly validates tokenCategory
+// PROTECTION: Prevents token attachment, substitution, and pollution attacks
+contract SecureBCHOnlyWithTokenValidation(
+    pubkey ownerPubKey,
+    bytes recipientBytecode
+) {
+    // SECURE: Validates recipient, value, AND tokenCategory
+    function sendBCH(sig ownerSig, int amount) {
+        // Step 1: Validate authorization
+        require(checkSig(ownerSig, ownerPubKey));
+        
+        // Step 2: Validate amount
+        require(amount > 0);
+        
+        // Step 3: CRITICAL - Enforce exactly 1 output
+        // Prevents attacker from adding extra outputs to siphon value
+        // Ensures single-output intent matches validation
+        require(tx.outputs.length == 1);
+        
+        // Step 4: Validate recipient
+        require(tx.outputs[0].lockingBytecode == recipientBytecode);
+        
+        // Step 5: Validate value
+        require(tx.outputs[0].value == amount);
+        
+        // Step 6: CRITICAL - Validate NO tokens on output
+        // tokenCategory == 0x means NO tokens are attached to this output
+        // This enforces a strict BCH-only UTXO
+        // For BCH-only outputs, tokenCategory MUST be empty (0x)
+        // This prevents any tokens from being attached
+        require(tx.outputs[0].tokenCategory == 0x);
+        
+        // ALTERNATIVE: Explicitly check for no token fields
+        // require(tx.outputs[0].tokenAmount == 0);  // No fungible tokens
+        // require(tx.outputs[0].nftCommitment == 0x);  // No NFT data
+        // require(tx.outputs[0].tokenCapability == 0x);  // No capabilities
+        //
+        // However, checking tokenCategory == 0x is sufficient because:
+        // - Empty category means NO tokens at all
+        // - If category is 0x, other token fields are irrelevant/empty
+        // - Single check is cleaner and equally secure
+        
+        // RESULT: Token attachment and output manipulation are now IMPOSSIBLE
+        // - Output count enforced (exactly 1 output)
+        // - Output must have tokenCategory == 0x (empty/no tokens)
+        // - Any transaction with tokens attached to output[0] will FAIL
+        // - Any transaction with extra outputs will FAIL
+        // - Recipient guaranteed to receive pure BCH
+        // - UTXO pollution prevented
+        // - Wallet compatibility preserved
+    }
+}
+
+// ============================================================================
+// SECURE PATTERN: Token-Aware Contract with Validation
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// SECURE: Contract that handles tokens and validates category explicitly
+// USE CASE: NFT transfer, token payment, multi-asset covenant
+contract SecureTokenTransferWithCategoryValidation(
+    pubkey ownerPubKey,
+    bytes recipientBytecode,
+    bytes expectedTokenCategory  // The specific token this contract handles
+) {
+    // SECURE: Validates both BCH and token properties
+    function transferToken(sig ownerSig, int bchAmount, int tokenAmount) {
+        // Step 1: Validate authorization
+        require(checkSig(ownerSig, ownerPubKey));
+        
+        // Step 2: Validate amounts
+        require(bchAmount > 0);
+        require(tokenAmount > 0);
+        
+        // Step 3: Validate recipient
+        require(tx.outputs[0].lockingBytecode == recipientBytecode);
+        
+        // Step 4: Validate BCH amount
+        require(tx.outputs[0].value == bchAmount);
+        
+        // Step 5: CRITICAL - Validate token category is EXPECTED category
+        // This prevents token substitution attacks
+        require(tx.outputs[0].tokenCategory == expectedTokenCategory);
+        
+        // Step 6: CRITICAL - Validate token amount
+        // Ensures recipient receives exact expected quantity
+        require(tx.outputs[0].tokenAmount == tokenAmount);
+        
+        // Step 7: Validate token capability (for NFTs)
+        // For immutable tokens/NFTs, capability should be empty
+        require(tx.outputs[0].tokenCapability == 0x);
+        
+        // RESULT: Complete token validation
+        // - Correct token category (no substitution)
+        // - Correct token amount (no shortchanging)
+        // - No minting capability leak
+        // - Recipient receives exactly what's expected
+    }
+}
+
+// ============================================================================
+// ADVANCED PATTERN: Multi-Output Token and BCH Split
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// ADVANCED: Contract splitting BCH and tokens to different recipients
+// USE CASE: Payment splitting, token sale, atomic swap preparation
+contract SecureTokenBCHSplit(
+    pubkey ownerPubKey,
+    bytes bchRecipientBytecode,   // Receives only BCH
+    bytes tokenRecipientBytecode,  // Receives only tokens
+    bytes tokenCategory
+) {
+    function split(sig ownerSig, int bchAmount, int tokenAmount) {
+        // Step 1: Validate authorization
+        require(checkSig(ownerSig, ownerPubKey));
+        
+        // Step 2: CRITICAL - Enforce exactly 2 outputs
+        require(tx.outputs.length == 2);
+        
+        // Step 3: Validate output[0] - BCH only to first recipient
+        require(tx.outputs[0].lockingBytecode == bchRecipientBytecode);
+        require(tx.outputs[0].value == bchAmount);
+        require(tx.outputs[0].tokenCategory == 0x);  // NO tokens
+        
+        // Step 4: Validate output[1] - Tokens to second recipient
+        require(tx.outputs[1].lockingBytecode == tokenRecipientBytecode);
+        require(tx.outputs[1].value >= 1000);  // Minimum dust for token output
+        require(tx.outputs[1].tokenCategory == tokenCategory);  // CORRECT tokens
+        require(tx.outputs[1].tokenAmount == tokenAmount);
+        require(tx.outputs[1].tokenCapability == 0x);
+        
+        // RESULT: Clean separation guaranteed
+        // - Output[0]: Pure BCH (no tokens)
+        // - Output[1]: Correct tokens (with minimal BCH)
+        // - No mixing, no substitution, no pollution
+    }
+}
+
+// ============================================================================
+// BEST PRACTICE: Input-Output Token Consistency
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// BEST PRACTICE: Covenant that preserves token category from input to output
+// USE CASE: Token covenants, escrow, vesting
+contract SecureTokenCovenant(
+    pubkey ownerPubKey
+) {
+    function transfer(sig ownerSig) {
+        // Step 1: Validate authorization
+        require(checkSig(ownerSig, ownerPubKey));
+        
+        // Step 2: Read input token category
+        bytes inputTokenCategory = tx.inputs[this.activeInputIndex].tokenCategory;
+        
+        // Step 3: CRITICAL - Enforce output preserves EXACT same category
+        // This prevents token substitution in covenant chains
+        require(tx.outputs[0].tokenCategory == inputTokenCategory);
+        
+        // Step 4: Optionally validate token amount preservation
+        int inputTokenAmount = tx.inputs[this.activeInputIndex].tokenAmount;
+        require(tx.outputs[0].tokenAmount == inputTokenAmount);
+        
+        // Step 5: Validate other output properties
+        bytes inputLockingBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+        require(tx.outputs[0].lockingBytecode == inputLockingBytecode);
+        
+        int inputValue = tx.inputs[this.activeInputIndex].value;
+        require(tx.outputs[0].value == inputValue);
+        
+        // RESULT: Complete token continuity
+        // - Token category preserved (no substitution)
+        // - Token amount preserved (no theft)
+        // - Covenant continues with exact same assets
+    }
+}
+
+// ============================================================================
+// EXPLANATION: Why Token Category Validation Is Critical
+// ============================================================================
+
+// TOKEN CATEGORY IN BITCOIN CASH
+// -------------------------------
+// Bitcoin Cash CashTokens (BCMR / CHIP) allow UTXOs to contain:
+// 1. BCH (satoshi value) - Always present
+// 2. Tokens (optional) - Identified by tokenCategory
+//
+// Token Category:
+// - 32-byte identifier (transaction ID where token was created)
+// - Empty (0x) means NO tokens
+// - Non-empty means tokens are present
+//
+// Output can contain:
+// - BCH only: tokenCategory = 0x
+// - BCH + Tokens: tokenCategory = <32-byte txid>
+// - Tokens only: BCH value = dust (546 sats), tokenCategory = <txid>
+
+// THE VALIDATION GAP
+// ------------------
+// Many contracts validate:
+// ✓ Output recipient (lockingBytecode)
+// ✓ Output BCH value (value)
+// ✗ Output token category (tokenCategory)
+//
+// Why developers miss this:
+// - Focus on BCH amount
+// - Assume "no tokens means tokenCategory is automatically 0x"
+// - Don't realize attacker can ADD tokens from other inputs
+// - Think "my contract doesn't use tokens, so I don't need to check"
+//
+// Reality:
+// - Outputs can receive tokens from ANY input
+// - If contract doesn't validate tokenCategory, ANY category can be attached
+// - Attacker controls which inputs are included
+// - Attacker can force tokens onto outputs
+
+// HOW TOKEN ATTACHMENT WORKS
+// ---------------------------
+// Transaction Structure:
+// Inputs: [Input0: 10k sats, Input1: 5k sats + 1M SPAM tokens]
+// Outputs: [Output0: 15k sats + 1M SPAM tokens]
+//
+// Bitcoin Cash consensus allows:
+// - Combining inputs (BCH sums)
+// - Routing tokens from any input to any output
+// - Attacker chooses token routing
+//
+// If contract only checks:
+//   require(tx.outputs[0].value == 15000);
+//
+// It does NOT prevent:
+//   tx.outputs[0].tokenCategory = SPAM_TOKEN
+//   tx.outputs[0].tokenAmount = 1000000
+//
+// Attacker can:
+// 1. Add their token UTXO as additional input
+// 2. Route tokens to output[0]
+// 3. Contract sees: value is correct ✓
+// 4. Contract never checks: tokenCategory
+// 5. Output receives unwanted tokens
+
+// EMPTY CATEGORY CHECK: THE SOLUTION
+// ------------------------------------
+// For BCH-only outputs:
+//   require(tx.outputs[0].tokenCategory == 0x);
+//
+// This enforces:
+// - Output has NO tokens
+// - Empty category (0x = no tokens)
+// - Pure BCH output guaranteed
+//
+// For token outputs:
+//   require(tx.outputs[0].tokenCategory == expectedCategory);
+//
+// This enforces:
+// - Output has SPECIFIC token
+// - No substitution possible
+// - Correct asset transferred
+
+// TOKEN VALIDATION LAYERS
+// ------------------------
+// Complete token validation requires checking:
+//
+// Layer 1: Category (tokenCategory)
+//   - Is this the right token? (or no token?)
+//   - Prevents: Substitution, attachment
+//
+// Layer 2: Amount (tokenAmount)
+//   - How many fungible tokens?
+//   - Prevents: Shortchanging, inflation
+//
+// Layer 3: Commitment (nftCommitment)
+//   - What data does NFT carry?
+//   - Prevents: Data manipulation
+//
+// Layer 4: Capability (tokenCapability)
+//   - Can this token mint more?
+//   - Prevents: Capability leak
+//
+// Minimum validation for BCH-only: Layer 1 (category == 0x)
+// Minimum validation for tokens: Layers 1 + 2 + 4
+// Full validation for NFTs: All 4 layers
+
+// ============================================================================
+// SECURITY PRINCIPLES FOR TOKEN VALIDATION
+// ============================================================================
+
+// PRINCIPLE 1: ALWAYS VALIDATE TOKEN CATEGORY
+// --------------------------------------------
+// Every output validation MUST include tokenCategory check
+// No exceptions, even for "BCH-only" contracts
+// Default: require(tx.outputs[N].tokenCategory == 0x);
+
+// PRINCIPLE 2: EXPLICIT IS BETTER THAN IMPLICIT
+// ----------------------------------------------
+// Don't assume outputs have no tokens
+// Don't assume tokens will "naturally" go to right output
+// Explicitly validate every token property
+
+// PRINCIPLE 3: BCH-ONLY REQUIRES TOKEN CHECKS
+// --------------------------------------------
+// If output should contain ONLY BCH:
+//   require(tx.outputs[N].tokenCategory == 0x);
+// This is NOT optional for BCH-only outputs
+
+// PRINCIPLE 4: TOKEN OUTPUTS NEED CATEGORY + AMOUNT
+// --------------------------------------------------
+// If output should contain tokens:
+//   require(tx.outputs[N].tokenCategory == expectedCategory);
+//   require(tx.outputs[N].tokenAmount == expectedAmount);
+// Both checks required (category AND amount)
+
+// PRINCIPLE 5: VALIDATE INPUT-OUTPUT CONSISTENCY
+// -----------------------------------------------
+// For covenants preserving tokens:
+//   bytes inputCat = tx.inputs[this.activeInputIndex].tokenCategory;
+//   require(tx.outputs[0].tokenCategory == inputCat);
+// Prevents token substitution in covenant chains
+
+// PRINCIPLE 6: PREVENT CAPABILITY LEAK
+// -------------------------------------
+// Unless explicitly intended, outputs should not have minting capability:
+//   require(tx.outputs[N].tokenCapability == 0x);
+// Keeps minting authority contained
+
+// ============================================================================
+// COMMON MISTAKES AND HOW TO AVOID THEM
+// ============================================================================
+
+// MISTAKE 1: Not Checking Token Category at All
+// ----------------------------------------------
+// WRONG:
+//   function sendBCH(sig ownerSig, int amount) {
+//       require(checkSig(ownerSig, ownerPubKey));
+//       require(tx.outputs[0].value == amount);
+//       // No tokenCategory check
+//       // No output count check
+//   }
+//
+// CORRECT:
+//   function sendBCH(sig ownerSig, int amount) {
+//       require(checkSig(ownerSig, ownerPubKey));
+//       require(tx.outputs.length == 1);  // Enforce single output
+//       require(tx.outputs[0].value == amount);
+//       require(tx.outputs[0].tokenCategory == 0x);  // No tokens allowed
+//   }
+
+// MISTAKE 2: Checking Token Amount Without Category
+// --------------------------------------------------
+// WRONG:
+//   require(tx.outputs[0].tokenAmount == 0);
+//
+// WHY WRONG:
+// - tokenAmount only applies to fungible tokens
+// - NFTs have tokenAmount = 0 but still have tokenCategory
+// - Attacker can attach NFT (amount = 0 but category != 0x)
+//
+// CORRECT:
+//   require(tx.outputs[0].tokenCategory == 0x);
+
+// MISTAKE 3: Only Checking Category on Some Outputs
+// --------------------------------------------------
+// WRONG:
+//   require(tx.outputs[0].tokenCategory == 0x);
+//   // Output[1] not checked - can receive tokens
+//
+// CORRECT:
+//   require(tx.outputs[0].tokenCategory == 0x);
+//   require(tx.outputs[1].tokenCategory == 0x);
+//   // Check EVERY output that should be BCH-only
+
+// MISTAKE 4: Using Wrong Comparison for Empty Check
+// --------------------------------------------------
+// WRONG:
+//   require(tx.outputs[0].tokenCategory == "");  // String comparison
+//   require(tx.outputs[0].tokenCategory == null);  // Null check
+//
+// CORRECT:
+//   require(tx.outputs[0].tokenCategory == 0x);  // Empty bytes
+
+// MISTAKE 5: Not Validating Token Amount
+// ---------------------------------------
+// WRONG:
+//   require(tx.outputs[0].tokenCategory == expectedCategory);
+//   // Amount not checked - could be wrong quantity
+//
+// CORRECT:
+//   require(tx.outputs[0].tokenCategory == expectedCategory);
+//   require(tx.outputs[0].tokenAmount == expectedAmount);
+
+// ============================================================================
+// DEPLOYMENT CHECKLIST FOR TOKEN-AWARE CONTRACTS
+// ============================================================================
+//
+// Before deploying a contract handling tokens or BCH:
+//
+// [ ] Output count validation: require(tx.outputs.length == N)
+// [ ] Every output has tokenCategory validation
+// [ ] BCH-only outputs: require(tokenCategory == 0x)
+// [ ] Token outputs: require(tokenCategory == expectedCategory)
+// [ ] Token outputs: require(tokenAmount == expectedAmount)
+// [ ] Token outputs: require(tokenCapability == 0x) (unless minting intended)
+// [ ] NFT outputs: require(nftCommitment validation) (if data matters)
+// [ ] Input-output consistency for covenants
+// [ ] Test with attacker adding token inputs
+// [ ] Test with attacker adding extra outputs
+// [ ] Test with various token categories (spam, valuable, NFT)
+// [ ] Test wallet compatibility with outputs
+// [ ] Document expected token behavior clearly
+
+// ============================================================================
+// TESTING RECOMMENDATIONS
+// ============================================================================
+//
+// Test Cases for VULNERABLE version (no token validation):
+// 1. Send BCH with no tokens (normal operation)
+//    Expected: SUCCEEDS
+//
+// 2. Send BCH + attach spam tokens from additional input
+//    Expected: SUCCEEDS (VULNERABILITY - should fail)
+//
+// 3. Send BCH + attach NFT from additional input
+//    Expected: SUCCEEDS (VULNERABILITY - should fail)
+//
+// 4. Substitute valuable token with worthless token
+//    Expected: SUCCEEDS (VULNERABILITY - should fail)
+//
+// Test Cases for SECURE version (with token validation):
+// 1. Send BCH with no tokens
+//    Expected: SUCCEEDS (valid clean BCH)
+//
+// 2. Attempt to attach spam tokens to BCH output
+//    Expected: FAILS (tokenCategory != 0x check rejects)
+//
+// 3. Attempt to attach NFT to BCH output
+//    Expected: FAILS (tokenCategory != 0x check rejects)
+//
+// 4. Send correct token category and amount
+//    Expected: SUCCEEDS (valid token transfer)
+//
+// 5. Attempt token substitution
+//    Expected: FAILS (tokenCategory validation rejects)
+//
+// 6. Attempt wrong token amount
+//    Expected: FAILS (tokenAmount validation rejects)
+
+// ============================================================================
+// REAL-WORLD IMPACT EXAMPLES
+// ============================================================================
+//
+// Example 1: Payment Processor UTXO Pollution
+// --------------------------------------------
+// Company: BCH payment processor (1000+ merchants)
+// Vulnerability: No tokenCategory validation on merchant payouts
+// Attack: Spam token creator attaches worthless tokens to all payouts
+// Impact:
+//   - 1000 merchants receive spam tokens
+//   - Merchant wallets slow down/crash
+//   - Customer support overwhelmed
+//   - Trust in processor destroyed
+//   - $50k+ in cleanup costs, lost business
+//
+// Example 2: NFT Marketplace Theft
+// ---------------------------------
+// Platform: NFT marketplace for digital art
+// Vulnerability: NFT transfer doesn't validate tokenCategory
+// Attack: Seller substitutes valuable NFT with worthless token
+// Impact:
+//   - Buyer pays $10,000 for NFT
+//   - Receives worthless token instead
+//   - Seller keeps valuable NFT
+//   - Marketplace liable, reputation destroyed
+//   - Legal action, platform shutdown
+//
+// Example 3: Mobile Wallet BCH Lockup
+// ------------------------------------
+// Scenario: Mobile wallet receives BCH payment
+// Vulnerability: Sender doesn't validate tokenCategory == 0x
+// Attack: Sender attaches tokens to BCH payment
+// Impact:
+//   - User's wallet doesn't support tokens
+//   - UTXO appears but cannot be spent
+//   - User thinks they lost BCH
+//   - Support costs, bad reviews, user churn
+
+// ============================================================================
+// END OF FILE
+// ============================================================================
