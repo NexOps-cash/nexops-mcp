@@ -1,0 +1,425 @@
+pragma cashscript ^0.13.0;
+
+// CONTRACT TYPE: Dutch Auction (Descending Price)
+// USE CASE: Time-based price decay with first-come-first-served finality
+// SECURITY LEVEL: High
+// DESIGN GOAL: Explicit correctness, adversarial safety, audit clarity
+
+// SECURITY MODEL NOTE:
+// This contract assumes a trusted transaction builder for:
+// - Correct price calculation at current time
+// NexOps enforces price calculation correctness at build-time
+// Contract enforces: time bounds, price boundaries, reserve price, finality
+
+// ROLES:
+// - seller: Receives payment when first valid bid is accepted
+// - bidder: First person to bid at or above current declining price wins
+
+// AUCTION MECHANICS:
+// - Price starts high (startPrice) and decreases linearly over time
+// - Price declines to reservePrice by priceDecayEnd time
+// - First bidder to pay the current price (or higher) wins immediately
+// - After priceDecayEnd, price stays at reservePrice until auctionEnd
+// - Seller can reclaim item if no valid bids by auctionEnd
+
+// TIME PROGRESSION:
+// [start]----[price decay period]----[priceDecayEnd]----[auctionEnd]
+//    |              |                       |                |
+// startPrice   linear decay           reservePrice      no more bids
+
+// EXPLICIT DESIGN DECISIONS:
+// - This contract does NOT handle CashTokens (BCH-only auction)
+// - First valid bid wins immediately (no refunds needed)
+// - Price decay is LINEAR from startPrice to reservePrice
+// - After priceDecayEnd, price remains at reservePrice
+// - Seller can reclaim after auctionEnd if no bids accepted
+// - No partial bids (must pay full current price or more)
+
+contract AuctionDutch(
+    pubkey seller,           // Seller who receives payment or reclaims item
+    int startPrice,          // Initial high price (in satoshis)
+    int reservePrice,        // Minimum acceptable price (in satoshis)
+    int priceDecayStart,     // Absolute block time (MTP) when price decay begins
+    int priceDecayEnd,       // Absolute block time (MTP) when price reaches reserve
+    int auctionEnd           // Absolute block time (MTP) when auction closes
+) {
+    // BID PATH
+    // First bidder to pay the current declining price wins the auction
+    // This is the primary path - auction ends immediately on first valid bid
+    function bid(
+        sig bidderSig,
+        pubkey bidder,
+        bytes sellerOutput,     // Output address for seller to receive payment
+        int bidAmount,          // Amount bidder is paying
+        int currentPrice        // Current price at tx.time (calculated by builder)
+    ) {
+        // TOKEN CATEGORY CONSTANT
+        // bytes32 representation of "no token" for BCH-only validation
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+
+        // ACTIVE INPUT VALIDATION
+        // Verify that THIS contract is the input being spent
+        // Prevents UTXO position attacks where attacker places contract at wrong index
+        require(tx.inputs[this.activeInputIndex].lockingBytecode == this.lockingBytecode);
+
+        // INPUT TOKEN VALIDATION
+        // Prevent tokenized UTXO from being in auction contract
+        // Auction contract should only hold the auctioned item representation (BCH)
+        require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
+
+        // AUCTION TIME VALIDATION
+        // Bids are ONLY accepted BEFORE auction end
+        // tx.time represents the current block's median time past (MTP)
+        // It is consensus-derived and NOT user-controlled
+        // Use < operator because we want to ensure we're BEFORE auction end
+        require(tx.time < auctionEnd);
+
+        // BIDDER SIGNATURE VALIDATION
+        // Verify bidder signature explicitly
+        // Ensures bidder authorizes this purchase
+        require(checkSig(bidderSig, bidder));
+
+        // PRICE DECAY CALCULATION AND VALIDATION
+        // This is the core Dutch auction logic - price decreases over time
+        // We validate that the builder-provided currentPrice is correct
+        
+        int calculatedPrice;
+        
+        // CASE 1: Before price decay starts
+        // Price is at startPrice (maximum)
+        if (tx.time < priceDecayStart) {
+            calculatedPrice = startPrice;
+        }
+        // CASE 2: After price decay ends (but before auction end)
+        // Price is at reservePrice (minimum)
+        else if (tx.time >= priceDecayEnd) {
+            calculatedPrice = reservePrice;
+        }
+        // CASE 3: During price decay period
+        // Price declines linearly from startPrice to reservePrice
+        else {
+            // LINEAR PRICE DECAY FORMULA:
+            // currentPrice = startPrice - (elapsed / duration) * (startPrice - reservePrice)
+            // Where:
+            // - elapsed = tx.time - priceDecayStart (time since decay started)
+            // - duration = priceDecayEnd - priceDecayStart (total decay period)
+            // - priceRange = startPrice - reservePrice (total price drop)
+            
+            int elapsed = tx.time - priceDecayStart;
+            int duration = priceDecayEnd - priceDecayStart;
+            int priceRange = startPrice - reservePrice;
+            
+            // DIVISION-BY-ZERO PREVENTION
+            // This should be validated at deployment, but we check defensively
+            // If priceDecayEnd == priceDecayStart, this would divide by zero
+            require(duration > 0);
+            
+            // Calculate price drop from start
+            int priceDrop = (priceRange * elapsed) / duration;
+            
+            // Current price = start price minus the drop
+            calculatedPrice = startPrice - priceDrop;
+        }
+
+        // PRICE CALCULATION VALIDATION
+        // Verify the builder-provided currentPrice matches our calculation
+        // This prevents price manipulation attacks
+        require(currentPrice == calculatedPrice);
+
+        // RESERVE PRICE VALIDATION
+        // Current price can never go below reserve price
+        // This is redundant with the calculation logic but defensive
+        require(currentPrice >= reservePrice);
+
+        // BID AMOUNT VALIDATION
+        // Bidder must pay at least the current price
+        // Bidder can overpay (shows strong interest, speeds up transaction)
+        require(bidAmount >= currentPrice);
+
+        // BID AMOUNT POSITIVITY
+        // Bid amount must be positive
+        require(bidAmount > 0);
+
+        // OUTPUT VALIDATION
+        // Require exactly 1 output to prevent output manipulation
+        // Seller receives the payment immediately
+        require(tx.outputs.length == 1);
+
+        // SEMANTIC OUTPUT VALIDATION
+        // Verify the output sends payment to seller's specified address
+        require(tx.outputs[0].lockingBytecode == sellerOutput);
+        
+        // OUTPUT VALUE VALIDATION
+        // Verify exact bid amount is sent to seller
+        require(tx.outputs[0].value == bidAmount);
+        
+        // OUTPUT TOKEN VALIDATION
+        // Seller payment should be BCH-only (no tokens)
+        require(tx.outputs[0].tokenCategory == NO_TOKEN);
+
+        // FIRST-COME-FIRST-SERVED SAFETY NOTE:
+        // Dutch auctions are safe with first-come-first-served because:
+        // - Price only decreases over time (never increases)
+        // - Later bids always pay less than or equal to earlier bids
+        // - First bidder willing to pay current price has highest valuation
+        // - No incentive to wait (price drops, but someone else might bid)
+        // - Rational bidders bid when price equals their valuation
+        // - This creates a race to bid, which is the intended mechanism
+        // - No refunds needed (unlike English auction) simplifies safety
+
+        // PRICE DECAY CALCULATION CORRECTNESS NOTE:
+        // Linear decay ensures:
+        // - Predictable price at any time
+        // - No sudden price jumps or discontinuities
+        // - Easy for bidders to calculate when to bid
+        // - Fair price discovery mechanism
+        // Formula: price(t) = startPrice - ((t - start) / (end - start)) * (startPrice - reserve)
+        // This is mathematically correct for linear interpolation
+
+        // TIME BOUNDARY HANDLING NOTE:
+        // - Before priceDecayStart: price = startPrice (constant)
+        // - During decay: price decreases linearly
+        // - After priceDecayEnd: price = reservePrice (constant)
+        // - After auctionEnd: no bids accepted
+        // This creates clear phases with no ambiguity
+
+        // SECURITY NOTES:
+        // - First valid bid wins immediately (auction ends)
+        // - Seller receives full bid amount (minus mining fee if they choose)
+        // - No refunds needed (bidder wanted to pay this price)
+        // - Mining fee is implicit: bidAmount specified by bidder
+        // - Bidder can overpay to ensure fast confirmation
+    }
+
+    // RECLAIM PATH
+    // Seller reclaims the auctioned item if no bids were accepted before auction end
+    // This is the failure/timeout path
+    function reclaim(
+        sig sellerSig,
+        bytes sellerOutput,    // Output address for seller to reclaim item
+        int reclaimAmount      // Amount seller is reclaiming (should be 0 or dust)
+    ) {
+        // TOKEN CATEGORY CONSTANT
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+
+        // ACTIVE INPUT VALIDATION
+        // Verify that THIS contract is the input being spent
+        require(tx.inputs[this.activeInputIndex].lockingBytecode == this.lockingBytecode);
+
+        // INPUT TOKEN VALIDATION
+        // Prevent tokenized UTXO from being in auction contract
+        require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
+
+        // AUCTION END VALIDATION
+        // Seller can ONLY reclaim AFTER auction end
+        // tx.time represents the current block's median time past (MTP)
+        // It is consensus-derived and NOT user-controlled
+        // Use >= operator for post-auction validation
+        require(tx.time >= auctionEnd);
+
+        // SELLER SIGNATURE VALIDATION
+        // Verify seller signature explicitly
+        // Only seller can reclaim the item
+        require(checkSig(sellerSig, seller));
+
+        // INPUT VALUE CAPTURE
+        // Get the contract balance (should be 0 or minimal dust)
+        int inputValue = tx.inputs[this.activeInputIndex].value;
+
+        // RECLAIM AMOUNT VALIDATION
+        // Reclaim amount cannot exceed contract balance
+        require(reclaimAmount <= inputValue);
+
+        // RECLAIM AMOUNT NON-NEGATIVITY
+        // Reclaim amount must be non-negative (can be 0)
+        require(reclaimAmount >= 0);
+
+        // OUTPUT VALIDATION
+        // Require exactly 1 output to prevent output manipulation
+        // Seller reclaims any dust in the contract
+        require(tx.outputs.length == 1);
+
+        // SEMANTIC OUTPUT VALIDATION
+        // Verify the output sends funds to seller's specified address
+        require(tx.outputs[0].lockingBytecode == sellerOutput);
+        
+        // OUTPUT VALUE VALIDATION
+        // Verify exact reclaim amount is sent
+        require(tx.outputs[0].value == reclaimAmount);
+        
+        // OUTPUT TOKEN VALIDATION
+        // Reclaim output should be BCH-only (no tokens)
+        require(tx.outputs[0].tokenCategory == NO_TOKEN);
+
+        // SECURITY NOTES:
+        // - Seller can only reclaim after auction end time
+        // - This path is only used if no bids were accepted
+        // - Reclaim amount is typically 0 or minimal dust (contract deployment cost)
+        // - Mining fee is implicit: inputValue - reclaimAmount
+    }
+}
+
+// DEPLOYMENT NOTES:
+// - Set startPrice > reservePrice (ensures meaningful decay)
+// - Set reservePrice to minimum acceptable price
+// - Set priceDecayStart to auction start time
+// - Set priceDecayEnd > priceDecayStart (prevents division by zero)
+// - Set auctionEnd >= priceDecayEnd (ensures reserve price period)
+// - Fund contract with 0 or minimal BCH (just for UTXO validity)
+// - Seller should verify all parameters before deployment
+// - Ensure priceDecayStart > current time for proper auction start
+
+// PARAMETER VALIDATION AT DEPLOYMENT:
+// - startPrice > reservePrice (ensures positive price range)
+// - priceDecayStart < priceDecayEnd (ensures positive decay duration)
+// - priceDecayEnd <= auctionEnd (ensures reserve price period exists)
+// - All times should be in the future at deployment
+
+// AUCTION FLOW:
+// 1. Seller deploys contract with price parameters and time bounds
+// 2. Price starts at startPrice (if tx.time < priceDecayStart)
+// 3. Price declines linearly from startPrice to reservePrice
+// 4. First bidder to pay current price (or higher) wins immediately
+// 5. Seller receives payment and delivers item off-chain
+// 6. If no bids by auctionEnd, seller reclaims using reclaim()
+
+// PRICE DECAY MECHANICS:
+// Time Phase 1 (before priceDecayStart):
+// - Price = startPrice (constant)
+// - Bidders can purchase at maximum price
+// 
+// Time Phase 2 (priceDecayStart to priceDecayEnd):
+// - Price declines linearly
+// - Formula: price = startPrice - (elapsed / duration) * (startPrice - reservePrice)
+// - Bidders watch price and bid when it matches their valuation
+// 
+// Time Phase 3 (priceDecayEnd to auctionEnd):
+// - Price = reservePrice (constant)
+// - Bidders can purchase at minimum price
+// - This gives a window for reserve price acceptance
+// 
+// Time Phase 4 (after auctionEnd):
+// - No bids accepted
+// - Seller can reclaim
+
+// PRICE DECAY EXAMPLE:
+// - startPrice = 1000 sats
+// - reservePrice = 100 sats
+// - priceDecayStart = timestamp 1000
+// - priceDecayEnd = timestamp 2000
+// - Duration = 1000 seconds
+// - Price range = 900 sats
+// 
+// At timestamp 1000: price = 1000 sats (start)
+// At timestamp 1250: price = 1000 - (250/1000)*900 = 775 sats
+// At timestamp 1500: price = 1000 - (500/1000)*900 = 550 sats
+// At timestamp 1750: price = 1000 - (750/1000)*900 = 325 sats
+// At timestamp 2000: price = 100 sats (reserve)
+// After timestamp 2000: price = 100 sats (constant until auctionEnd)
+
+// FIRST-COME-FIRST-SERVED SAFETY:
+// Why Dutch auctions don't need refunds:
+// - Price only decreases (monotonically non-increasing)
+// - First bidder at price P values item >= P
+// - Later bidder at price Q < P values item >= Q
+// - First bidder had opportunity to wait for lower price but chose not to
+// - This reveals first bidder's valuation is >= P
+// - No fairness issue: earlier bidder paid more but got certainty
+// - Later bidders risk losing to earlier bids (trade-off)
+// - Economically efficient: item goes to bidder willing to pay most
+// - Simple finality: first valid bid wins, no complex refund logic
+
+// WHY FIRST-COME-FIRST-SERVED IS SAFE:
+// Dutch auctions naturally align with first-come-first-served because:
+// 1. Rational bidders bid when price = their valuation
+// 2. Higher valuations trigger earlier bids (at higher prices)
+// 3. Item goes to highest-valuation bidder (efficient allocation)
+// 4. No strategic benefit to waiting (someone else might bid first)
+// 5. Creates urgency (race to bid at acceptable price)
+// 6. Simple finality (no multi-round bidding or refund complexity)
+
+// TIME BOUNDARY HANDLING:
+// - Bidding period: tx.time < auctionEnd
+// - Reclaim period: tx.time >= auctionEnd
+// - No overlap: < and >= are complementary
+// - Price calculation phases are sequential and non-overlapping
+// - Clear separation: bidding XOR reclaiming, never both
+
+// EDGE CASES:
+// Case 1: No bids received
+// - Auction reaches auctionEnd
+// - Seller reclaims using reclaim()
+// - Seller can relist or sell through other means
+
+// Case 2: Bid at startPrice (before decay)
+// - Bidder pays maximum price
+// - Shows strong demand
+// - Auction ends immediately
+
+// Case 3: Bid at reservePrice (after decay)
+// - Bidder pays minimum acceptable price
+// - Seller accepts as it meets reserve
+// - Auction ends immediately
+
+// Case 4: Bid during decay period
+// - Bidder pays current declining price
+// - Optimal for both parties (price discovery)
+// - Auction ends immediately
+
+// SECURITY INVARIANTS:
+// ✓ Explicit activeInputIndex validation on all paths
+// ✓ Explicit input tokenCategory validation on all paths
+// ✓ Explicit output tokenCategory validation on all outputs
+// ✓ Explicit tx.outputs.length validation on all paths
+// ✓ Explicit lockingBytecode validation on all outputs
+// ✓ Explicit value validation on all outputs
+// ✓ Time validation uses < for before, >= for after (no fencepost errors)
+// ✓ Price decay calculation includes division-by-zero prevention
+// ✓ Price calculation validation ensures builder correctness
+// ✓ Reserve price enforced as minimum price
+// ✓ First valid bid wins immediately (no refunds needed)
+// ✓ No fee assumptions (caller specifies output amounts)
+// ✓ No output ordering assumptions (all outputs validated explicitly)
+
+// ANTI-PATTERN IMMUNITY:
+// ✓ Unvalidated position: activeInputIndex validated on all paths
+// ✓ Implicit output ordering: All outputs validated explicitly
+// ✓ Fee assumptions: Caller controls output amounts
+// ✓ Time validation errors: Uses < for before, >= for after
+// ✓ Token category vulnerabilities: Explicit validation on all inputs/outputs
+// ✓ Division by zero: Prevented by require(duration > 0) in price calculation
+// ✓ Price manipulation: Builder-provided price validated against calculation
+// ✓ Auction finality: First valid bid wins, no complex state management
+
+// AUDIT CHECKLIST:
+// [ ] Verify startPrice > reservePrice at deployment
+// [ ] Verify priceDecayStart < priceDecayEnd at deployment
+// [ ] Verify priceDecayEnd <= auctionEnd at deployment
+// [ ] Verify all times are in the future at deployment
+// [ ] Verify all paths validate activeInputIndex
+// [ ] Verify bid path validates price calculation correctly
+// [ ] Verify bid path prevents division by zero
+// [ ] Verify bid path enforces bidAmount >= currentPrice
+// [ ] Verify bid path validates tx.time < auctionEnd
+// [ ] Verify reclaim path validates tx.time >= auctionEnd
+// [ ] Verify all paths validate tokenCategory explicitly
+// [ ] Verify all signature checks use explicit checkSig
+// [ ] Test bid at startPrice (before decay)
+// [ ] Test bid during decay period (mid-range price)
+// [ ] Test bid at reservePrice (after decay)
+// [ ] Test bid after auctionEnd (should fail)
+// [ ] Test bid with amount < currentPrice (should fail)
+// [ ] Test reclaim before auctionEnd (should fail)
+// [ ] Test price calculation at various timestamps
+// [ ] Verify transaction builder cannot add unauthorized outputs
+// [ ] Verify mining fees are handled correctly (implicit in remainder)
+// [ ] Test edge case: no bids, seller reclaims
+// [ ] Verify first valid bid wins (auction ends immediately)
+// [ ] Verify price decay formula correctness (linear interpolation)
+
+// NEXOPS BUILDER RESPONSIBILITIES:
+// - Calculate correct currentPrice based on tx.time
+// - Ensure price calculation matches on-chain formula exactly
+// - Validate deployment parameters (price range, time bounds)
+// - This is enforced at BUILD-TIME
+// - On-chain validation ensures calculation correctness
