@@ -1,0 +1,250 @@
+pragma cashscript ^0.13.0;
+
+// COMMON MISTAKE: Division by Zero
+// SEVERITY: Critical (consensus failure, contract bricking)
+// CATEGORY: Arithmetic Safety
+
+// MISTAKE DESCRIPTION:
+// Performing division or modulo operations without validating that the divisor is non-zero.
+// In CashScript (and Bitcoin Script), division by zero causes script evaluation to fail,
+// resulting in consensus rejection of the transaction. This bricks the contract permanently
+// if the zero divisor is derived from contract parameters or input data.
+
+// WHY THIS IS CRITICAL:
+// - Division by zero causes immediate script failure (consensus-level rejection)
+// - Transaction is invalid and will never be accepted by the network
+// - Funds locked in the contract become permanently unspendable
+// - No recovery mechanism exists once deployed with vulnerable parameters
+// - Even a single division by zero path bricks the entire contract
+// - This is NOT a vulnerability that can be exploited - it's a denial of service to everyone
+
+// COMMON SCENARIOS:
+// 1. Vesting schedules with identical start and end times
+// 2. Price calculations with zero duration periods
+// 3. Proportional splits with zero total supply
+// 4. Reward calculations with zero staking period
+// 5. Linear interpolation with zero range
+// 6. Any formula using (endTime - startTime) where times could be equal
+
+// ❌ VULNERABLE EXAMPLE: Vesting without duration validation
+contract VestingVulnerable(
+    pubkey beneficiary,
+    int vestingStart,
+    int vestingEnd,
+    int totalAmount
+) {
+    function claim(sig beneficiarySig, int claimAmount) {
+        require(checkSig(beneficiarySig, beneficiary));
+        
+        // VULNERABLE: No check that vestingEnd > vestingStart
+        // If vestingEnd == vestingStart, this divides by zero
+        int duration = vestingEnd - vestingStart;
+        
+        // 💥 DIVISION BY ZERO: Script fails if duration == 0
+        // Contract is permanently bricked - funds are lost
+        int vestedAmount = (totalAmount * (tx.time - vestingStart)) / duration;
+        
+        require(claimAmount <= vestedAmount);
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].value == claimAmount);
+    }
+}
+
+// CONSEQUENCES OF THE VULNERABLE EXAMPLE:
+// - If deployed with vestingStart == vestingEnd (even by accident):
+//   - First claim attempt will divide by zero
+//   - Transaction will fail at consensus level
+//   - No transaction can ever spend this UTXO
+//   - Funds are permanently locked (bricked)
+//   - No recovery possible (contract is immutable)
+// - This is a DEPLOYMENT ERROR, not an attack vector
+// - Prevention MUST happen before deployment
+
+// ✅ SECURE EXAMPLE: Vesting with explicit duration validation
+contract VestingSecure(
+    pubkey beneficiary,
+    int vestingStart,
+    int vestingEnd,
+    int totalAmount
+) {
+    function claim(sig beneficiarySig, int claimAmount) {
+        require(checkSig(beneficiarySig, beneficiary));
+        
+        // ✅ CRITICAL VALIDATION: Prevent division by zero
+        // This ensures duration is always positive and non-zero
+        // Must be checked BEFORE any division operation
+        require(vestingEnd > vestingStart);
+        
+        // ✅ CORRECTNESS VALIDATION: Prevent negative vesting math
+        // This ensures we're not claiming before vesting starts
+        // Improves audit logic clarity and prevents ambiguous behavior
+        require(tx.time >= vestingStart);
+        
+        // Now safe: duration is guaranteed to be > 0
+        int duration = vestingEnd - vestingStart;
+        
+        // ✅ SAFE DIVISION: Cannot divide by zero
+        // elapsed = tx.time - vestingStart is guaranteed >= 0
+        int elapsed = tx.time - vestingStart;
+        int vestedAmount = (totalAmount * elapsed) / duration;
+        
+        require(claimAmount <= vestedAmount);
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].value == claimAmount);
+    }
+}
+
+// WHY THE SECURE EXAMPLE WORKS:
+// - require(vestingEnd > vestingStart) guarantees duration > 0 (CRITICAL)
+// - require(tx.time >= vestingStart) guarantees elapsed >= 0 (CORRECTNESS)
+// - Both checks happen BEFORE the division operation
+// - If either check fails, transaction is rejected with clear error
+// - Funds remain spendable (contract not bricked)
+// - Deployment errors are caught before funds are locked
+// - Simple, explicit, and foolproof protection
+
+// SEVERITY CLASSIFICATION:
+// NexOps classifies arithmetic safety issues by severity:
+//
+// SEVERITY: Critical (Consensus Bricking)
+// - Division by zero: / or % with unchecked divisor
+// - Consequence: Permanent fund loss, contract unusable
+// - Detection: AST-level - division/modulo nodes without dominating require
+// - Prevention: Mandatory divisor > 0 validation
+//
+// SEVERITY: High (Silent Miscalculation)
+// - Integer overflow in multiplication or addition
+// - Consequence: Incorrect amounts, potential fund loss
+// - Detection: AST-level - arithmetic operations on unbounded inputs
+// - Prevention: Bounded input validation, explicit overflow checks
+//
+// SEVERITY: Medium (Logic Correctness)
+// - Negative time calculations: (tx.time - start) without start <= tx.time check
+// - Consequence: Unexpected behavior, potential logic errors
+// - Detection: AST-level - subtraction used in critical calculations
+// - Prevention: Explicit ordering validation (tx.time >= start)
+//
+// This classification helps NexOps audit agents prioritize issues deterministically.
+
+// STRUCTURAL INVARIANT FOR NEXOPS:
+// AST-Level Rule: Division Safety Invariant
+// For every AST node of type:
+// - BinaryExpression with operator '/' (division)
+// - BinaryExpression with operator '%' (modulo)
+// There must exist a DOMINATING require() statement that ensures:
+// - divisor > 0 (for positive-only divisors)
+// - OR divisor != 0 (for divisors that can be negative but not zero)
+// Where "dominating" means:
+// - The require() executes in ALL code paths leading to the division
+// - The require() executes BEFORE the division in control flow
+// - No intermediate code can modify the divisor between check and use
+
+// DETECTION RULES (AST-BASED):
+// 1. Parse contract into Abstract Syntax Tree (AST)
+// 2. Identify all BinaryExpression nodes with operator '/' or '%'
+// 3. Extract the right operand (divisor) of each division/modulo
+// 4. Perform control flow analysis to find all paths to this node
+// 5. For each path, verify a require() statement exists that:
+//    a. References the same divisor variable or expression
+//    b. Enforces divisor > 0 or divisor != 0
+//    c. Dominates the division node (executes before in all paths)
+// 6. If any path lacks this dominating require(), flag as CRITICAL
+
+// TEXTUAL PATTERNS (SUPPLEMENTARY):
+// While AST analysis is primary, these textual patterns help identify candidates:
+// ❌ (endTime - startTime) without require(endTime > startTime)
+// ❌ (total - used) without require(total > used)
+// ❌ userInput without require(userInput != 0)
+// ❌ (price * quantity) / total without require(total > 0)
+// ❌ balance / count without require(count > 0)
+
+// CORRECT PROTECTION PATTERNS:
+// ✅ require(divisor > 0) before division (for positive-only divisors)
+// ✅ require(divisor != 0) before division (for divisors that can be negative)
+// ✅ require(endTime > startTime) before using (endTime - startTime)
+// ✅ require(total >= used) before using (total - used) as divisor
+// ✅ Early validation at the start of the function (minimizes code paths)
+
+// MODULO OPERATIONS:
+// The modulo operator (%) has the same division-by-zero risk
+// ❌ value % divisor  // Fails if divisor == 0
+// ✅ require(divisor > 0); value % divisor
+
+// BEST PRACTICES:
+// 1. Always validate divisors before division/modulo operations
+// 2. Use require(divisor > 0) not require(divisor != 0) when dealing with durations/counts
+// 3. Place validation checks as early as possible in the function
+// 4. Document WHY each division is safe in comments
+// 5. In deployment scripts, validate parameters before contract creation
+// 6. Use NexOps static analysis to detect potential division by zero
+// 7. Test with edge case parameters (equal times, zero values, etc.)
+// 8. Add correctness checks (like tx.time >= vestingStart) to prevent negative math
+
+// DEPLOYMENT VALIDATION:
+// Before deploying contracts with division operations, validate:
+// - vestingEnd > vestingStart (for vesting contracts)
+// - auctionEnd > auctionStart (for auction contracts)
+// - priceDecayEnd > priceDecayStart (for Dutch auctions)
+// - totalSupply > 0 (for proportional distributions)
+// - Any subtraction used as a divisor results in positive value
+
+// RELATIONSHIP TO OTHER ANTI-PATTERNS:
+// - Often combined with unenforced parameter constraints
+// - Can occur in price calculation formulas
+// - Common in time-based linear interpolation
+// - Related to general arithmetic overflow/underflow concerns
+// - Connected to implicit_output_ordering (both require explicit validation)
+
+// NEXOPS ENFORCEMENT:
+// NexOps MUST:
+// 1. Parse contracts into AST representation
+// 2. Identify all division (/) and modulo (%) nodes
+// 3. Perform control flow analysis to find dominating require() statements
+// 4. Verify divisor validation exists in ALL code paths
+// 5. Flag any division without dominating bounds checking as CRITICAL
+// 6. Validate deployment parameters before contract creation
+// 7. Reject contracts with potential division by zero
+// 8. Provide clear error messages with:
+//    - Line number of vulnerable division
+//    - Divisor expression that needs validation
+//    - Suggested fix (require statement to add)
+
+// AUDIT CHECKLIST FOR DIVISION OPERATIONS:
+// [ ] Identify all division (/) and modulo (%) operations (AST scan)
+// [ ] For each operation, extract divisor expression
+// [ ] Trace divisor to its source (parameter, calculation, or input)
+// [ ] Verify require(divisor > 0) or require(divisor != 0) exists
+// [ ] Verify require executes in ALL code paths leading to division (dominance)
+// [ ] Check that validation happens BEFORE division, not after
+// [ ] Verify no code between validation and division modifies divisor
+// [ ] Test with edge case parameters that could cause zero divisor
+// [ ] Validate deployment parameters prevent zero divisor scenarios
+// [ ] Check for negative math issues (add tx.time >= start checks)
+// [ ] Document why each division is safe in code comments
+// [ ] Run NexOps static analyzer to verify all divisions are protected
+
+// TESTING RECOMMENDATIONS:
+// - Test with vestingStart == vestingEnd (should fail deployment validation)
+// - Test with tx.time < vestingStart (should fail with correctness check)
+// - Test with zero duration periods
+// - Test with minimal valid duration (e.g., 1 second)
+// - Test all edge cases where parameters could be equal
+// - Use fuzzing to test with random parameter combinations
+// - Verify error messages are clear and actionable
+
+// REAL-WORLD IMPACT:
+// - Funds lost: Potentially millions if large contract is deployed incorrectly
+// - User impact: Permanent loss, no recovery mechanism
+// - Reputation damage: Severe for protocol deploying bricked contracts
+// - Legal liability: Possible if negligence can be proven
+// - Prevention cost: Nearly zero (one or two require statements)
+// - Fix cost: Impossible (contract is immutable)
+
+// EXAMPLE NEXOPS ERROR MESSAGE:
+// ❌ CRITICAL: Division by zero risk detected
+// File: vesting_contract.cash
+// Line: 42
+// Expression: (totalAmount * elapsed) / duration
+// Issue: Divisor 'duration' may be zero
+// Fix: Add 'require(vestingEnd > vestingStart);' before division
+// Severity: Critical (consensus bricking)

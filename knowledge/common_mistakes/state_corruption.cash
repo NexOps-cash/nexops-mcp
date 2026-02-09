@@ -1,0 +1,403 @@
+pragma cashscript ^0.13.0;
+
+// COMMON MISTAKE: State Corruption via Invalid Transitions
+// SEVERITY: Critical (fund loss, logic bypass, protocol violation)
+// CATEGORY: Covenant Continuation Safety
+
+// MISTAKE DESCRIPTION:
+// Allowing state transitions that violate contract invariants by failing to validate
+// that covenant continuation outputs maintain required state properties. This includes
+// state length mismatches, invalid state values, unauthorized state mutations, and
+// missing state fields. In stateful covenants, the contract must cryptographically
+// enforce that its future self maintains all required properties.
+
+// WHY THIS IS CRITICAL:
+// - State corruption allows bypassing contract logic and security guarantees
+// - Attacker can craft continuation states that violate invariants
+// - Can lead to fund theft, unauthorized withdrawals, or protocol violations
+// - Breaks the fundamental covenant model (self-enforcing rules)
+// - Once corrupted state is committed, it cannot be reversed (immutable)
+// - Undermines trust in the entire covenant system
+
+// COMMON SCENARIOS:
+// 1. Not validating continuation contract lockingBytecode matches expected structure
+// 2. State length mismatches (e.g., 32-byte hash becomes 16 bytes)
+// 3. Missing required state fields in continuation
+// 4. Allowing state mutations that violate invariants
+// 5. Not validating serialized state format
+// 6. Trusting builder-provided continuation without verification
+// 7. Partial state validation (checking some fields but not all)
+
+// COVENANT STATE MODEL:
+// A stateful covenant recreates itself with updated state:
+// Input: Contract(state1) → Output: Contract(state2)
+// The contract MUST validate that state2 is a valid successor to state1
+// This is NOT enforced automatically - it requires explicit validation
+
+// ❌ VULNERABLE EXAMPLE: Counter without state validation
+contract CounterVulnerable(
+    bytes32 stateHash  // Hash of current counter state
+) {
+    // Increment counter and continue with new state
+    function increment(
+        bytes currentState,     // Current counter value (serialized)
+        bytes32 newStateHash,   // Hash of new counter value (UNCHECKED)
+        bytes newContractOutput // Continuation contract output (UNCHECKED)
+    ) {
+        // VULNERABLE: No validation that currentState matches stateHash
+        // Attacker can provide arbitrary currentState
+        // 💥 STATE CORRUPTION: Can claim any current value
+        
+        // VULNERABLE: No validation of currentState format/length
+        // Attacker can provide malformed state
+        // 💥 STATE LENGTH MISMATCH: Can break state assumptions
+        
+        // Assume currentState is a 4-byte integer (no validation)
+        bytes4 counterBytes = bytes4(currentState);
+        int counter = int(counterBytes);
+        
+        // Increment counter
+        int newCounter = counter + 1;
+        bytes4 newCounterBytes = bytes4(newCounter);
+        
+        // VULNERABLE: No validation that newStateHash is correct
+        // Attacker can provide arbitrary newStateHash
+        // 💥 STATE CORRUPTION: Can commit invalid hash for future state
+        
+        // VULNERABLE: No validation of newContractOutput structure
+        // Attacker can redirect continuation to different contract
+        // 💥 COVENANT ESCAPE: Can break out of covenant constraints
+        
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].lockingBytecode == newContractOutput);
+        require(tx.outputs[0].value >= tx.inputs[this.activeInputIndex].value);
+    }
+}
+
+// CONSEQUENCES OF THE VULNERABLE EXAMPLE:
+// Attack Scenario 1: State hash bypass
+// - Attacker provides currentState = 0x00000064 (counter = 100)
+// - But stateHash = hash(0x00000001) (should be counter = 1)
+// - Contract doesn't verify currentState matches stateHash
+// - Attacker skips 99 increments, breaking counter invariant
+//
+// Attack Scenario 2: State length mismatch
+// - Contract expects 4-byte counter
+// - Attacker provides currentState = 0xFFFFFFFFFFFFFFFF (8 bytes)
+// - bytes4(currentState) truncates to first 4 bytes
+// - State interpretation corrupted, undefined behavior
+//
+// Attack Scenario 3: Invalid continuation hash
+// - Attacker increments counter: 1 → 2
+// - Provides newStateHash = hash(0x00000005) instead of hash(0x00000002)
+// - Next increment starts from corrupted state (thinks counter = 5)
+// - Counter jumps forward, breaking monotonic increment invariant
+//
+// Attack Scenario 4: Covenant escape
+// - Attacker provides newContractOutput = different contract bytecode
+// - Continuation output is not the same Counter contract
+// - Breaks out of covenant constraints
+// - Can redirect funds to arbitrary contract or address
+
+// ✅ SECURE EXAMPLE: Counter with comprehensive state validation
+contract CounterSecure(
+    bytes32 stateHash  // Hash of current counter state
+) {
+    // Increment counter and continue with new state
+    function increment(
+        bytes currentState,     // Current counter value (serialized)
+        bytes newContractOutput // Continuation contract output
+    ) {
+        // ✅ CRITICAL VALIDATION: State format validation
+        // Ensure currentState is exactly 4 bytes (expected format)
+        // Prevents state length mismatch attacks
+        require(currentState.length == 4);
+        
+        // ✅ CRITICAL VALIDATION: State integrity validation
+        // Verify currentState matches the committed stateHash
+        // Prevents state hash bypass attacks
+        require(hash256(currentState) == stateHash);
+        
+        // Now safe: currentState is verified to be correct
+        bytes4 counterBytes = bytes4(currentState);
+        int counter = int(counterBytes);
+        
+        // Increment counter (state transition logic)
+        int newCounter = counter + 1;
+        bytes4 newCounterBytes = bytes4(newCounter);
+        
+        // ✅ CRITICAL VALIDATION: New state hash calculation
+        // Calculate the correct hash for the new state
+        // This is NOT provided by caller - we calculate it ourselves
+        bytes32 newStateHash = hash256(bytes(newCounterBytes));
+        
+        // ✅ CRITICAL VALIDATION: Covenant continuation validation
+        // The continuation output MUST be the same contract with new state
+        // We reconstruct the expected lockingBytecode and validate it matches
+        // This prevents covenant escape attacks
+        
+        // Expected continuation: Counter(newStateHash)
+        // In practice, this requires reconstructing the contract bytecode
+        // CashScript limitation: We cannot reconstruct lockingBytecode on-chain
+        // WORKAROUND: Validate the output matches our current structure
+        require(
+            tx.outputs[0].lockingBytecode == 
+            tx.inputs[this.activeInputIndex].lockingBytecode
+        );
+        
+        // This validates structure but NOT state parameter update
+        // KNOWN LIMITATION: Cannot enforce newStateHash in continuation on-chain
+        // NexOps MUST validate state parameter updates at build-time
+        
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].value >= tx.inputs[this.activeInputIndex].value);
+        
+        // SECURITY NOTE: We validate:
+        // ✓ Current state format (length == 4)
+        // ✓ Current state integrity (hash matches stateHash)
+        // ✓ New state calculation (deterministic from current state)
+        // ✓ Continuation structure (same contract)
+        // ⚠ New state commitment (validated by NexOps builder, not on-chain)
+    }
+}
+
+// WHY THE SECURE EXAMPLE WORKS:
+// - require(currentState.length == 4) enforces expected state format (CRITICAL)
+// - require(hash256(currentState) == stateHash) verifies state integrity (CRITICAL)
+// - newStateHash calculated on-chain (not trusted from caller) (CRITICAL)
+// - Continuation lockingBytecode validated (prevents covenant escape) (CRITICAL)
+// - State transition is deterministic and verifiable
+// - Attacker cannot provide arbitrary state values
+// - State invariants are preserved across transitions
+
+// SEVERITY CLASSIFICATION:
+// NexOps classifies state corruption issues by severity:
+//
+// SEVERITY: Critical (Fund Loss / Protocol Violation)
+// - Missing state integrity validation (hash check)
+// - Missing covenant continuation validation
+// - Consequence: Fund theft, logic bypass, covenant escape
+// - Detection: AST-level - state hash comparison, lockingBytecode validation
+// - Prevention: Mandatory state hash validation, continuation enforcement
+//
+// SEVERITY: High (State Invariant Violation)
+// - State length mismatch (wrong size)
+// - Invalid state values (out of range)
+// - Consequence: Protocol malfunction, unexpected behavior
+// - Detection: AST-level - state deserialization without length check
+// - Prevention: Explicit format validation before deserialization
+//
+// SEVERITY: Medium (Incomplete Validation)
+// - Partial state validation (some fields checked, others not)
+// - Trusting builder for state calculation
+// - Consequence: Subtle bugs, edge case failures
+// - Detection: Code review - state validation coverage analysis
+// - Prevention: Comprehensive validation of all state components
+
+// STRUCTURAL INVARIANT FOR NEXOPS:
+// AST-Level Rule: State Integrity Invariant
+// For stateful covenants (contracts with state parameters):
+// 1. State Commitment:
+//    - If contract has state parameter (e.g., stateHash, merkleRoot)
+//    - There must exist validation that input state matches commitment
+//    - Pattern: require(hash256(state) == stateCommitment)
+//
+// 2. State Format:
+//    - Before deserializing state (e.g., bytes4(state), int(state))
+//    - There must exist length validation
+//    - Pattern: require(state.length == EXPECTED_LENGTH)
+//
+// 3. Covenant Continuation:
+//    - If contract recreates itself (covenant continuation)
+//    - There must exist validation of continuation lockingBytecode
+//    - Pattern: require(output.lockingBytecode == expected)
+//    - Minimum: require(output.lockingBytecode == input.lockingBytecode)
+//
+// 4. State Transition:
+//    - New state must be calculated on-chain (not trusted from caller)
+//    - Pattern: newState = calculateState(currentState) [on-chain]
+//    - NOT: newState = userProvidedState [trusted]
+
+// DETECTION RULES (AST-BASED):
+// 1. Identify stateful covenants:
+//    - Contracts with hash/commitment parameters (e.g., bytes32 stateHash)
+//    - Contracts with state deserialization (bytes to int/bytes4)
+//    - Contracts with covenant continuation patterns
+//
+// 2. For each stateful covenant, verify:
+//    a. State integrity check exists: hash256(state) == commitment
+//    b. State format validation exists: state.length == expected
+//    c. Continuation validation exists: output.lockingBytecode checked
+//    d. State transition is deterministic: new state calculated on-chain
+//
+// 3. Flag violations:
+//    - CRITICAL: Missing state integrity check
+//    - CRITICAL: Missing continuation validation
+//    - HIGH: Missing state format validation
+//    - MEDIUM: State transition trusts caller input
+
+// COMMON STATE CORRUPTION PATTERNS TO AVOID:
+
+// Pattern 1: No state integrity validation
+// ❌ VULNERABLE:
+// function update(bytes state, bytes32 newHash) {
+//     int value = int(state);  // No validation that state is correct
+// }
+//
+// ✅ SECURE:
+// function update(bytes state, bytes32 newHash) {
+//     require(hash256(state) == this.stateHash);
+//     int value = int(state);
+// }
+
+// Pattern 2: No state length validation
+// ❌ VULNERABLE:
+// bytes4 counter = bytes4(state);  // Truncates if state.length > 4
+//
+// ✅ SECURE:
+// require(state.length == 4);
+// bytes4 counter = bytes4(state);
+
+// Pattern 3: Trusting caller for new state hash
+// ❌ VULNERABLE:
+// function update(bytes state, bytes32 userProvidedNewHash) {
+//     require(hash256(state) == this.stateHash);
+//     // Use userProvidedNewHash in continuation (WRONG)
+// }
+//
+// ✅ SECURE:
+// function update(bytes state) {
+//     require(hash256(state) == this.stateHash);
+//     bytes newState = calculateNewState(state);
+//     bytes32 newHash = hash256(newState);  // Calculate on-chain
+// }
+
+// Pattern 4: No continuation validation
+// ❌ VULNERABLE:
+// require(tx.outputs[0].lockingBytecode == userProvidedBytecode);
+//
+// ✅ SECURE:
+// require(
+//     tx.outputs[0].lockingBytecode ==
+//     tx.inputs[this.activeInputIndex].lockingBytecode
+// );
+
+// COVENANT CONTINUATION BEST PRACTICES:
+
+// Option A: Exact Structure Validation (Secure but Limiting)
+// ✅ Validates structure is unchanged
+// ⚠️ Cannot update state parameters on-chain (CashScript limitation)
+// require(
+//     tx.outputs[0].lockingBytecode ==
+//     tx.inputs[this.activeInputIndex].lockingBytecode
+// );
+
+// Option B: Builder-Verified State Update (Secure with NexOps)
+// ✅ Allows state parameter updates
+// ✅ Builder validates new contract matches expected structure + new state
+// ⚠️ Requires NexOps build-time validation
+// // On-chain: Validate structure
+// require(structureMatches(tx.outputs[0].lockingBytecode));
+// // Off-chain (NexOps): Validate state parameter is newStateHash
+
+// Option C: State Commitment Only (Simplest)
+// ✅ Doesn't require covenant continuation
+// ✅ Next transaction validates state independently
+// ⚠️ Doesn't enforce covenant structure preservation
+// // Just validate state integrity each time
+// require(hash256(state) == stateHash);
+
+// STATE VALIDATION CHECKLIST:
+// For any contract with state:
+// [ ] Identify all state parameters (hashes, commitments, roots)
+// [ ] Identify all state deserialization points (bytes → int, bytes4, etc.)
+// [ ] Add length validation before every deserialization
+// [ ] Add integrity validation (hash check) before using state
+// [ ] Calculate new state on-chain (don't trust caller)
+// [ ] Validate continuation lockingBytecode (if covenant)
+// [ ] Document state format and invariants clearly
+// [ ] Test with malformed state (wrong length, invalid hash)
+// [ ] Test with corrupted continuation (wrong contract)
+
+// BEST PRACTICES:
+// 1. Always validate state length before deserialization
+// 2. Always validate state hash matches commitment
+// 3. Calculate new state on-chain (don't trust caller)
+// 4. Validate covenant continuation lockingBytecode
+// 5. Document expected state format in comments
+// 6. Use fixed-length state formats when possible (easier to validate)
+// 7. Consider state versioning for upgradeable covenants
+// 8. Test with corrupted state inputs (fuzzing)
+
+// DEPLOYMENT VALIDATION:
+// Before deploying stateful covenants:
+// - Verify initial state is well-formed
+// - Verify initial state hash matches commitment
+// - Document state format and transition rules
+// - Test all state transitions with edge cases
+// - Verify NexOps builder validates state updates correctly
+
+// RELATIONSHIP TO OTHER ANTI-PATTERNS:
+// - Related to unenforced_covenant_continuation (both about continuation safety)
+// - Connected to implicit_output_ordering (state often in outputs)
+// - Part of general covenant safety discipline
+// - Often combined with array_bounds issues (accessing state fields)
+
+// NEXOPS ENFORCEMENT:
+// NexOps MUST:
+// 1. Identify stateful covenants (contracts with hash/commitment parameters)
+// 2. Verify state integrity validation exists (hash checks)
+// 3. Verify state format validation exists (length checks)
+// 4. Verify covenant continuation validation exists
+// 5. Verify new state is calculated on-chain (not trusted)
+// 6. At build-time, validate state parameter updates in continuations
+// 7. Flag violations by severity (CRITICAL for missing integrity checks)
+// 8. Provide clear error messages with suggested fixes
+
+// AUDIT CHECKLIST FOR STATE VALIDATION:
+// [ ] Identify all state parameters in contract
+// [ ] Identify all state deserialization operations
+// [ ] Verify length validation before each deserialization
+// [ ] Verify hash validation for each state parameter
+// [ ] Verify new state calculation is on-chain
+// [ ] Verify covenant continuation lockingBytecode validation
+// [ ] Check that all validations happen BEFORE state use
+// [ ] Test with wrong-length state (should fail)
+// [ ] Test with wrong-hash state (should fail)
+// [ ] Test with corrupted continuation (should fail)
+// [ ] Document state format and invariants
+// [ ] Run NexOps static analyzer to verify state safety
+
+// TESTING RECOMMENDATIONS:
+// - Test with currentState.length != expected (should fail)
+// - Test with hash256(currentState) != stateHash (should fail)
+// - Test with corrupted newStateHash (should fail in next transition)
+// - Test with wrong continuation contract (should fail)
+// - Test valid state transitions (should succeed)
+// - Use fuzzing to test random state values
+// - Test state boundary values (min, max, edge cases)
+
+// REAL-WORLD IMPACT:
+// - Fund loss: Attacker can drain covenant by corrupting state
+// - Protocol violation: State invariants broken, system trust lost
+// - User impact: Unexpected behavior, lost funds, broken guarantees
+// - Reputation damage: Severe for protocols with state corruption bugs
+// - Prevention cost: Minimal (a few validation checks)
+// - Fix cost: Impossible (contract is immutable)
+
+// KNOWN CASHSCRIPT LIMITATIONS:
+// - Cannot reconstruct lockingBytecode with updated parameters on-chain
+// - Cannot verify continuation state parameter matches calculated state
+// - Workaround: NexOps validates state updates at build-time
+// - Alternative: Use exact structure validation (no parameter updates)
+// - Future: Consider stateless designs or external state tracking
+
+// EXAMPLE NEXOPS ERROR MESSAGE:
+// ❌ CRITICAL: State corruption risk detected
+// File: counter_contract.cash
+// Line: 23
+// Issue: State 'currentState' is deserialized without integrity validation
+// Missing: require(hash256(currentState) == stateHash);
+// Consequence: Attacker can provide arbitrary state values
+// Fix: Add state integrity check before deserialization
+// Severity: Critical (fund loss, protocol violation)

@@ -1,0 +1,355 @@
+pragma cashscript ^0.13.0;
+
+// COMMON MISTAKE: Integer Overflow
+// SEVERITY: High (silent miscalculation, potential fund loss)
+// CATEGORY: Arithmetic Safety
+
+// MISTAKE DESCRIPTION:
+// Performing arithmetic operations (addition, multiplication, subtraction) without validating
+// that the result stays within safe bounds. In CashScript, integers are 64-bit signed values
+// with range: -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807. Overflow causes
+// wraparound behavior (silent failure) rather than consensus failure, leading to incorrect
+// calculations and potential fund loss.
+
+// WHY THIS IS CRITICAL:
+// - Integer overflow wraps around silently (no error, no transaction failure)
+// - Can cause balances to become negative or unexpectedly small
+// - Can bypass validation checks (e.g., require(amount <= balance) with overflowed balance)
+// - Can result in incorrect payment amounts (underpayment or overpayment)
+// - Can break invariants that contracts rely on for safety
+// - Difficult to detect without careful analysis (no consensus rejection)
+// - Can be exploited maliciously or occur accidentally
+
+// COMMON SCENARIOS:
+// 1. Incrementing counters without upper bound checks
+// 2. Accumulating totals (sum of deposits, stakes, votes)
+// 3. Multiplying large values (price * quantity, amount * rate)
+// 4. Exponential growth calculations (compound interest, rewards)
+// 5. Time-based accumulations (rewards per second * elapsed time)
+// 6. Subtraction resulting in unexpectedly negative values
+
+// BITCOIN SCRIPT INTEGER LIMITS:
+// - Minimum: -9223372036854775808 (-2^63)
+// - Maximum:  9223372036854775807 (2^63 - 1)
+// - Common satoshi amounts can overflow when multiplied by rates or time
+// - Example: 100,000,000 sats * 100,000,000 rate = overflow
+
+// ❌ VULNERABLE EXAMPLE: Counter without overflow protection
+contract CounterVulnerable(
+    pubkey owner,
+    int currentCount  // Current counter value
+) {
+    function increment(
+        sig ownerSig,
+        int incrementAmount
+    ) {
+        require(checkSig(ownerSig, owner));
+        
+        // VULNERABLE: No check that currentCount + incrementAmount stays in bounds
+        // If currentCount = 9223372036854775807 (max int64)
+        // And incrementAmount = 1
+        // Then newCount wraps to -9223372036854775808 (min int64)
+        int newCount = currentCount + incrementAmount;
+        
+        // 💥 SILENT OVERFLOW: newCount may have wrapped around
+        // Contract continues executing with incorrect value
+        // No consensus failure, no error - just wrong math
+        
+        // This validation is USELESS after overflow
+        require(newCount > currentCount);  // Will fail after wraparound, but too late
+        
+        require(tx.outputs.length == 1);
+        // Output would encode the overflowed value, corrupting contract state
+    }
+}
+
+// CONSEQUENCES OF THE VULNERABLE EXAMPLE:
+// - If currentCount approaches max int64:
+//   - Increment causes wraparound to large negative number
+//   - Contract state becomes corrupted
+//   - Future operations may fail or produce wrong results
+//   - Funds may be distributed incorrectly
+// - If used for access control (e.g., require(count < maxAllowed)):
+//   - Overflow could bypass the limit
+//   - Unauthorized access or withdrawals
+// - If used for calculations (e.g., rewards = count * rate):
+//   - Incorrect reward amounts
+//   - Potential fund drainage or shortfall
+
+// ❌ VULNERABLE EXAMPLE: Multiplication without bounds checking
+contract RewardVulnerable(
+    pubkey staker,
+    int stakedAmount,
+    int rewardRate  // Reward per staked token per block
+) {
+    function claim(
+        sig stakerSig,
+        int blockElapsed
+    ) {
+        require(checkSig(stakerSig, staker));
+        
+        // VULNERABLE: No check that stakedAmount * rewardRate * blockElapsed stays in bounds
+        // Example: stakedAmount = 1,000,000,000 (10 BCH in sats)
+        //          rewardRate = 1,000,000 (1% per block in basis points)
+        //          blockElapsed = 10,000 blocks
+        // Result: 1,000,000,000 * 1,000,000 * 10,000 = overflow
+        int totalReward = stakedAmount * rewardRate * blockElapsed;
+        
+        // 💥 SILENT OVERFLOW: totalReward wraps around to negative or small value
+        // User receives incorrect reward (possibly negative, possibly tiny)
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].value == totalReward);  // Wrong amount!
+    }
+}
+
+// ✅ SECURE EXAMPLE: Counter with explicit overflow protection
+contract CounterSecure(
+    pubkey owner,
+    int currentCount,  // Current counter value
+    int maxCount       // Maximum allowed counter value
+) {
+    function increment(
+        sig ownerSig,
+        int incrementAmount
+    ) {
+        require(checkSig(ownerSig, owner));
+        
+        // ✅ INPUT VALIDATION: Ensure increment is positive and reasonable
+        require(incrementAmount > 0);
+        require(incrementAmount <= 1000000);  // Reasonable upper bound for single increment
+        
+        // ✅ OVERFLOW PREVENTION: Check that addition stays within bounds
+        // Method 1: Check against maximum allowed value BEFORE addition
+        require(currentCount <= maxCount - incrementAmount);
+        
+        // Alternative Method 2: Check against int64 max BEFORE addition
+        // require(currentCount <= 9223372036854775807 - incrementAmount);
+        
+        // Now safe: guaranteed not to overflow
+        int newCount = currentCount + incrementAmount;
+        
+        // ✅ POST-CONDITION VALIDATION: Verify result makes sense
+        require(newCount > currentCount);  // Should always be true if no overflow
+        require(newCount <= maxCount);     // Enforce maximum bound
+        
+        require(tx.outputs.length == 1);
+        // Output encodes safe, validated value
+    }
+}
+
+// WHY THE SECURE EXAMPLE WORKS:
+// - Pre-validates that currentCount + incrementAmount won't exceed maxCount
+// - Uses algebraic rearrangement: (a + b <= max) → (a <= max - b)
+// - This avoids computing the potentially-overflowing sum
+// - Checks happen BEFORE the arithmetic operation
+// - Post-condition validation catches any logic errors
+// - Multiple layers of defense (input bounds, pre-check, post-check)
+
+// ✅ SECURE EXAMPLE: Safe multiplication with bounds checking
+contract RewardSecure(
+    pubkey staker,
+    int stakedAmount,
+    int rewardRate,     // Reward per staked token per block (in basis points)
+    int maxBlockElapsed // Maximum claimable blocks (prevents overflow)
+) {
+    function claim(
+        sig stakerSig,
+        int blockElapsed
+    ) {
+        require(checkSig(stakerSig, staker));
+        
+        // ✅ INPUT VALIDATION: Ensure inputs are within safe ranges
+        require(blockElapsed > 0);
+        require(blockElapsed <= maxBlockElapsed);
+        
+        // ✅ OVERFLOW PREVENTION: Bound intermediate calculations
+        // Instead of: totalReward = stakedAmount * rewardRate * blockElapsed
+        // We compute in stages with bounds checking
+        
+        // First, check that stakedAmount * rewardRate won't overflow
+        // Safe threshold: if both < sqrt(max_int64) ≈ 3,037,000,499
+        require(stakedAmount <= 100000000000);  // 1000 BCH in sats (reasonable max stake)
+        require(rewardRate <= 10000);            // 100% reward rate in basis points
+        
+        int intermediateReward = stakedAmount * rewardRate;
+        
+        // Then check that intermediateReward * blockElapsed won't overflow
+        // Given our bounds above, intermediateReward <= 1,000,000,000,000
+        require(blockElapsed <= 9223372);  // maxBlockElapsed prevents overflow
+        
+        int totalReward = intermediateReward * blockElapsed;
+        
+        // ✅ SANITY CHECK: Ensure result is positive (catches negative wraparound)
+        require(totalReward > 0);
+        
+        // Typically, divide by basis points to get actual reward
+        int actualReward = totalReward / 10000;
+        
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].value == actualReward);
+    }
+}
+
+// ALTERNATIVE SAFE PATTERN: Division before multiplication
+// For calculations like (amount * rate * time), consider:
+// - Rearrange to (amount * time) * rate if time is bounded
+// - Or compute amount * (rate / divisor) * time if rate can be reduced first
+// - Use smaller units (e.g., whole BCH instead of satoshis where possible)
+// - Cap individual factors to safe ranges
+
+// SEVERITY CLASSIFICATION:
+// NexOps classifies overflow issues by severity:
+//
+// SEVERITY: High (Silent Miscalculation)
+// - Integer overflow in multiplication or addition
+// - Consequence: Incorrect amounts, potential fund loss, bypassed checks
+// - Detection: AST-level - arithmetic operations on unbounded inputs
+// - Prevention: Bounded input validation, explicit overflow checks
+//
+// SEVERITY: Medium (Logic Correctness)
+// - Subtraction overflow (underflow to large positive)
+// - Consequence: Unexpected behavior, potential logic errors
+// - Detection: AST-level - subtraction on user inputs
+// - Prevention: Explicit ordering validation (a >= b before a - b)
+//
+// SEVERITY: Critical (Consensus Bricking) - different anti-pattern
+// - Division by zero (not overflow, but related arithmetic issue)
+// - See: division_by_zero.cash
+
+// STRUCTURAL INVARIANT FOR NEXOPS:
+// AST-Level Rule: Overflow Safety Invariant
+// For every AST node of type:
+// - BinaryExpression with operator '+' (addition)
+// - BinaryExpression with operator '*' (multiplication)
+// - BinaryExpression with operator '-' (subtraction, for underflow)
+// Where operands are NOT compile-time constants:
+// There must exist DOMINATING require() statements that ensure:
+// - For addition (a + b): require(a <= MAX_SAFE - b) OR require(a + b <= MAX_SAFE)
+// - For multiplication (a * b): require(a <= MAX_SAFE / b) OR both bounded
+// - For subtraction (a - b): require(a >= b) OR require(a - b >= MIN_SAFE)
+// Where "dominating" means:
+// - The require() executes in ALL code paths leading to the operation
+// - The require() executes BEFORE the operation in control flow
+// - Operands are not modified between check and use
+
+// DETECTION RULES (AST-BASED):
+// 1. Parse contract into Abstract Syntax Tree (AST)
+// 2. Identify all arithmetic BinaryExpression nodes (+, *, -)
+// 3. Filter out operations where both operands are compile-time constants
+// 4. Extract operands of each arithmetic operation
+// 5. Perform control flow analysis to find all paths to this node
+// 6. For each path, verify require() statements exist that:
+//    a. Bound the operands to safe ranges
+//    b. OR validate the result won't overflow
+//    c. Dominate the arithmetic node (execute before in all paths)
+// 7. If any path lacks dominating bounds, flag as HIGH severity
+
+// SAFE BOUNDS EXAMPLES:
+// ✅ require(a <= 1000000000) before a * b (if b is also bounded)
+// ✅ require(a <= MAX - b) before a + b
+// ✅ require(a >= b) before a - b (prevents underflow to large positive)
+// ✅ require(result > operand1) after addition (post-condition check)
+// ✅ require(result >= 0) after any operation (catches negative wraparound)
+
+// COMMON OVERFLOW PATTERNS TO AVOID:
+// ❌ counter++ without upper bound
+// ❌ total += amount without total <= MAX - amount check
+// ❌ price * quantity without bounding both factors
+// ❌ amount * rate * time without staged calculation and bounds
+// ❌ balance - withdrawal without balance >= withdrawal check
+
+// CORRECT PROTECTION PATTERNS:
+// ✅ require(counter < MAX_COUNTER) before counter + 1
+// ✅ require(total <= MAX_TOTAL - amount) before total + amount
+// ✅ require(price <= MAX / quantity) before price * quantity
+// ✅ require(a >= b) before a - b (for subtraction)
+// ✅ Bound all inputs to safe ranges at function entry
+// ✅ Use post-condition checks (require(result > operand))
+
+// BEST PRACTICES:
+// 1. Bound all external inputs at function entry (amounts, rates, times)
+// 2. Use pre-condition checks BEFORE arithmetic operations
+// 3. Use post-condition checks AFTER arithmetic to verify sanity
+// 4. For multiplication, bound both factors to safe ranges
+// 5. For addition, check: a <= MAX - b before computing a + b
+// 6. For subtraction, check: a >= b before computing a - b
+// 7. Use smaller units when possible (whole BCH vs satoshis)
+// 8. Stage complex calculations with intermediate bounds checks
+// 9. Document maximum safe values for each parameter
+// 10. Test with boundary values (near max int64, near min int64)
+
+// DEPLOYMENT VALIDATION:
+// Before deploying contracts with arithmetic operations, validate:
+// - All input parameters have documented maximum safe values
+// - Multiplication factors are bounded appropriately
+// - Accumulator variables have maximum caps
+// - Time periods are bounded to prevent time * rate overflows
+// - Rate values are in safe ranges for multiplication
+
+// RELATIONSHIP TO OTHER ANTI-PATTERNS:
+// - Related to division_by_zero (both arithmetic safety)
+// - Connected to fee_assumption_violation (incorrect amount calculations)
+// - Can combine with unvalidated_position (overflow in array indexing)
+// - May interact with implicit_output_ordering (wrong amounts in outputs)
+
+// TESTING RECOMMENDATIONS:
+// - Test with values near max int64: 9223372036854775807
+// - Test with values near min int64: -9223372036854775808
+// - Test multiplication of large values (e.g., 1000000000 * 1000000000)
+// - Test accumulation over many iterations (counter increments)
+// - Test time-based calculations with large elapsed times
+// - Use fuzzing with random large values
+// - Test boundary conditions (max allowed value, max + 1)
+// - Verify post-condition checks catch overflow attempts
+
+// REAL-WORLD IMPACT:
+// - Funds lost: Can range from minor to catastrophic depending on context
+// - User impact: Incorrect balances, unauthorized access, fund drainage
+// - Exploit potential: Attackers can trigger overflow to bypass limits
+// - Reputation damage: Severe if overflow leads to fund loss
+// - Detection difficulty: High (silent failure, no consensus error)
+// - Prevention cost: Low (bounds checking requires minimal code)
+// - Fix cost: High if contract is already deployed (requires migration)
+
+// NEXOPS ENFORCEMENT:
+// NexOps MUST:
+// 1. Parse contracts into AST representation
+// 2. Identify all arithmetic operations on non-constant values
+// 3. Perform control flow analysis to find dominating require() statements
+// 4. Verify bounds checking exists in ALL code paths
+// 5. Flag any unbounded arithmetic as HIGH severity
+// 6. Validate that bounds are appropriate for the use case
+// 7. Check for post-condition validation after arithmetic
+// 8. Provide clear error messages with:
+//    - Line number of vulnerable operation
+//    - Operands that need bounding
+//    - Suggested fix (require statements to add)
+//    - Maximum safe values for the context
+
+// AUDIT CHECKLIST FOR ARITHMETIC OPERATIONS:
+// [ ] Identify all addition, multiplication, subtraction operations (AST scan)
+// [ ] For each operation, determine if operands are compile-time constants
+// [ ] If not constant, verify bounds checking exists
+// [ ] For addition (a + b): verify require(a <= MAX - b) or equivalent
+// [ ] For multiplication (a * b): verify both a and b are bounded
+// [ ] For subtraction (a - b): verify require(a >= b) or equivalent
+// [ ] Verify bounds checking dominates arithmetic in all code paths
+// [ ] Check that bounds are appropriate for the use case
+// [ ] Verify post-condition checks exist (result > operand, result >= 0)
+// [ ] Test with boundary values near int64 limits
+// [ ] Document maximum safe values for all parameters
+// [ ] Run NexOps static analyzer to verify all operations are protected
+
+// EXAMPLE NEXOPS ERROR MESSAGE:
+// ❌ HIGH: Integer overflow risk detected
+// File: reward_contract.cash
+// Line: 67
+// Expression: stakedAmount * rewardRate * blockElapsed
+// Issue: Multiplication may overflow int64 bounds
+// Fix: Add bounds checking before multiplication:
+//   require(stakedAmount <= 100000000000);  // 1000 BCH max
+//   require(rewardRate <= 10000);           // 100% max rate
+//   require(blockElapsed <= maxBlocks);
+// Severity: High (silent miscalculation)
+// Max safe values:
+//   stakedAmount * rewardRate must be < 9223372036854775807 / blockElapsed

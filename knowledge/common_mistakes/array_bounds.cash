@@ -1,0 +1,364 @@
+pragma cashscript ^0.13.0;
+
+// COMMON MISTAKE: Array Bounds Violation
+// SEVERITY: Critical (consensus failure, transaction rejection)
+// CATEGORY: Memory Safety
+
+// MISTAKE DESCRIPTION:
+// Accessing array elements (tx.inputs, tx.outputs) without validating that the index
+// is within bounds. In CashScript (and Bitcoin Script), out-of-bounds array access
+// causes script evaluation to fail, resulting in consensus rejection of the transaction.
+// This can brick contracts or create denial-of-service conditions.
+
+// WHY THIS IS CRITICAL:
+// - Out-of-bounds access causes immediate script failure (consensus-level rejection)
+// - Transaction is invalid and will never be accepted by the network
+// - Can brick contracts if bounds depend on deployment parameters
+// - Can create DoS if attacker controls array length (e.g., tx.inputs.length)
+// - No recovery mechanism for bricked contracts (immutable)
+// - Different from traditional languages: no runtime exception, just consensus failure
+
+// COMMON SCENARIOS:
+// 1. Accessing tx.inputs[N] without checking tx.inputs.length > N
+// 2. Accessing tx.outputs[N] without checking tx.outputs.length > N
+// 3. Using hardcoded indices with dynamic array lengths
+// 4. Iterating over arrays without bounds validation
+// 5. Using user-provided indices without validation
+// 6. Assuming minimum array lengths without enforcement
+
+// BCH COVENANT SPECIFIC RISKS:
+// - tx.inputs and tx.outputs are runtime-determined arrays
+// - Attacker can control array lengths by constructing transactions
+// - Contract assumes specific input/output counts without validation
+// - this.activeInputIndex may be out of bounds if not validated
+// - Multi-input contracts are especially vulnerable
+
+// ❌ VULNERABLE EXAMPLE: NFT refund without bounds checking
+contract CrowdfundingVulnerable(
+    pubkey campaign,
+    int fundingGoal,
+    int deadline,
+    bytes32 nftCategory
+) {
+    function refund(
+        sig pledgerSig,
+        pubkey pledger,
+        bytes pledgerRefundOutput,
+        int refundAmount,
+        int nftInputIndex  // User-provided index - UNCHECKED
+    ) {
+        require(checkSig(pledgerSig, pledger));
+        require(tx.time >= deadline);
+        
+        int campaignValue = tx.inputs[this.activeInputIndex].value;
+        require(campaignValue < fundingGoal);
+        
+        // VULNERABLE: No check that nftInputIndex is within bounds
+        // If nftInputIndex >= tx.inputs.length, script fails
+        // 💥 OUT-OF-BOUNDS ACCESS: Script fails if index is invalid
+        // Transaction rejected by consensus
+        require(tx.inputs[nftInputIndex].tokenCategory == nftCategory);
+        
+        // VULNERABLE: No check that nftInputIndex is within bounds
+        // 💥 OUT-OF-BOUNDS ACCESS: Script fails if index is invalid
+        require(tx.inputs[nftInputIndex].tokenAmount == 0);
+        
+        require(tx.outputs.length >= 1);
+        require(tx.outputs[0].value == refundAmount);
+    }
+}
+
+// CONSEQUENCES OF THE VULNERABLE EXAMPLE:
+// Attack Scenario 1: Index too large
+// - Attacker provides nftInputIndex = 999
+// - tx.inputs.length = 2 (only 2 inputs)
+// - tx.inputs[999] is out of bounds
+// - Script fails, transaction rejected
+// - Legitimate refund is DoS'd
+//
+// Attack Scenario 2: Negative index (if allowed by type system)
+// - Attacker provides nftInputIndex = -1
+// - Negative indices cause out-of-bounds access
+// - Script fails, transaction rejected
+//
+// Attack Scenario 3: Index equals activeInputIndex
+// - Contract checks nftInputIndex != this.activeInputIndex
+// - But doesn't check bounds first
+// - If attacker uses nftInputIndex >= length, bounds check happens first
+// - Script fails before inequality check
+
+// ✅ SECURE EXAMPLE: Refund with explicit bounds validation
+contract CrowdfundingSecure(
+    pubkey campaign,
+    int fundingGoal,
+    int deadline,
+    bytes32 nftCategory
+) {
+    function refund(
+        sig pledgerSig,
+        pubkey pledger,
+        bytes pledgerRefundOutput,
+        int refundAmount,
+        int nftInputIndex  // User-provided index - VALIDATED
+    ) {
+        require(checkSig(pledgerSig, pledger));
+        require(tx.time >= deadline);
+        
+        int campaignValue = tx.inputs[this.activeInputIndex].value;
+        require(campaignValue < fundingGoal);
+        
+        // ✅ CRITICAL VALIDATION: Input count check
+        // Ensures we have at least 2 inputs (campaign + NFT)
+        require(tx.inputs.length >= 2);
+        
+        // ✅ CRITICAL VALIDATION: Bounds check for user-provided index
+        // This ensures nftInputIndex is within valid range
+        // Must be checked BEFORE accessing array element
+        require(nftInputIndex >= 0);
+        require(nftInputIndex < tx.inputs.length);
+        
+        // ✅ CORRECTNESS VALIDATION: NFT input is not the campaign input
+        // Prevents using the same input for both purposes
+        require(nftInputIndex != this.activeInputIndex);
+        
+        // Now safe: nftInputIndex is guaranteed to be valid
+        // ✅ SAFE ACCESS: Bounds validated before access
+        require(tx.inputs[nftInputIndex].tokenCategory == nftCategory);
+        require(tx.inputs[nftInputIndex].tokenAmount == 0);
+        
+        require(tx.outputs.length >= 1);
+        require(tx.outputs[0].value == refundAmount);
+    }
+}
+
+// WHY THE SECURE EXAMPLE WORKS:
+// - require(tx.inputs.length >= 2) ensures minimum array size (CRITICAL)
+// - require(nftInputIndex >= 0) prevents negative indices (CRITICAL)
+// - require(nftInputIndex < tx.inputs.length) prevents out-of-bounds (CRITICAL)
+// - require(nftInputIndex != this.activeInputIndex) prevents logic errors (CORRECTNESS)
+// - All checks happen BEFORE array access
+// - If any check fails, transaction rejected with clear error (not bricked)
+// - Attacker cannot cause out-of-bounds access (DoS prevented)
+
+// SEVERITY CLASSIFICATION:
+// NexOps classifies array bounds issues by severity:
+//
+// SEVERITY: Critical (Consensus Failure)
+// - Out-of-bounds array access without bounds validation
+// - Consequence: Transaction rejection, potential contract bricking, DoS
+// - Detection: AST-level - array access nodes without dominating bounds check
+// - Prevention: Mandatory bounds validation before array access
+//
+// SEVERITY: High (Logic Correctness)
+// - Using hardcoded indices with dynamic arrays
+// - Consequence: Unexpected behavior when array length varies
+// - Detection: AST-level - literal indices with runtime arrays
+// - Prevention: Explicit length validation or dynamic index calculation
+//
+// SEVERITY: Medium (Defensive Programming)
+// - Accessing this.activeInputIndex without validation
+// - Consequence: Potential issues if contract used in unexpected ways
+// - Detection: AST-level - activeInputIndex usage patterns
+// - Prevention: Validate activeInputIndex < tx.inputs.length
+
+// STRUCTURAL INVARIANT FOR NEXOPS:
+// AST-Level Rule: Array Bounds Safety Invariant
+// For every AST node of type:
+// - MemberExpression accessing tx.inputs[index]
+// - MemberExpression accessing tx.outputs[index]
+// Where index is:
+// - A variable (not a literal constant)
+// - A user-provided parameter
+// - A calculated expression
+// There must exist DOMINATING require() statements that ensure:
+// - index >= 0 (if index could be negative)
+// - index < array.length (prevents out-of-bounds)
+// Where "dominating" means:
+// - The require() executes in ALL code paths leading to the access
+// - The require() executes BEFORE the access in control flow
+// - No intermediate code can modify the index between check and use
+//
+// For literal indices (e.g., tx.inputs[0], tx.outputs[1]):
+// - There must exist a require() ensuring array.length > literalIndex
+
+// DETECTION RULES (AST-BASED):
+// 1. Parse contract into Abstract Syntax Tree (AST)
+// 2. Identify all MemberExpression nodes accessing:
+//    - tx.inputs[...]
+//    - tx.outputs[...]
+// 3. Extract the index expression for each access
+// 4. Classify index type:
+//    a. Literal constant (e.g., 0, 1, 2)
+//    b. Variable/parameter (e.g., nftInputIndex, outputIndex)
+//    c. Expression (e.g., this.activeInputIndex + 1)
+// 5. For each access, perform control flow analysis:
+//    a. Find all paths to this array access
+//    b. Verify dominating require() for array.length
+//    c. If index is variable/expression, verify bounds check
+// 6. Flag violations based on severity:
+//    - No length check: CRITICAL
+//    - No bounds check on variable index: CRITICAL
+//    - Literal index without length validation: HIGH
+
+// COMMON ARRAY ACCESS PATTERNS:
+
+// Pattern 1: Hardcoded index (literal)
+// ❌ VULNERABLE:
+// tx.outputs[0].value  // No length check
+//
+// ✅ SECURE:
+// require(tx.outputs.length >= 1);
+// tx.outputs[0].value
+
+// Pattern 2: User-provided index
+// ❌ VULNERABLE:
+// tx.inputs[userIndex].value  // No bounds check
+//
+// ✅ SECURE:
+// require(userIndex >= 0);
+// require(userIndex < tx.inputs.length);
+// tx.inputs[userIndex].value
+
+// Pattern 3: this.activeInputIndex
+// ⚠️ USUALLY SAFE (consensus enforces validity)
+// tx.inputs[this.activeInputIndex].value
+//
+// ✅ DEFENSIVE:
+// require(this.activeInputIndex < tx.inputs.length);
+// tx.inputs[this.activeInputIndex].value
+
+// Pattern 4: Calculated index
+// ❌ VULNERABLE:
+// tx.outputs[outputCount - 1].value  // No validation
+//
+// ✅ SECURE:
+// require(outputCount > 0);
+// require(outputCount <= tx.outputs.length);
+// tx.outputs[outputCount - 1].value
+
+// SPECIAL CASE: this.activeInputIndex
+// The this.activeInputIndex is guaranteed by consensus to be valid
+// HOWEVER, defensive programming still recommends validation:
+// require(this.activeInputIndex < tx.inputs.length);
+// This protects against:
+// - Future CashScript implementation changes
+// - Unexpected edge cases
+// - Makes code intent explicit for auditors
+
+// BCH COVENANT SPECIFIC CONSIDERATIONS:
+// 1. tx.inputs.length is runtime-determined
+//    - Attacker can control by adding/removing inputs
+//    - Always validate before using as bounds
+//
+// 2. tx.outputs.length is runtime-determined
+//    - Attacker can control by adding/removing outputs
+//    - Many contracts explicitly require exact output count
+//
+// 3. Multi-input contracts are high-risk
+//    - Must validate all input indices
+//    - Must validate input count matches expectations
+//
+// 4. Output validation patterns:
+//    - Option A: Exact count (require tx.outputs.length == N)
+//    - Option B: Minimum count (require tx.outputs.length >= N)
+//    - Both prevent out-of-bounds on subsequent accesses
+
+// CORRECT PROTECTION PATTERNS:
+// ✅ For literal index N:
+//    require(array.length > N);
+//    array[N]
+//
+// ✅ For variable index:
+//    require(index >= 0);
+//    require(index < array.length);
+//    array[index]
+//
+// ✅ For calculated index:
+//    require(expression >= 0);
+//    require(expression < array.length);
+//    array[expression]
+//
+// ✅ For this.activeInputIndex (defensive):
+//    require(this.activeInputIndex < tx.inputs.length);
+//    tx.inputs[this.activeInputIndex]
+
+// BEST PRACTICES:
+// 1. Always validate array lengths before accessing elements
+// 2. Validate user-provided indices with both lower and upper bounds
+// 3. Use exact length requirements when possible (tx.outputs.length == N)
+// 4. Place validation checks as early as possible in the function
+// 5. Document WHY each array access is safe in comments
+// 6. Test with edge cases (empty arrays, maximum indices, off-by-one)
+// 7. Use NexOps static analysis to detect missing bounds checks
+// 8. Prefer exact output counts over minimum counts (reduces attack surface)
+
+// DEPLOYMENT VALIDATION:
+// Before deploying contracts with array access:
+// - Verify all literal indices have corresponding length checks
+// - Verify all variable indices have bounds validation
+// - Test with minimum and maximum valid array lengths
+// - Test with off-by-one indices (length-1, length, length+1)
+// - Ensure error messages clearly indicate bounds violations
+
+// RELATIONSHIP TO OTHER ANTI-PATTERNS:
+// - Related to implicit_output_ordering (both need explicit validation)
+// - Connected to unvalidated_position (similar validation patterns)
+// - Often combined with fee_assumption_violation
+// - Part of general input validation discipline
+
+// NEXOPS ENFORCEMENT:
+// NexOps MUST:
+// 1. Parse contracts into AST representation
+// 2. Identify all tx.inputs[...] and tx.outputs[...] access nodes
+// 3. Extract index expressions (literal, variable, calculated)
+// 4. Perform control flow analysis to find dominating bounds checks
+// 5. Verify bounds validation exists in ALL code paths
+// 6. Flag violations by severity:
+//    - CRITICAL: Variable index without bounds check
+//    - HIGH: Literal index without length check
+//    - MEDIUM: Missing defensive activeInputIndex validation
+// 7. Provide actionable error messages with suggested fixes
+// 8. Reject contracts with CRITICAL violations
+
+// AUDIT CHECKLIST FOR ARRAY ACCESS:
+// [ ] Identify all tx.inputs[...] accesses (AST scan)
+// [ ] Identify all tx.outputs[...] accesses (AST scan)
+// [ ] For each access, extract index expression
+// [ ] Classify index: literal, variable, or calculated
+// [ ] Verify array.length validation exists before access
+// [ ] For variable indices, verify bounds check (>= 0 and < length)
+// [ ] For literal indices, verify length check (length > literal)
+// [ ] Check that validation happens BEFORE access in all paths
+// [ ] Verify no code between validation and access modifies index
+// [ ] Test with edge cases (empty arrays, max indices, off-by-one)
+// [ ] Document why each access is safe in code comments
+// [ ] Run NexOps static analyzer to verify all accesses are protected
+
+// TESTING RECOMMENDATIONS:
+// - Test with tx.inputs.length = 0 (empty inputs - should fail gracefully)
+// - Test with tx.inputs.length = 1 (minimum inputs)
+// - Test with userIndex = -1 (negative index - should fail)
+// - Test with userIndex = tx.inputs.length (equal to length - should fail)
+// - Test with userIndex = tx.inputs.length + 1 (beyond length - should fail)
+// - Test with userIndex = 999 (far beyond length - should fail)
+// - Test with valid indices (0 to length-1 - should succeed)
+// - Use fuzzing to test random array lengths and indices
+
+// REAL-WORLD IMPACT:
+// - DoS risk: Attacker can prevent legitimate transactions
+// - Bricking risk: Contract becomes unusable if bounds depend on parameters
+// - User impact: Cannot execute valid operations
+// - Reputation damage: Protocol appears broken or poorly designed
+// - Prevention cost: Minimal (a few require statements)
+// - Fix cost: Impossible if contract is bricked (immutable)
+
+// EXAMPLE NEXOPS ERROR MESSAGE:
+// ❌ CRITICAL: Out-of-bounds array access risk detected
+// File: crowdfunding_refundable.cash
+// Line: 58
+// Expression: tx.inputs[nftInputIndex].tokenCategory
+// Issue: Index 'nftInputIndex' is user-provided and not bounds-checked
+// Fix: Add bounds validation before access:
+//       require(nftInputIndex >= 0);
+//       require(nftInputIndex < tx.inputs.length);
+// Severity: Critical (consensus failure, DoS risk)
