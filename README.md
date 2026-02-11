@@ -10,7 +10,7 @@ The Model Context Protocol (MCP) server for NexOps. This server acts as the inte
 ## Getting Started
 
 ### Prerequisites
-- Python 3.11+
+- Python 3.11++
 
 ### Installation
 1. Install dependencies:
