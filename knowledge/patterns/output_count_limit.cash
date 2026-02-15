@@ -1,18 +1,462 @@
-// PATTERN: Output Count Security
-// CRITICAL: Include as FIRST validation in EVERY function
+pragma cashscript ^0.13.0;
 
-contract SecureContract() {
-    function anyOperation() {
-        // CRITICAL: ALWAYS include this FIRST
-        require(tx.outputs.length <= 5);
-        
-        // ... rest of logic
+// SECURITY PATTERN: Output Count Limiting and Hidden Output Prevention
+// PURPOSE: Prevent output explosion, fee extraction, and hidden output attacks
+// CATEGORY: Output Safety
+// USE CASE: Any contract that must enforce strict control over transaction outputs
+
+// PATTERN DESCRIPTION:
+// This pattern demonstrates how to explicitly bound and validate all transaction
+// outputs. Unbounded or partially validated outputs are a primary attack vector
+// in CashScript covenants. An adversarial builder can add hidden outputs to:
+// - Extract mining fees from the covenant (fee theft)
+// - Inject token-carrying outputs (token laundering)
+// - Create unvalidated change outputs (value drain)
+// - Split funds to attacker-controlled addresses (theft)
+// - Batch multiple operations in one transaction (logic bypass)
+//
+// The only defense is: explicitly count outputs AND validate every single one.
+
+// WHY OUTPUT COUNT IS SECURITY-CRITICAL:
+// CashScript contracts validate the outputs they know about.
+// If a contract validates output[0] but allows output[1] to exist unvalidated,
+// an attacker can freely populate output[1] with anything, including:
+// - Their own address (fund theft)
+// - A minting NFT (token injection)
+// - A sub-covenant with different rules (logic bypass)
+// Output count limiting closes this gap completely.
+
+// ATTACK VECTORS BLOCKED:
+// ✗ Hidden output theft: Cannot add attacker-controlled outputs
+// ✗ Fee extraction: Cannot drain value through unvalidated outputs
+// ✗ Token injection: Cannot add token-carrying outputs beyond validated set
+// ✗ Output explosion: Cannot bloat transaction with unvalidated outputs
+// ✗ Logic bypass via batching: Cannot combine multiple operations
+// ✗ Value fragmentation: Cannot split funds to multiple destinations
+
+// EXPLICIT DESIGN DECISIONS:
+// - No signatures required (pure output structure enforcement)
+// - All outputs validated for tokenCategory and value positivity
+// - No ordering assumptions unless explicitly documented
+// - BCH-only (all tokenCategory == NO_TOKEN)
+// - Three canonical patterns: exact-1, exact-2, bounded-range
+
+// ═══════════════════════════════════════════════════════════════════════
+// PATTERN A: EXACT SINGLE OUTPUT
+// The strictest and most common form.
+// Use when: Contract has exactly one valid output (settlement, claim, refund)
+// Security: Strongest — zero unvalidated output space
+// ═══════════════════════════════════════════════════════════════════════
+
+contract OutputCountExactOne() {
+    function validate(
+        pubkeyhash recipient,  // Typed P2PKH destination — no raw bytes
+        int outputValue        // Output value (untrusted — bound below)
+    ) {
+        // TOKEN CATEGORY CONSTANT
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+
+        // ACTIVE INPUT VALIDATION
+        // Verify this contract is the input being spent
+        // Prevents UTXO position attacks
+        require(tx.inputs[this.activeInputIndex].lockingBytecode == this.lockingBytecode);
+
+        // INPUT TOKEN VALIDATION
+        // Covenant must be BCH-only — reject any token-carrying input
+        require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
+        require(tx.inputs[this.activeInputIndex].tokenAmount == 0);
+
+        // ═══════════════════════════════════════════════════════════════
+        // OUTPUT COUNT ENFORCEMENT: EXACT 1
+        // ═══════════════════════════════════════════════════════════════
+        // PURPOSE: Eliminate all unvalidated output space
+        // SEVERITY: Critical
+        //
+        // WHY == 1 and not >= 1:
+        // - >= 1 allows hidden outputs at index 1, 2, 3...
+        // - == 1 leaves zero unvalidated output space
+        // - Any attempt to add extra outputs fails at consensus
+        // - This is the gold standard for single-settlement contracts
+        require(tx.outputs.length == 1);
+
+        // FEE MODEL: EXTERNAL
+        // With exactly 1 output, mining fee cannot be deducted from this input
+        // The transaction builder must include a separate fee-bearing input
+        // This is intentional: covenant value is fully preserved in output[0]
+        // NEXOPS NOTE: If internal fee deduction is needed, use Pattern C
+
+        // OUTPUT 0 VALIDATION
+        // All three properties validated: destination, value, token category
+
+        // DESTINATION: Typed P2PKH construction — prevents raw bytes injection
+        // Caller controls WHICH address, not the script type
+        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(recipient));
+
+        // VALUE: Bind untrusted outputValue to consensus-enforced output value
+        // outputValue is UNTRUSTED (caller-provided)
+        // Safety relies ENTIRELY on this equality binding
+        // Do NOT use outputValue in any logic before this binding
+        require(tx.outputs[0].value == outputValue);
+
+        // VALUE POSITIVITY: Prevent zero-value or dust-only outputs
+        // Ensures the output is economically meaningful
+        // Guards against griefing via zero-value output construction
+        require(tx.outputs[0].value > 0);
+
+        // TOKEN REJECTION: Prevent any token category in output
+        // Prevents minting authority propagation through this contract
+        require(tx.outputs[0].tokenCategory == NO_TOKEN);
+        require(tx.outputs[0].tokenAmount == 0);
     }
 }
 
-// Standard Output Limits:
-// Simple transfer: 3-4
-// Swap/exchange: 5-6
-// Complex DeFi: 7-10
-// Batch operations: 15-20
-// Maximum: 50
+// ═══════════════════════════════════════════════════════════════════════
+// PATTERN B: EXACT TWO OUTPUTS
+// Use when: Contract needs exactly two outputs (e.g., payment + continuation)
+// Security: Strong — both outputs fully validated, no hidden space
+// Ordering: Explicitly enforced and documented below
+// ═══════════════════════════════════════════════════════════════════════
+
+contract OutputCountExactTwo() {
+    function validate(
+        pubkeyhash recipient,   // Typed P2PKH destination for output 0
+        int output0Value,       // Value for output 0 (untrusted — bound below)
+        int output1Value        // Value for output 1 (untrusted — bound below)
+    ) {
+        // TOKEN CATEGORY CONSTANT
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+
+        // ACTIVE INPUT VALIDATION
+        require(tx.inputs[this.activeInputIndex].lockingBytecode == this.lockingBytecode);
+
+        // INPUT TOKEN VALIDATION
+        require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
+        require(tx.inputs[this.activeInputIndex].tokenAmount == 0);
+
+        // ═══════════════════════════════════════════════════════════════
+        // OUTPUT COUNT ENFORCEMENT: EXACT 2
+        // ═══════════════════════════════════════════════════════════════
+        // PURPOSE: Ensure exactly 2 outputs — no hidden third output
+        // SEVERITY: Critical
+        //
+        // NEXOPS COVERAGE INVARIANT:
+        // require(tx.outputs.length == 2) obligates validation of BOTH:
+        // - tx.outputs[0]: fully validated below
+        // - tx.outputs[1]: fully validated below
+        // Skipping either output validation would create an injection vector
+        require(tx.outputs.length == 2);
+
+        // FEE MODEL: INTERNAL (IMPLICIT)
+        // With 2 outputs, the difference between input value and
+        // (output0Value + output1Value) becomes the mining fee
+        // This is valid but requires caller to set values correctly
+        // NEXOPS NOTE: Neither output is exclusively a fee output here
+        // If one output is intended as a change/fee output, document it
+
+        // OUTPUT ORDERING NOTE:
+        // We explicitly assign semantics to each index:
+        // - output[0]: Payment to recipient (P2PKH)
+        // - output[1]: Covenant continuation (self-reference)
+        // This ordering is ENFORCED by validation — not assumed
+        // Future auditors: Do NOT reorder without updating validation
+
+        // OUTPUT 0: PAYMENT TO RECIPIENT
+        // Typed P2PKH destination — no raw bytes
+        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(recipient));
+
+        // output0Value is UNTRUSTED — bound to consensus data here
+        require(tx.outputs[0].value == output0Value);
+        require(tx.outputs[0].value > 0);
+        require(tx.outputs[0].tokenCategory == NO_TOKEN);
+        require(tx.outputs[0].tokenAmount == 0);
+
+        // OUTPUT 1: COVENANT CONTINUATION (SELF-REFERENCE)
+        // Must recreate this exact contract — caller has no influence on type
+        // Self-reference is the most restrictive form of destination validation
+        require(
+            tx.outputs[1].lockingBytecode ==
+            tx.inputs[this.activeInputIndex].lockingBytecode
+        );
+
+        // output1Value is UNTRUSTED — bound to consensus data here
+        require(tx.outputs[1].value == output1Value);
+        require(tx.outputs[1].value > 0);
+        require(tx.outputs[1].tokenCategory == NO_TOKEN);
+        require(tx.outputs[1].tokenAmount == 0);
+
+        // VALUE CONSERVATION NOTE:
+        // inputValue = output0Value + output1Value + miningFee
+        // We do NOT enforce value conservation explicitly here
+        // The caller selects output values; remaining becomes fee
+        // If strict conservation is needed, add:
+        // int inputValue = tx.inputs[this.activeInputIndex].value;
+        // require(output0Value + output1Value == inputValue);
+        // (This would enforce zero-fee external model)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// PATTERN C: BOUNDED RANGE (1 TO 2 OUTPUTS)
+// Use when: Contract may produce 1 or 2 outputs depending on remaining balance
+// Example: Partial withdrawal (1=full drain, 2=withdrawal+continuation)
+// Security: Strong — both cases fully validated, no hidden outputs in either
+// Ordering: Explicitly enforced per branch
+// ═══════════════════════════════════════════════════════════════════════
+
+contract OutputCountBounded() {
+    function validate(
+        pubkeyhash recipient,   // Typed P2PKH destination for withdrawal
+        int withdrawalValue,    // Withdrawal amount (untrusted — bound below)
+        int continuationValue   // Remaining value for continuation (0 if full drain)
+    ) {
+        // TOKEN CATEGORY CONSTANT
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+
+        // ACTIVE INPUT VALIDATION
+        require(tx.inputs[this.activeInputIndex].lockingBytecode == this.lockingBytecode);
+
+        // INPUT TOKEN VALIDATION
+        require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
+        require(tx.inputs[this.activeInputIndex].tokenAmount == 0);
+
+        // WITHDRAWAL VALUE POSITIVITY
+        // Must be validated before branching — applies to both cases
+        require(withdrawalValue > 0);
+
+        // ═══════════════════════════════════════════════════════════════
+        // OUTPUT COUNT ENFORCEMENT: BOUNDED [1, 2]
+        // ═══════════════════════════════════════════════════════════════
+        // PURPOSE: Allow 1 or 2 outputs but NOTHING else
+        // SEVERITY: Critical
+        //
+        // WHY NOT >= 1:
+        // - >= 1 allows 3, 4, 5... outputs all unvalidated
+        // - We bound the range: exactly 1 OR exactly 2
+        // - Both branches are fully validated below
+        // - No attacker can add a third output in either case
+        require(tx.outputs.length >= 1);
+        require(tx.outputs.length <= 2);
+
+        // NEXOPS INVARIANT: NFT BURN ENFORCEMENT
+        // When output count is bounded to <= 2, token burn enforcement is safe:
+        // We validate tokenCategory on outputs[0] and conditionally outputs[1]
+        // This is ONLY safe because the bound prevents a hidden outputs[2]
+        // Relaxing the upper bound REQUIRES revisiting token validation coverage
+
+        // OUTPUT 0: WITHDRAWAL TO RECIPIENT
+        // This output exists in BOTH the 1-output and 2-output cases
+        // Typed P2PKH destination — no raw bytes
+        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(recipient));
+
+        // withdrawalValue is UNTRUSTED — bound to consensus data here
+        require(tx.outputs[0].value == withdrawalValue);
+        require(tx.outputs[0].value > 0);
+        require(tx.outputs[0].tokenCategory == NO_TOKEN);
+        require(tx.outputs[0].tokenAmount == 0);
+
+        // CONDITIONAL OUTPUT 1: COVENANT CONTINUATION
+        // Only exists in the 2-output case (partial withdrawal)
+        // If tx.outputs.length == 1: full drain, no continuation needed
+        // If tx.outputs.length == 2: partial drain, covenant continues
+        if (tx.outputs.length == 2) {
+            // CONTINUATION VALUE POSITIVITY
+            // Continuation must have economic value (not zero/dust trap)
+            require(continuationValue > 0);
+
+            // SELF-REFERENCE DESTINATION
+            // Continuation MUST be this exact contract — no substitution
+            require(
+                tx.outputs[1].lockingBytecode ==
+                tx.inputs[this.activeInputIndex].lockingBytecode
+            );
+
+            // continuationValue is UNTRUSTED — bound to consensus data here
+            require(tx.outputs[1].value == continuationValue);
+            require(tx.outputs[1].tokenCategory == NO_TOKEN);
+            require(tx.outputs[1].tokenAmount == 0);
+        }
+
+        // FEE MODEL: IMPLICIT (INTERNAL)
+        // inputValue - (withdrawalValue + continuationValue) = miningFee
+        // Both values are caller-specified; remainder becomes fee
+        // No explicit fee enforcement — caller controls fee via output values
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// PATTERN SUMMARY: WHEN TO USE EACH VARIANT
+// ═══════════════════════════════════════════════════════════════════════
+
+// Pattern A — OutputCountExactOne (== 1)
+// Use for: Settlement, claim, refund, final payment
+// Fee model: External (fee must come from another input)
+// Security: Maximum (zero unvalidated output space)
+// Examples: Escrow claim, auction settlement, vesting final withdrawal
+
+// Pattern B — OutputCountExactTwo (== 2)
+// Use for: Payment + covenant continuation
+// Fee model: Implicit (difference between input and outputs)
+// Security: High (both outputs fully validated)
+// Examples: Partial vesting claim, crowdfunding pledge, auction bid
+
+// Pattern C — OutputCountBounded (>= 1, <= 2)
+// Use for: Optional continuation (full or partial execution)
+// Fee model: Implicit (difference between input and outputs)
+// Security: High (both branches fully validated)
+// Examples: Partial withdrawal, refund with optional continuation
+
+// ═══════════════════════════════════════════════════════════════════════
+// OUTPUT ORDERING PHILOSOPHY
+// ═══════════════════════════════════════════════════════════════════════
+
+// NexOps does NOT assume output ordering unless explicitly enforced.
+// When ordering is enforced, it must be:
+// 1. Documented in comments (which index has which semantic)
+// 2. Validated by checking each index explicitly
+// 3. Not rely on builder discipline for index assignment
+
+// CORRECT ORDERING ENFORCEMENT:
+// - Assign index 0 to primary output (payment, withdrawal)
+// - Assign index 1 to secondary output (continuation, change)
+// - Validate EACH index independently (no iteration, no loops)
+// - Document the ordering rationale inline
+
+// INCORRECT ORDERING ASSUMPTION:
+// ❌ "The builder will put the covenant continuation at index 1"
+// ❌ Using tx.outputs[0] for both payment and continuation conditionally
+// ❌ Assuming fee output is always last
+// ✅ Explicitly require each index to match its expected semantic
+
+// ═══════════════════════════════════════════════════════════════════════
+// SEVERITY CLASSIFICATION
+// ═══════════════════════════════════════════════════════════════════════
+
+// SEVERITY: Critical (Hidden Output Injection)
+// - Missing tx.outputs.length validation entirely
+// - Consequence: Attacker adds arbitrary outputs undetected
+// - Detection: AST-level — outputs.length check absence
+// - Prevention: Mandatory exact or bounded count
+
+// SEVERITY: Critical (Incomplete Token Coverage)
+// - Output count bounded but tokenCategory not checked on all outputs
+// - Consequence: Token injection through unvalidated output
+// - Detection: Coverage analysis — outputs checked vs total count
+// - Prevention: Every output within the bound must be token-validated
+
+// SEVERITY: High (Weak Upper Bound)
+// - Using >= N without an upper bound (>= 1, >= 2, etc.)
+// - Consequence: Allows unbounded hidden outputs beyond N
+// - Detection: AST-level — missing complementary <= check
+// - Prevention: Use == N or (>= min AND <= max)
+
+// SEVERITY: High (Value Not Bound)
+// - Output value parameter used before equality binding
+// - Consequence: Logic operates on unvalidated data
+// - Detection: AST-level — parameter usage before binding
+// - Prevention: Bind outputValue to tx.outputs[N].value immediately
+
+// SEVERITY: High (Zero-Value Output)
+// - Missing require(tx.outputs[N].value > 0)
+// - Consequence: Dust outputs, griefing, economic invalidity
+// - Detection: AST-level — positivity check absence
+// - Prevention: Require value > 0 on every output
+
+// SEVERITY: Medium (Ordering Assumption Without Enforcement)
+// - Code assumes output ordering without validating it
+// - Consequence: Outputs swapped by malicious builder
+// - Detection: Code review — implicit ordering assumptions
+// - Prevention: Explicit index assignment with inline documentation
+
+// ═══════════════════════════════════════════════════════════════════════
+// STRUCTURAL INVARIANT FOR NEXOPS
+// ═══════════════════════════════════════════════════════════════════════
+
+// AST-Level Rule: Output Count Safety Invariant
+//
+// 1. COUNT BOUNDING INVARIANT:
+//    Every function accessing tx.outputs[N] must have:
+//    - Either require(tx.outputs.length == N+1) for exact count
+//    - Or require(tx.outputs.length >= min) AND require(tx.outputs.length <= max)
+//    Never require(tx.outputs.length >= N) alone without upper bound
+//
+// 2. COVERAGE COMPLETENESS INVARIANT:
+//    If tx.outputs.length <= M is enforced, then for every i in [0..M-1]
+//    that is accessible, there must be:
+//    - require(tx.outputs[i].tokenCategory == NO_TOKEN)
+//    - require(tx.outputs[i].tokenAmount == 0)
+//    - require(tx.outputs[i].value > 0)
+//    (or explicit token validation if contract handles tokens)
+//
+// 3. VALUE BINDING INVARIANT:
+//    For every caller-provided output value parameter V:
+//    - require(tx.outputs[i].value == V) must exist
+//    - This binding must precede any use of V in logic
+//    - V is untrusted until bound to consensus output
+//
+// 4. DESTINATION CONSTRUCTION INVARIANT:
+//    All lockingBytecode destinations must use typed constructors:
+//    - new LockingBytecodeP2PKH(pubkeyhash)
+//    - new LockingBytecodeP2SH(bytes32)
+//    - tx.inputs[this.activeInputIndex].lockingBytecode
+//    Never: raw bytes parameter == tx.outputs[i].lockingBytecode
+
+// ═══════════════════════════════════════════════════════════════════════
+// NEXOPS ENFORCEMENT CHECKLIST
+// ═══════════════════════════════════════════════════════════════════════
+
+// NexOps MUST verify:
+// [ ] tx.outputs.length is explicitly validated in every function
+// [ ] Exact count (==) used when output set is deterministic
+// [ ] Bounded range (>= min AND <= max) used when count varies
+// [ ] No bare >= N without upper bound
+// [ ] Every output within the bound has tokenCategory == NO_TOKEN
+// [ ] Every output within the bound has tokenAmount == 0
+// [ ] Every output within the bound has value > 0
+// [ ] Every caller-provided output value is bound to actual output
+// [ ] All lockingBytecode destinations use typed constructors
+// [ ] Output ordering is documented and enforced (not assumed)
+// [ ] Fee model is identified and documented (internal vs external)
+
+// NexOps MUST flag:
+// - Missing outputs.length validation: CRITICAL
+// - Output with unchecked tokenCategory: CRITICAL
+// - Bare >= N without upper bound: HIGH
+// - Output value not bound to consensus: HIGH
+// - Output with no value > 0 check: HIGH
+// - Raw bytes used as destination: CRITICAL
+// - Implicit ordering assumption: MEDIUM
+// - Ambiguous fee model: WARNING
+// - Missing tokenAmount == 0 check: HIGH
+
+// ═══════════════════════════════════════════════════════════════════════
+// TESTING CHECKLIST
+// ═══════════════════════════════════════════════════════════════════════
+
+// Pattern A (exact 1):
+// [ ] Test with 0 outputs (should fail)
+// [ ] Test with 1 output — correct (should succeed)
+// [ ] Test with 2 outputs (should fail)
+// [ ] Test with output value = 0 (should fail)
+// [ ] Test with output tokenCategory != NO_TOKEN (should fail)
+// [ ] Test with output tokenAmount > 0 (should fail)
+// [ ] Test with wrong recipient pubkeyhash (should fail)
+
+// Pattern B (exact 2):
+// [ ] Test with 1 output (should fail)
+// [ ] Test with 2 outputs — correct (should succeed)
+// [ ] Test with 3 outputs (should fail)
+// [ ] Test with output[0] value = 0 (should fail)
+// [ ] Test with output[1] value = 0 (should fail)
+// [ ] Test with output[0] tokenCategory != NO_TOKEN (should fail)
+// [ ] Test with output[1] tokenCategory != NO_TOKEN (should fail)
+// [ ] Test with output[1] lockingBytecode != self (should fail)
+
+// Pattern C (bounded 1–2):
+// [ ] Test with 0 outputs (should fail)
+// [ ] Test with 1 output — full drain (should succeed)
+// [ ] Test with 2 outputs — partial drain (should succeed)
+// [ ] Test with 3 outputs (should fail)
+// [ ] Test with output[0] value = 0 (should fail)
+// [ ] Test with output[1] value = 0 in 2-output case (should fail)
+// [ ] Test with output[1] lockingBytecode != self (should fail)
+// [ ] Test with any output tokenCategory != NO_TOKEN (should fail)

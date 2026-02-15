@@ -1,26 +1,480 @@
-// PATTERN: Minting Authority Control
-// NEVER release minting NFTs to untrusted addresses
+pragma cashscript ^0.13.0;
 
-contract MintingController(bytes32 category) {
-    function mint(int amount) {
-        // Verify this contract holds minting NFT
-        require(tx.inputs[0].tokenCategory == category + 0x02);
-        
-        // CRITICAL: Keep minting NFT in contract
-        require(tx.outputs[0].lockingBytecode == tx.inputs[0].lockingBytecode);
-        require(tx.outputs[0].tokenCategory == tx.inputs[0].tokenCategory);
-        
-        // Never send minting NFT to user addresses
+// SECURITY PATTERN: Minting Control and Token Authority Leakage Prevention
+// PURPOSE: Prevent unauthorized CashToken minting or mint authority propagation
+// CATEGORY: Token Safety
+// USE CASE: Any BCH-only contract that must defensively reject all token flows
+
+// PATTERN DESCRIPTION:
+// This pattern demonstrates how to explicitly and exhaustively prevent CashToken
+// minting operations from occurring in or through a contract. Even contracts that
+// do not intentionally handle tokens must defensively validate that no token
+// authority (minting, mutable, or immutable) can enter, propagate, or exit
+// through the contract. Failure to do so creates silent token injection vectors.
+
+// CASHTOKEN CAPABILITY MODEL (Background):
+// Every CashToken UTXO carries a capability field that defines its authority:
+// - NO CAPABILITY (0x00): Standard immutable NFT (fixed commitment, no authority)
+// - MUTABLE     (0x01): NFT can be updated (commitment can change)
+// - MINTING     (0x02): NFT can create new tokens of same category (highest authority)
+// - FUNGIBLE    (none): FT tokens carry no capability but carry tokenAmount > 0
+//
+// A MINTING token in a contract output means:
+// - The output can generate unlimited new tokens of that category
+// - This is equivalent to a central bank printing press
+// - If leaked into wrong contract, anyone can drain or corrupt the token supply
+//
+// A MUTABLE token in a contract output means:
+// - The output can change its NFT commitment data
+// - Can corrupt state that relies on NFT commitment integrity
+//
+// RISK: If a BCH-only contract does not explicitly reject tokens, a malicious
+// builder can inject a minting-capable NFT into the contract, effectively
+// laundering mint authority through an unsuspecting contract.
+
+// LOCKING BYTECODE CONSTRUCTION MODEL:
+// NexOps prohibits raw bytes parameters for lockingBytecode destinations.
+// Reason: raw bytes allow caller to inject arbitrary destination scripts,
+// which is a covenant escape vector. All destinations must be constructed
+// from typed primitives using CashScript's LockingBytecode constructors:
+//
+// ✅ new LockingBytecodeP2PKH(pubkeyhash)   — pay to public key hash
+// ✅ new LockingBytecodeP2SH(bytes32)        — pay to script hash
+// ✅ tx.inputs[this.activeInputIndex].lockingBytecode — self-reference (covenant)
+//
+// ❌ bytes rawBytecode                       — FORBIDDEN (covenant escape)
+// ❌ bytes expectedOutput                    — FORBIDDEN (covenant escape)
+//
+// This applies to ALL covenant destination parameters in NexOps contracts.
+
+// EXPLICIT DESIGN DECISIONS:
+// - This contract EXPLICITLY rejects ALL token inputs (any category)
+// - This contract EXPLICITLY rejects ALL token outputs (any category)
+// - This contract does NOT handle minting, mutable, or immutable NFTs
+// - This contract does NOT handle fungible tokens (any tokenAmount > 0)
+// - Defensive validation applies even if contract has no other token logic
+// - This is a BCH-only contract by design and enforcement
+// - All output destinations are constructed from typed primitives (no raw bytes)
+
+// ATTACK VECTORS BLOCKED:
+// ✗ Minting NFT injection: Cannot inject minting authority into contract
+// ✗ Mutable NFT injection: Cannot inject mutable authority into contract
+// ✗ Token laundering: Cannot route mint authority through this contract
+// ✗ Silent token acceptance: Cannot add tokens to inputs without detection
+// ✗ Token output injection: Cannot create token outputs from this contract
+// ✗ Category confusion: Cannot use any non-zero token category
+// ✗ Token amount smuggling: Cannot carry fungible tokens through contract
+// ✗ Covenant escape via raw bytes: Cannot inject arbitrary destination scripts
+
+contract MintingControl() {
+    // PRIMARY VALIDATION FUNCTION (P2PKH DESTINATION)
+    // Demonstrates complete minting control with typed P2PKH destination
+    // Recipient is a pubkeyhash — not raw bytes — preventing covenant escape
+    function validateP2PKH(
+        pubkeyhash recipient,  // Typed recipient hash — NOT raw bytes
+        int outputValue        // Expected output value (BCH only)
+    ) {
+        // TOKEN CATEGORY CONSTANT
+        // bytes32 representation of "no token" — canonical all-zeros value
+        // SEMANTIC CONSTANT: The ONLY acceptable token category for BCH-only contracts
+        // Any non-zero value represents a CashToken category and MUST be rejected
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 1: ACTIVE INPUT IDENTIFICATION
+        // ═══════════════════════════════════════════════════════════════
+        // PURPOSE: Establish which input belongs to this contract
+        // PREVENTS: Position attacks, wrong input validation
+        // SEVERITY: Critical
+        require(tx.inputs[this.activeInputIndex].lockingBytecode == this.lockingBytecode);
+
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 2: INPUT TOKEN CATEGORY REJECTION
+        // ═══════════════════════════════════════════════════════════════
+        // PURPOSE: Reject any token-carrying input to this contract
+        // PREVENTS: Token injection, minting authority import, token laundering
+        // SEVERITY: Critical
+
+        // WHY THIS EXISTS:
+        // A malicious transaction builder could construct a transaction where:
+        // - This contract's UTXO was previously injected with a minting NFT
+        // - The builder then spends this UTXO to "use" the minting authority
+        // - Without this check, the contract silently validates token spending
+        // By explicitly requiring NO_TOKEN, we ensure the contract UTXO was
+        // never used to hold any token authority
+        require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
+
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 3: INPUT TOKEN AMOUNT REJECTION
+        // ═══════════════════════════════════════════════════════════════
+        // PURPOSE: Reject fungible tokens even if category check somehow passes
+        // PREVENTS: Fungible token smuggling, amount-based attacks
+        // SEVERITY: High
+        // NOTE: Defensive redundancy — if tokenCategory == NO_TOKEN then
+        // tokenAmount must also be 0 by protocol rules. However, explicit
+        // validation makes intent clear and guards against future edge cases.
+        require(tx.inputs[this.activeInputIndex].tokenAmount == 0);
+
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 4: OUTPUT COUNT ENFORCEMENT
+        // ═══════════════════════════════════════════════════════════════
+        // PURPOSE: Bound the output space to prevent unvalidated outputs
+        // PREVENTS: Hidden token outputs, output injection attacks
+        // SEVERITY: Critical
+
+        // WHY EXACT COUNT MATTERS FOR MINTING CONTROL:
+        // Minting attacks often work by adding extra unvalidated outputs
+        // An attacker could add a minting NFT output AFTER the validated output
+        // By requiring exactly 1 output, every output is explicitly validated
+        // There is NO unvalidated output space where tokens can hide
+        require(tx.outputs.length == 1);
+
+        // NEXOPS NOTE: If your contract requires more outputs (N > 1),
+        // you MUST explicitly validate tokenCategory == NO_TOKEN on EVERY
+        // output individually. Never leave an output unvalidated.
+
+        // FEE MODEL: EXTERNAL
+        // tx.outputs.length == 1 implies no fee output from this contract
+        // Mining fee MUST be provided by other inputs in the transaction
+        // NEXOPS NOTE: This is an intentional design choice (external fee model)
+        // If unintentional, use fee-tolerant pattern with >= 2 outputs
+
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 5: OUTPUT DESTINATION VALIDATION (TYPED P2PKH)
+        // ═══════════════════════════════════════════════════════════════
+        // PURPOSE: Validate output goes to typed P2PKH destination
+        // PREVENTS: Redirection attacks, covenant escape via raw bytes
+        // SEVERITY: Critical
+
+        // WHY WE USE new LockingBytecodeP2PKH(recipient) NOT raw bytes:
+        // - raw bytes parameter = caller controls destination = covenant escape
+        // - pubkeyhash parameter = caller provides hash, destination is CONSTRUCTED
+        // - LockingBytecodeP2PKH wraps hash in the correct P2PKH script template
+        // - The script template itself is enforced by the constructor (not caller)
+        // - Attacker can only influence WHICH P2PKH address, not the script TYPE
+        // This is the NexOps-required pattern for all payment destinations
+        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(recipient));
+
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 6: OUTPUT VALUE VALIDATION
+        // ═══════════════════════════════════════════════════════════════
+        // PURPOSE: Bind caller-provided value to actual output value
+        // PREVENTS: Value mismatch attacks, parameter spoofing
+        // SEVERITY: High
+
+        // TRUST MODEL: outputValue is UNTRUSTED (caller-provided)
+        // Safety relies ENTIRELY on equality with tx.outputs[0].value
+        // outputValue is validated SOLELY by this equality check
+        // Do NOT use outputValue in any logic before this binding
+        require(tx.outputs[0].value == outputValue);
+
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 7: OUTPUT TOKEN CATEGORY REJECTION
+        // ═══════════════════════════════════════════════════════════════
+        // PURPOSE: Prevent any token from being created in the output
+        // PREVENTS: Minting through this contract, token output injection
+        // SEVERITY: Critical
+
+        // WHY THIS IS THE MOST IMPORTANT CHECK:
+        // Even if no tokens entered via inputs, a malicious builder could:
+        // - Construct a transaction that creates NEW tokens in the output
+        // - Use this contract's validation as "cover" for a minting operation
+        // - The minting UTXO would then exist at the output address
+        //
+        // By requiring NO_TOKEN on the output, we guarantee:
+        // - This contract CANNOT be used as a minting vehicle
+        // - No token category can appear in any output we validate
+        // - Mint authority CANNOT propagate through this contract
+        require(tx.outputs[0].tokenCategory == NO_TOKEN);
+
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 8: OUTPUT TOKEN AMOUNT REJECTION
+        // ═══════════════════════════════════════════════════════════════
+        // PURPOSE: Explicit fungible token rejection on output
+        // PREVENTS: Fungible token creation, FT smuggling in outputs
+        // SEVERITY: High
+        // NOTE: Defensive redundancy — if tokenCategory == NO_TOKEN then
+        // tokenAmount must be 0. Explicit check documents intent clearly.
+        require(tx.outputs[0].tokenAmount == 0);
+
+        // ═══════════════════════════════════════════════════════════════
+        // VALIDATION COMPLETE
+        // ═══════════════════════════════════════════════════════════════
+        // At this point, we have guaranteed:
+        // ✓ This contract is the active input being validated
+        // ✓ Input carries no token category (not even immutable NFT)
+        // ✓ Input carries no fungible token amount
+        // ✓ Exactly one output exists (no hidden output space)
+        // ✓ Output destination is a typed P2PKH (no raw bytes injection)
+        // ✓ Output value matches caller claim (parameter binding)
+        // ✓ Output carries no token category (no minting possible)
+        // ✓ Output carries no fungible token amount
+        // ✓ Mint authority CANNOT enter or exit through this contract
+        // ✓ Fee is paid externally (external fee model, intentional)
     }
-    
-    function downgrade() {
-        // After initial setup, downgrade to mutable
-        require(tx.outputs[0].tokenCategory == category + 0x01);
+
+    // SECONDARY VALIDATION FUNCTION (P2SH DESTINATION)
+    // Same minting control guarantees with typed P2SH destination
+    // scriptHash is bytes32 — NOT raw bytes — still prevents covenant escape
+    // Caller provides hash of a script, not the script itself
+    function validateP2SH(
+        bytes32 scriptHash,    // Typed script hash — NOT raw lockingBytecode
+        int outputValue        // Expected output value (BCH only)
+    ) {
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+
+        // Active input validation
+        require(tx.inputs[this.activeInputIndex].lockingBytecode == this.lockingBytecode);
+        require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
+        require(tx.inputs[this.activeInputIndex].tokenAmount == 0);
+
+        // Output count bounding
+        require(tx.outputs.length == 1);
+
+        // TYPED P2SH DESTINATION
+        // new LockingBytecodeP2SH(scriptHash) constructs the P2SH wrapper
+        // Caller provides the script hash, not the raw destination bytecode
+        // The P2SH script template is enforced by the constructor
+        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2SH(scriptHash));
+
+        // Value binding (outputValue is untrusted — bound to consensus data)
+        require(tx.outputs[0].value == outputValue);
+
+        // Output token rejection
+        require(tx.outputs[0].tokenCategory == NO_TOKEN);
+        require(tx.outputs[0].tokenAmount == 0);
     }
-    
-    function burn() {
-        // Send minting NFT to OP_RETURN to destroy it
-        require(tx.outputs[destroyIdx].lockingBytecode == 0x6a);
-        require(tx.outputs[destroyIdx].tokenCategory == category + 0x02);
+
+    // COVENANT CONTINUATION VARIANT
+    // Minting control for self-referential covenant continuation
+    // Uses self-reference pattern — no destination parameter needed at all
+    // This is the most restrictive form: output MUST be this exact contract
+    function validateContinuation(
+        int outputValue        // Expected continuation value (BCH only)
+    ) {
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+
+        // Active input validation
+        require(tx.inputs[this.activeInputIndex].lockingBytecode == this.lockingBytecode);
+        require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
+        require(tx.inputs[this.activeInputIndex].tokenAmount == 0);
+
+        // Output count bounding
+        require(tx.outputs.length == 1);
+
+        // SELF-REFERENCE DESTINATION
+        // No destination parameter — output MUST be this exact contract
+        // This is the strongest form: caller has zero influence over destination
+        // Covenant escape is impossible by construction
+        require(
+            tx.outputs[0].lockingBytecode ==
+            tx.inputs[this.activeInputIndex].lockingBytecode
+        );
+
+        // Value binding (outputValue is untrusted — bound to consensus data)
+        require(tx.outputs[0].value == outputValue);
+
+        // Output token rejection
+        require(tx.outputs[0].tokenCategory == NO_TOKEN);
+        require(tx.outputs[0].tokenAmount == 0);
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// PATTERN: EXHAUSTIVE OUTPUT TOKEN REJECTION (N OUTPUTS)
+// ═══════════════════════════════════════════════════════════════════════
+// When a contract requires multiple outputs, EVERY output must be
+// individually validated. This pattern shows the required structure.
+//
+// MANDATORY RULE: No output may be left unvalidated for token category.
+// If tx.outputs.length == N, then outputs [0..N-1] must ALL be checked.
+
+contract MintingControlMultiOutput() {
+    function validate(
+        pubkeyhash recipient0,    // Typed destination — output 0
+        pubkeyhash recipient1,    // Typed destination — output 1
+        int output0Value,
+        int output1Value
+    ) {
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+
+        // Active input validation
+        require(tx.inputs[this.activeInputIndex].lockingBytecode == this.lockingBytecode);
+        require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
+        require(tx.inputs[this.activeInputIndex].tokenAmount == 0);
+
+        // Exact output count: 2 outputs, both fully validated
+        // NEXOPS INVARIANT: outputs.length == N must be followed by
+        // tokenCategory == NO_TOKEN check on ALL N outputs
+        require(tx.outputs.length == 2);
+
+        // OUTPUT 0: Full token rejection with typed P2PKH destination
+        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(recipient0));
+        require(tx.outputs[0].value == output0Value);
+        require(tx.outputs[0].tokenCategory == NO_TOKEN);
+        require(tx.outputs[0].tokenAmount == 0);
+
+        // OUTPUT 1: Full token rejection with typed P2PKH destination
+        // CRITICAL: Every output MUST be validated individually
+        // Skipping even one output creates a token injection vector
+        require(tx.outputs[1].lockingBytecode == new LockingBytecodeP2PKH(recipient1));
+        require(tx.outputs[1].value == output1Value);
+        require(tx.outputs[1].tokenCategory == NO_TOKEN);
+        require(tx.outputs[1].tokenAmount == 0);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// LOCKING BYTECODE CONSTRUCTION RULES (NEXOPS CANONICAL)
+// ═══════════════════════════════════════════════════════════════════════
+
+// RULE: All output destinations must be constructed from typed primitives.
+// NEVER use raw bytes parameters for lockingBytecode destinations.
+
+// ALLOWED DESTINATION PATTERNS:
+//
+// Pattern A: P2PKH (most common, recommended for individual recipients)
+// Parameter type: pubkeyhash recipient
+// Construction:   new LockingBytecodeP2PKH(recipient)
+// Security:       Caller controls WHICH address, not the script type
+//
+// Pattern B: P2SH (for script-hash destinations)
+// Parameter type: bytes32 scriptHash
+// Construction:   new LockingBytecodeP2SH(scriptHash)
+// Security:       Caller controls WHICH script hash, not the wrapper type
+//
+// Pattern C: Self-reference (for covenant continuation)
+// Parameter type: (none needed)
+// Construction:   tx.inputs[this.activeInputIndex].lockingBytecode
+// Security:       Caller has zero influence over destination (strongest)
+//
+// FORBIDDEN DESTINATION PATTERNS:
+//
+// ❌ Pattern X: Raw bytes parameter
+// Parameter type: bytes destination
+// Usage:          require(tx.outputs[0].lockingBytecode == destination)
+// Risk:           Caller injects arbitrary script — covenant escape
+//
+// ❌ Pattern Y: Raw bytes32 used as lockingBytecode directly
+// Parameter type: bytes32 rawScript
+// Usage:          require(tx.outputs[0].lockingBytecode == rawScript)
+// Risk:           Caller constructs arbitrary 32-byte script fragments
+
+// ═══════════════════════════════════════════════════════════════════════
+// MINTING CONTROL SEVERITY CLASSIFICATION
+// ═══════════════════════════════════════════════════════════════════════
+
+// SEVERITY: Critical (Minting Authority Leakage)
+// - Missing input tokenCategory validation
+// - Missing output tokenCategory validation
+// - Consequence: Minting authority can enter/exit via contract
+// - Detection: AST-level — tokenCategory comparison absence
+// - Prevention: Mandatory NO_TOKEN check on all inputs/outputs
+
+// SEVERITY: Critical (Covenant Escape via Raw Bytes)
+// - Using bytes parameter for lockingBytecode destination
+// - Consequence: Caller controls output destination arbitrarily
+// - Detection: AST-level — lockingBytecode == bytes_parameter pattern
+// - Prevention: Use typed constructors (P2PKH, P2SH, self-reference)
+
+// SEVERITY: Critical (Unvalidated Output Space)
+// - tx.outputs.length not bounded
+// - Consequence: Hidden token output can bypass all checks
+// - Detection: AST-level — outputs.length validation absence
+// - Prevention: Exact output count with per-output validation
+
+// SEVERITY: High (Fungible Token Smuggling)
+// - Missing tokenAmount == 0 validation
+// - Consequence: FT tokens can pass through BCH-only contract
+// - Detection: AST-level — tokenAmount comparison absence
+// - Prevention: Explicit tokenAmount == 0 on all inputs/outputs
+
+// SEVERITY: Medium (Incomplete Coverage)
+// - Some but not all outputs validated for token category
+// - Consequence: Token injection through unvalidated output
+// - Detection: Coverage analysis — outputs checked vs total count
+// - Prevention: All outputs validated when count is bounded
+
+// ═══════════════════════════════════════════════════════════════════════
+// STRUCTURAL INVARIANT FOR NEXOPS
+// ═══════════════════════════════════════════════════════════════════════
+
+// AST-Level Rule: Minting Control Invariant
+// For any contract classified as BCH-only (no token parameters):
+//
+// 1. INPUT TOKEN REJECTION INVARIANT:
+//    For the active input, ALL of these must exist:
+//    - require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN)
+//    - require(tx.inputs[this.activeInputIndex].tokenAmount == 0)
+//    Both must dominate any covenant logic
+//
+// 2. OUTPUT BOUNDING INVARIANT:
+//    - require(tx.outputs.length == N) must exist
+//    - N must be a specific literal (not a variable)
+//    - Exact count is preferred over minimum count for BCH-only
+//
+// 3. OUTPUT TOKEN REJECTION INVARIANT:
+//    For each output index i in [0..N-1]:
+//    - require(tx.outputs[i].tokenCategory == NO_TOKEN)
+//    - require(tx.outputs[i].tokenAmount == 0)
+//    Coverage must be COMPLETE: every output validated
+//
+// 4. NO_TOKEN CONSTANT INVARIANT:
+//    - NO_TOKEN must equal bytes32 of all zeros
+//    - NexOps should recognize and verify this canonical value
+//    - Any other value is semantically incorrect
+//
+// 5. DESTINATION CONSTRUCTION INVARIANT:
+//    - All output lockingBytecode destinations must use typed constructors
+//    - Permitted: new LockingBytecodeP2PKH(pubkeyhash)
+//    - Permitted: new LockingBytecodeP2SH(bytes32)
+//    - Permitted: tx.inputs[this.activeInputIndex].lockingBytecode
+//    - Forbidden: any bytes or bytes32 parameter used directly as destination
+
+// ═══════════════════════════════════════════════════════════════════════
+// NEXOPS ENFORCEMENT CHECKLIST
+// ═══════════════════════════════════════════════════════════════════════
+
+// NexOps MUST verify for every BCH-only contract:
+// [ ] Input tokenCategory == NO_TOKEN exists for active input
+// [ ] Input tokenAmount == 0 exists for active input
+// [ ] tx.outputs.length is bounded with exact count
+// [ ] Output tokenCategory == NO_TOKEN exists for EVERY output
+// [ ] Output tokenAmount == 0 exists for EVERY output
+// [ ] NO_TOKEN constant equals 0x0000...0000 (32 zero bytes)
+// [ ] Coverage is complete (no output left without token check)
+// [ ] Token checks use == NO_TOKEN (not != someCategory)
+// [ ] All lockingBytecode destinations use typed constructors
+// [ ] No raw bytes parameters used for destination scripts
+// [ ] outputValue is bound to tx.outputs[N].value before use
+
+// NexOps MUST flag:
+// - Missing input tokenCategory check: CRITICAL
+// - Missing output tokenCategory check: CRITICAL
+// - Incomplete output coverage: CRITICAL
+// - Unbounded output count: CRITICAL
+// - Raw bytes used as lockingBytecode destination: CRITICAL
+// - Missing tokenAmount check: HIGH
+// - outputValue used before binding: HIGH
+// - Incorrect NO_TOKEN value: ERROR
+// - Partial coverage (some outputs checked): HIGH
+// - Ambiguous fee model: WARNING
+
+// ═══════════════════════════════════════════════════════════════════════
+// TESTING CHECKLIST
+// ═══════════════════════════════════════════════════════════════════════
+
+// [ ] Test with input tokenCategory = immutable NFT category (should fail)
+// [ ] Test with input tokenCategory = mutable NFT category (should fail)
+// [ ] Test with input tokenCategory = minting NFT category (should fail)
+// [ ] Test with input tokenAmount > 0 (should fail)
+// [ ] Test with extra outputs beyond N (should fail — length check)
+// [ ] Test with output tokenCategory = any non-zero value (should fail)
+// [ ] Test with output tokenAmount > 0 (should fail)
+// [ ] Test with valid BCH-only inputs and outputs (should succeed)
+// [ ] Test that minting NFT cannot propagate through contract
+// [ ] Test that mutable NFT cannot propagate through contract
+// [ ] Test all three destination variants (P2PKH, P2SH, self-reference)
+// [ ] Verify NO_TOKEN constant is exactly 32 zero bytes
+// [ ] Test with boundary output count (N-1, N, N+1)
+// [ ] Verify outputValue binding prevents parameter spoofing

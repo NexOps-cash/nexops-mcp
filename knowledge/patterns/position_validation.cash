@@ -1,20 +1,387 @@
-// PATTERN: Input Position Validation
-// ALWAYS validate your own position and other contracts' positions
+pragma cashscript ^0.13.0;
 
-function myOperation() {
-    // ALWAYS validate your own position first
-    require(this.activeInputIndex == 2);
-    
-    // Define expected positions
-    // Index 0: Price oracle
-    // Index 1: Main contract
-    // Index 2: This function contract (self)
-    // Index 3: User BCH
-    
-    // Validate each position
-    require(tx.inputs[0].tokenCategory == oracleCategory + 0x01);
-    require(tx.inputs[1].tokenCategory == mainCategory + 0x01);
-    require(tx.inputs[3].tokenCategory == 0x); // Pure BCH
-    
-    // Now safe to use these indices
+// SECURITY PATTERN: Input Index Safety (Active Input Anchoring)
+// PURPOSE: Prevent hardcoded input index attacks and enforce correct input reads
+// CATEGORY: Input Safety
+// USE CASE: Any contract that reads its own input properties via introspection
+
+// PATTERN DESCRIPTION:
+// This pattern enforces safe input index discipline in CashScript covenants.
+// The core rule is simple: ALL reads of THIS contract's input properties
+// must anchor to this.activeInputIndex — never to a hardcoded literal index.
+//
+// BCH EXECUTION MODEL (CRITICAL UNDERSTANDING):
+// In Bitcoin Cash, each input is validated independently by the consensus engine.
+// When a contract executes:
+// - this.activeInputIndex is SET by consensus (not the builder)
+// - The contract executes FOR that specific input (not any other)
+// - this.activeInputIndex always correctly identifies THIS contract's input
+// - There is NO scenario where a contract "accidentally validates the wrong input"
+//
+// Therefore:
+// require(tx.inputs[this.activeInputIndex].lockingBytecode == this.lockingBytecode)
+// is REDUNDANT. If this contract is executing, that input IS this contract.
+// The consensus engine already enforces this identity before the script runs.
+//
+// The REAL danger is not position spoofing — it is hardcoded index reads.
+
+// THE ACTUAL ATTACK: HARDCODED INDEX READS
+//
+// A contract that reads tx.inputs[0].value instead of
+// tx.inputs[this.activeInputIndex].value creates a critical vulnerability:
+//
+// Scenario A: Contract deployed normally
+// Input 0: ThisContract UTXO  ← tx.inputs[0] and activeInputIndex both point here
+// Result: Correct value read (works by accident)
+//
+// Scenario B: Contract deployed in multi-input transaction
+// Input 0: AttackerUTXO       ← tx.inputs[0] points here (attacker controls this)
+// Input 1: ThisContract UTXO  ← activeInputIndex points here (correct)
+//
+// If contract reads tx.inputs[0].value:
+// - Reads ATTACKER's balance, not its own
+// - All value checks operate on wrong data
+// - Attacker can inflate or deflate perceived contract balance
+// - Reserve checks, minimum balance checks, all bypassed
+//
+// This is the real attack. Not position spoofing — index confusion.
+
+// SECONDARY RISK: CALLER-PROVIDED INDEX WITHOUT BOUNDS VALIDATION
+// When a contract legitimately needs to read other inputs (e.g., NFT receipts),
+// the index is often caller-provided. Without bounds checking, an attacker
+// can provide an out-of-bounds index causing consensus failure (DoS).
+
+// EXPLICIT DESIGN DECISIONS:
+// - No outputs validated (pattern focuses purely on input index safety)
+// - No signatures required (pure structural enforcement)
+// - BCH-only (input tokenCategory validated as NO_TOKEN)
+// - this.activeInputIndex is the ONLY valid reference for THIS contract's input
+// - Hardcoded literal indices for THIS contract's reads are FORBIDDEN
+// - Caller-provided secondary indices MUST be bounds-checked
+
+// ATTACK VECTORS BLOCKED:
+// ✗ Hardcoded index confusion: Cannot read wrong input via literal index
+// ✗ Multi-input balance spoofing: Cannot fake contract balance via index 0
+// ✗ Value assumption bypass: Cannot manipulate perceived contract value
+// ✗ Token assumption bypass: Cannot fake token state via wrong input index
+// ✗ Out-of-bounds secondary index: Cannot DoS via invalid caller index
+// ✗ Self-reference confusion: Cannot pass activeInputIndex as secondary index
+
+contract InputIndexSafety() {
+    // CORE ANCHORING FUNCTION
+    // Demonstrates correct and incorrect ways to read contract input properties
+    function validateAnchoredReads() {
+        // TOKEN CATEGORY CONSTANT
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+
+        // ═══════════════════════════════════════════════════════════════
+        // CORRECT: ALL contract input reads anchor to this.activeInputIndex
+        // ═══════════════════════════════════════════════════════════════
+        // PURPOSE: Read THIS contract's input properties safely
+        // SEVERITY: Critical if violated (hardcoded index used instead)
+        //
+        // this.activeInputIndex is set by the consensus engine.
+        // It always and only refers to THIS contract's input.
+        // Reading any property via this reference is always correct,
+        // regardless of where in the input array the contract sits.
+
+        // ✅ CORRECT: Anchored to this.activeInputIndex
+        int contractBalance = tx.inputs[this.activeInputIndex].value;
+        bytes32 contractTokenCategory = tx.inputs[this.activeInputIndex].tokenCategory;
+        int contractTokenAmount = tx.inputs[this.activeInputIndex].tokenAmount;
+
+        // ✅ Token validation anchored to active input
+        // This is safe because we are reading from the correct input
+        require(contractTokenCategory == NO_TOKEN);
+        require(contractTokenAmount == 0);
+
+        // ✅ Value validation anchored to active input
+        // contractBalance is now trusted (read from consensus-identified input)
+        require(contractBalance > 0);
+
+        // ═══════════════════════════════════════════════════════════════
+        // WHAT NOT TO DO: HARDCODED INDEX READS (NEVER USE IN PRODUCTION)
+        // ═══════════════════════════════════════════════════════════════
+        // The following examples are shown for educational purposes ONLY.
+        // They represent the exact patterns NexOps MUST detect and reject.
+        //
+        // ❌ FORBIDDEN: tx.inputs[0].value
+        //    - Reads from input 0 regardless of where contract actually is
+        //    - In a multi-input tx where contract is at index 1, reads wrong input
+        //    - Attacker places their own UTXO at index 0 with arbitrary value
+        //    - Contract balance check operates on attacker-controlled data
+        //
+        // ❌ FORBIDDEN: tx.inputs[1].value
+        //    - Same problem at a different hardcoded index
+        //    - No hardcoded literal index is ever safe for reading OWN input
+        //
+        // ❌ FORBIDDEN: tx.inputs[0].tokenCategory
+        //    - Reads token state from wrong input
+        //    - Token injection check rendered meaningless
+        //
+        // RULE: For THIS contract's own input properties, ONLY use:
+        //       tx.inputs[this.activeInputIndex].*
+        //       Never: tx.inputs[0].*, tx.inputs[1].*, tx.inputs[N].*
+
+        // ═══════════════════════════════════════════════════════════════
+        // VALIDATION COMPLETE
+        // ═══════════════════════════════════════════════════════════════
+        // At this point, we have demonstrated:
+        // ✓ All contract input reads anchored to this.activeInputIndex
+        // ✓ Value read is from THIS contract's actual UTXO
+        // ✓ Token checks read from THIS contract's actual UTXO
+        // ✓ No hardcoded index used for own-input reads
+    }
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// PATTERN: SAFE SECONDARY INPUT ACCESS
+// ═══════════════════════════════════════════════════════════════════════
+// When a contract legitimately needs to read OTHER inputs (e.g., NFT receipts,
+// companion UTXOs), the index is typically caller-provided. This requires
+// explicit bounds validation before any access.
+
+contract SecondaryInputAccess() {
+    function validateWithSecondaryInput(
+        int secondaryInputIndex  // Caller-provided index — UNTRUSTED
+    ) {
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+
+        // STEP 1: READ OWN INPUT — always anchored to activeInputIndex
+        int contractBalance = tx.inputs[this.activeInputIndex].value;
+        require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
+        require(tx.inputs[this.activeInputIndex].tokenAmount == 0);
+        require(contractBalance > 0);
+
+        // STEP 2: TOTAL INPUT COUNT VALIDATION
+        // Must establish bounds before accessing any caller-provided index
+        // Without this, secondaryInputIndex could reference non-existent input
+        require(tx.inputs.length >= 2);
+
+        // STEP 3: SECONDARY INDEX BOUNDS CHECK
+        // secondaryInputIndex is UNTRUSTED (caller-provided)
+        // Lower bound: cannot be negative
+        // Upper bound: cannot equal or exceed array length
+        require(secondaryInputIndex >= 0);
+        require(secondaryInputIndex < tx.inputs.length);
+
+        // STEP 4: SECONDARY INDEX DISTINCTNESS CHECK
+        // Prevents the caller from providing this.activeInputIndex as the
+        // "secondary" input — which would cause self-reference logic errors
+        require(secondaryInputIndex != this.activeInputIndex);
+
+        // STEP 5: SECONDARY INPUT READ (now safe)
+        // Bounds confirmed, distinctness confirmed, read is safe
+        int secondaryValue = tx.inputs[secondaryInputIndex].value;
+        require(secondaryValue > 0);
+
+        // NOTE: secondaryInputIndex is intentionally caller-controlled
+        // The contract does not care WHICH other input is referenced,
+        // only that it satisfies the required properties above
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// PATTERN: MULTI-FUNCTION CONTRACT — EACH PATH ANCHORED INDEPENDENTLY
+// ═══════════════════════════════════════════════════════════════════════
+// Each function in a contract is an independent spending path.
+// Each path must independently anchor all own-input reads to activeInputIndex.
+// This is not because of position spoofing (that cannot happen in BCH),
+// but because each function is self-contained and must not rely on
+// assumptions from other functions.
+
+contract MultiPathInputSafety() {
+    function pathOne() {
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+
+        // All own-input reads anchored to this.activeInputIndex
+        // No hardcoded index used anywhere in this function
+        int balance = tx.inputs[this.activeInputIndex].value;
+        require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
+        require(balance > 0);
+    }
+
+    function pathTwo() {
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+
+        // Each function independently anchors its own reads
+        // Not because position can be spoofed (it cannot)
+        // But because each function is self-contained and must be
+        // independently correct and independently auditable
+        int balance = tx.inputs[this.activeInputIndex].value;
+        require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
+        require(balance > 0);
+    }
+
+    function pathThree() {
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+
+        // Same pattern repeated — self-contained, no cross-function assumptions
+        int balance = tx.inputs[this.activeInputIndex].value;
+        require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
+        require(balance > 0);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// BCH EXECUTION MODEL — CANONICAL UNDERSTANDING
+// ═══════════════════════════════════════════════════════════════════════
+
+// HOW BCH INPUT VALIDATION ACTUALLY WORKS:
+//
+// Transaction:
+// Input 0 → UTXO A (script A executes)
+// Input 1 → UTXO B (script B executes)
+// Input 2 → UTXO C (script C executes)
+//
+// Execution order:
+// - Script A runs: this.activeInputIndex == 0
+// - Script B runs: this.activeInputIndex == 1
+// - Script C runs: this.activeInputIndex == 2
+//
+// INVARIANT: When script X runs, this.activeInputIndex == X.
+// This is enforced by consensus. It cannot be spoofed.
+//
+// CONSEQUENCE:
+// - require(tx.inputs[this.activeInputIndex].lockingBytecode == this.lockingBytecode)
+//   is always true when the contract executes (tautological)
+// - It wastes bytecode without adding security
+// - NexOps should NOT require this check
+//
+// THE REAL RISK is contracts that read tx.inputs[0] instead of
+// tx.inputs[this.activeInputIndex] — because index 0 may not be
+// this contract when the transaction has multiple inputs.
+
+// ═══════════════════════════════════════════════════════════════════════
+// SEVERITY CLASSIFICATION
+// ═══════════════════════════════════════════════════════════════════════
+
+// SEVERITY: Critical (Hardcoded Own-Input Index)
+// - Contract reads tx.inputs[N].* (literal N) for own-input properties
+// - Consequence: Reads wrong input in multi-input transactions
+// - Detection: AST-level — literal index in own-input read patterns
+// - Prevention: Replace all tx.inputs[N] with tx.inputs[this.activeInputIndex]
+
+// SEVERITY: High (Unbounded Secondary Input Index)
+// - Contract reads tx.inputs[callerIndex] without bounds validation
+// - Consequence: Out-of-bounds access causes consensus failure (DoS)
+// - Detection: AST-level — variable index without dominating bounds check
+// - Prevention: require(idx >= 0), require(idx < tx.inputs.length)
+
+// SEVERITY: High (Secondary Index Same As Active)
+// - Contract allows callerIndex == this.activeInputIndex
+// - Consequence: Self-reference in secondary input logic, logical errors
+// - Detection: AST-level — missing != this.activeInputIndex check
+// - Prevention: require(callerIndex != this.activeInputIndex)
+
+// SEVERITY: None (Redundant lockingBytecode Self-Check)
+// - require(tx.inputs[this.activeInputIndex].lockingBytecode == this.lockingBytecode)
+// - Consequence: None — tautologically true, wastes bytecode
+// - Detection: AST-level — lockingBytecode equality with self
+// - NexOps action: WARN (unnecessary bytecode) — do not treat as security check
+
+// ═══════════════════════════════════════════════════════════════════════
+// STRUCTURAL INVARIANT FOR NEXOPS
+// ═══════════════════════════════════════════════════════════════════════
+
+// AST-Level Rule: Input Index Safety Invariant
+//
+// 1. OWN-INPUT READ INVARIANT:
+//    For all accesses to THIS contract's own input properties:
+//    - The index MUST be this.activeInputIndex
+//    - Literal indices (0, 1, 2...) are FORBIDDEN for own-input reads
+//    - Pattern: tx.inputs[this.activeInputIndex].*
+//    - Violation: tx.inputs[0].*, tx.inputs[1].*, tx.inputs[N].*
+//
+// 2. SECONDARY INPUT BOUNDS INVARIANT:
+//    For all accesses to tx.inputs[variable] where variable is not activeInputIndex:
+//    - require(variable >= 0) must dominate the access
+//    - require(variable < tx.inputs.length) must dominate the access
+//    - require(tx.inputs.length >= N) must dominate for minimum count
+//    - require(variable != this.activeInputIndex) must dominate the access
+//
+// 3. REDUNDANT CHECK INVARIANT:
+//    require(tx.inputs[this.activeInputIndex].lockingBytecode == this.lockingBytecode)
+//    SHOULD NOT appear in NexOps-generated contracts.
+//    It is tautological (always true when contract executes) and wastes bytecode.
+//    NexOps generation agents must not emit this check.
+//    NexOps audit agents should flag it as WARNING (unnecessary, not harmful).
+//
+// 4. TOKEN READ ORDER INVARIANT:
+//    tokenCategory and tokenAmount reads are safe at any position since they
+//    correctly reference activeInputIndex — no ordering constraint needed.
+
+// ═══════════════════════════════════════════════════════════════════════
+// DETECTION RULES (AST-BASED)
+// ═══════════════════════════════════════════════════════════════════════
+
+// Rule 1: Scan for hardcoded input index in own-input reads
+// - Find all MemberExpression: tx.inputs[N].* where N is a literal
+// - If N != this.activeInputIndex reference: CRITICAL violation
+// - Report: "Hardcoded input index N — use this.activeInputIndex"
+
+// Rule 2: Scan for variable input index without bounds check
+// - Find all MemberExpression: tx.inputs[variable].*
+//   where variable is not this.activeInputIndex
+// - Check for dominating: require(variable >= 0)
+// - Check for dominating: require(variable < tx.inputs.length)
+// - Check for dominating: require(variable != this.activeInputIndex)
+// - Missing any: HIGH violation
+
+// Rule 3: Scan for redundant lockingBytecode self-check
+// - Find: require(tx.inputs[this.activeInputIndex].lockingBytecode == this.lockingBytecode)
+// - Flag as: WARNING (tautological — true by consensus, wastes bytecode)
+// - NexOps action: suggest removal, not treatment as security check
+
+// Rule 4: Verify token reads use activeInputIndex
+// - Find all .tokenCategory and .tokenAmount reads
+// - If index is not this.activeInputIndex: apply Rule 1 / Rule 2 logic
+
+// ═══════════════════════════════════════════════════════════════════════
+// NEXOPS ENFORCEMENT CHECKLIST
+// ═══════════════════════════════════════════════════════════════════════
+
+// NexOps MUST verify:
+// [ ] No hardcoded literal index for own-input reads (tx.inputs[0], etc.)
+// [ ] All own-input reads use this.activeInputIndex
+// [ ] All caller-provided secondary indices are bounds-checked
+// [ ] Secondary indices validated >= 0
+// [ ] Secondary indices validated < tx.inputs.length
+// [ ] Secondary indices validated != this.activeInputIndex
+// [ ] tx.inputs.length >= N validated before secondary index access
+// [ ] Token reads (tokenCategory, tokenAmount) use activeInputIndex
+
+// NexOps MUST flag:
+// - Hardcoded literal index in own-input read: CRITICAL
+// - Unbounded caller-provided index: HIGH
+// - Missing != activeInputIndex check on secondary: HIGH
+// - Missing tx.inputs.length validation: HIGH
+// - Redundant lockingBytecode self-equality check: WARNING (not security)
+
+// NexOps generation agents MUST NOT emit:
+// - require(tx.inputs[this.activeInputIndex].lockingBytecode == this.lockingBytecode)
+// - tx.inputs[0].* for own-input reads
+// - Any hardcoded literal input index for own-input property reads
+
+// ═══════════════════════════════════════════════════════════════════════
+// TESTING CHECKLIST
+// ═══════════════════════════════════════════════════════════════════════
+
+// Core anchoring:
+// [ ] Test with contract at input index 0 (standard single-input case)
+// [ ] Test with contract at input index 1 (multi-input case)
+// [ ] Test with contract at input index 2 (multi-input case)
+// [ ] Verify contractBalance always reads THIS contract's value (not index 0)
+// [ ] Verify token checks always read THIS contract's tokens (not index 0)
+
+// Secondary input access:
+// [ ] Test with valid secondaryInputIndex (should succeed)
+// [ ] Test with secondaryInputIndex == this.activeInputIndex (should fail)
+// [ ] Test with secondaryInputIndex >= tx.inputs.length (should fail)
+// [ ] Test with secondaryInputIndex < 0 (should fail if type allows)
+// [ ] Test with tx.inputs.length < 2 (should fail before index access)
+
+// Hardcoded index regression:
+// [ ] Verify no production contract uses tx.inputs[0] for own-input reads
+// [ ] Verify no production contract uses tx.inputs[1] for own-input reads
+// [ ] Audit all input reads in all contracts for literal index usage

@@ -1,21 +1,520 @@
-// PATTERN: Sidecar Attachment
-// Proves sidecar belongs to main contract
+pragma cashscript ^0.13.0;
 
-contract TokenSidecar() {
-    function attach() {
-        int mainIndex = this.activeInputIndex - 1;
-        
-        // CRITICAL: Prove same-transaction origin
-        require(tx.inputs[this.activeInputIndex].outpointTransactionHash ==
-                tx.inputs[mainIndex].outpointTransactionHash);
-        
-        // CRITICAL: Prove sequential output indices
-        require(tx.inputs[this.activeInputIndex].outpointIndex ==
-                tx.inputs[mainIndex].outpointIndex + 1);
-        
-        // Self-replicate
-        require(tx.outputs[this.activeInputIndex].lockingBytecode ==
-                tx.inputs[this.activeInputIndex].lockingBytecode);
-        require(tx.outputs[this.activeInputIndex].value == 1000);
+// SECURITY PATTERN: Sidecar Output Attachment
+// PURPOSE: Allow exactly one optional auxiliary output without hidden value leakage
+// CATEGORY: Output Safety
+// USE CASE: Contracts that need to attach a controlled secondary output
+//           while maintaining full validation coverage and parameter consistency
+
+// PATTERN DESCRIPTION:
+// A "sidecar" is a secondary output attached to a primary transaction.
+// Common use cases include:
+// - Returning change to the transaction builder
+// - Paying a protocol fee to a known address
+// - Attaching a notification output to a recipient
+// - Funding a companion contract alongside the primary operation
+//
+// The danger with sidecars is that they create an unvalidated output slot
+// that attackers can exploit to:
+// - Drain value from the contract (fee extraction)
+// - Inject tokens into the transaction output set
+// - Recreate the contract at a different address (covenant escape)
+// - Extract more value than allowed (over-payment of sidecar)
+//
+// PARAMETER CONSISTENCY INVARIANT (CRITICAL):
+// sidecarValue and tx.outputs.length must always agree:
+// - tx.outputs.length == 1 → sidecarValue MUST be 0 (no sidecar exists)
+// - tx.outputs.length == 2 → sidecarValue MUST be > 0 (sidecar exists)
+// Without this, the sidecarValue parameter is semantically undefined
+// in the single-output case, creating audit confusion and repair hazards.
+
+// SIDECAR SAFETY MODEL:
+// The sidecar slot (output[1]) is an explicitly-permitted exception to the
+// "validate everything" rule. It is controlled by the transaction builder
+// with the following constraints:
+// - Builder can choose the sidecar destination freely
+// - Builder CANNOT use the sidecar to recreate this covenant
+// - Builder CANNOT use the sidecar to inject tokens
+// - Builder CANNOT set sidecar value to zero (dust/griefing prevention)
+// - Builder CANNOT add a third output (strict upper bound enforced)
+// - Builder CANNOT claim sidecarValue > 0 while omitting output[1]
+
+// EXPLICIT DESIGN DECISIONS:
+// - No signatures required (pure output structure enforcement)
+// - BCH-only on all outputs (sidecar and primary)
+// - Sidecar destination is builder-controlled (intentional flexibility)
+// - Primary output[0] destination is contract-controlled (typed constructor)
+// - Sidecar CANNOT be another instance of this contract (explicit check)
+// - At most ONE sidecar permitted (strict upper bound)
+// - sidecarValue == 0 when no sidecar, sidecarValue > 0 when sidecar present
+// - Economic consistency enforced: primaryValue + sidecarValue <= inputValue
+
+// ATTACK VECTORS BLOCKED:
+// ✗ Hidden output theft: Cannot add third unvalidated output
+// ✗ Token injection via sidecar: Sidecar is BCH-only
+// ✗ Covenant cloning: Sidecar cannot recreate this contract
+// ✗ Dust sidecar griefing: Sidecar value must be > 0 when present
+// ✗ Sidecar value extraction: Value bounded by inputValue
+// ✗ Output explosion: Hard upper bound of 2 outputs
+// ✗ Parameter/structure mismatch: sidecarValue bound to output count
+
+// ═══════════════════════════════════════════════════════════════════════
+// VARIANT A: PRIMARY IS RECIPIENT (P2PKH) + OPTIONAL SIDECAR
+// Use when: Contract settles to a known recipient with optional change output
+// ═══════════════════════════════════════════════════════════════════════
+
+contract SidecarWithRecipient() {
+    function execute(
+        pubkeyhash recipient,    // Typed P2PKH destination for primary output
+        int primaryValue,        // Value for primary output (untrusted — bound below)
+        int sidecarValue         // Value for sidecar output (MUST be 0 if no sidecar)
+    ) {
+        // TOKEN CATEGORY CONSTANT
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+
+        // ACTIVE INPUT READ — anchored to this.activeInputIndex
+        int inputValue = tx.inputs[this.activeInputIndex].value;
+        require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
+        require(tx.inputs[this.activeInputIndex].tokenAmount == 0);
+
+        // PRIMARY VALUE POSITIVITY
+        // Primary output must have economic value
+        // Validated before output branching — applies to both cases
+        require(primaryValue > 0);
+
+        // ═══════════════════════════════════════════════════════════════
+        // OUTPUT COUNT ENFORCEMENT: EXACTLY 1 OR 2
+        // ═══════════════════════════════════════════════════════════════
+        // PURPOSE: Allow optional sidecar while preventing hidden outputs
+        // SEVERITY: Critical
+        //
+        // Lower bound: at least 1 (primary output must exist)
+        // Upper bound: at most 2 (one sidecar maximum)
+        // No bare >= 1 without upper bound — that allows unlimited outputs
+        require(tx.outputs.length >= 1);
+        require(tx.outputs.length <= 2);
+
+        // ═══════════════════════════════════════════════════════════════
+        // PARAMETER CONSISTENCY INVARIANT
+        // ═══════════════════════════════════════════════════════════════
+        // PURPOSE: Bind sidecarValue to output count — no semantic mismatch
+        // SEVERITY: High (audit determinism, MCP repair safety)
+        //
+        // RULE: sidecarValue and tx.outputs.length must always agree.
+        // - If tx.outputs.length == 1: no sidecar exists → sidecarValue MUST be 0
+        // - If tx.outputs.length == 2: sidecar exists → sidecarValue MUST be > 0
+        //
+        // Without this, a caller could supply sidecarValue = 10_000_000
+        // while producing only one output. The parameter would be silently
+        // ignored, creating semantic inconsistency and audit confusion.
+        //
+        // This is the canonical expression of the invariant:
+        require(
+            (tx.outputs.length == 1 && sidecarValue == 0) ||
+            (tx.outputs.length == 2 && sidecarValue > 0)
+        );
+
+        // ═══════════════════════════════════════════════════════════════
+        // ECONOMIC CONSISTENCY ENFORCEMENT
+        // ═══════════════════════════════════════════════════════════════
+        // PURPOSE: Prevent output values exceeding input value
+        // SEVERITY: Medium (consensus would reject anyway, but determinism matters)
+        //
+        // Without this, primaryValue + sidecarValue could exceed inputValue.
+        // The transaction would fail at consensus, but the contract would have
+        // "approved" an economically impossible configuration.
+        // Enforcing here makes the contract's intent explicit and deterministic.
+        require(primaryValue + sidecarValue <= inputValue);
+
+        // FEE MODEL: IMPLICIT
+        // inputValue - (primaryValue + sidecarValue) = mining fee
+        // Builder chooses output values; remainder becomes fee
+        // Fee is always non-negative due to constraint above
+
+        // ═══════════════════════════════════════════════════════════════
+        // OUTPUT[0]: PRIMARY — RECIPIENT PAYMENT
+        // ═══════════════════════════════════════════════════════════════
+        // Destination is typed P2PKH — no raw bytes injection possible
+        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(recipient));
+
+        // primaryValue is UNTRUSTED (caller-provided)
+        // Bound SOLELY by equality with consensus-enforced output value
+        require(tx.outputs[0].value == primaryValue);
+
+        // BCH-only enforcement on primary output
+        require(tx.outputs[0].tokenCategory == NO_TOKEN);
+        require(tx.outputs[0].tokenAmount == 0);
+
+        // ═══════════════════════════════════════════════════════════════
+        // OUTPUT[1]: OPTIONAL SIDECAR
+        // ═══════════════════════════════════════════════════════════════
+        // This branch executes ONLY when tx.outputs.length == 2.
+        // Due to the consistency invariant above, if we reach this branch
+        // then sidecarValue > 0 is already guaranteed — no re-check needed.
+        if (tx.outputs.length == 2) {
+            // SIDECAR VALUE BINDING
+            // sidecarValue > 0 already guaranteed by consistency invariant
+            // Bind to consensus-enforced output value
+            require(tx.outputs[1].value == sidecarValue);
+
+            // SIDECAR TOKEN REJECTION
+            // Sidecar must be BCH-only
+            // Prevents token injection through the sidecar slot
+            require(tx.outputs[1].tokenCategory == NO_TOKEN);
+            require(tx.outputs[1].tokenAmount == 0);
+
+            // SIDECAR COVENANT EXCLUSION
+            // CRITICAL: Sidecar MUST NOT recreate this contract
+            // Prevents covenant cloning and parallel instance attacks
+            // Builder controls WHERE the sidecar goes — just not WHAT it is
+            require(
+                tx.outputs[1].lockingBytecode !=
+                tx.inputs[this.activeInputIndex].lockingBytecode
+            );
+        }
+
+        // NEXOPS INVARIANT: Token burn enforcement is safe here
+        // tx.outputs.length <= 2 ensures token checks cover all outputs
+        // Relaxing the upper bound REQUIRES revisiting token coverage
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// VARIANT B: PRIMARY IS COVENANT CONTINUATION + OPTIONAL SIDECAR
+// Use when: Contract continues (self-replicates) with optional change output
+// ═══════════════════════════════════════════════════════════════════════
+
+contract SidecarWithContinuation() {
+    function execute(
+        int continuationValue,   // Value for covenant continuation (untrusted — bound below)
+        int sidecarValue         // Value for sidecar output (MUST be 0 if no sidecar)
+    ) {
+        // TOKEN CATEGORY CONSTANT
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+
+        // ACTIVE INPUT READ — anchored to this.activeInputIndex
+        int inputValue = tx.inputs[this.activeInputIndex].value;
+        require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
+        require(tx.inputs[this.activeInputIndex].tokenAmount == 0);
+
+        // CONTINUATION VALUE POSITIVITY
+        require(continuationValue > 0);
+
+        // OUTPUT COUNT ENFORCEMENT: EXACTLY 1 OR 2
+        require(tx.outputs.length >= 1);
+        require(tx.outputs.length <= 2);
+
+        // PARAMETER CONSISTENCY INVARIANT
+        // sidecarValue and tx.outputs.length must always agree
+        // If length == 1: sidecarValue MUST be 0
+        // If length == 2: sidecarValue MUST be > 0
+        require(
+            (tx.outputs.length == 1 && sidecarValue == 0) ||
+            (tx.outputs.length == 2 && sidecarValue > 0)
+        );
+
+        // ECONOMIC CONSISTENCY ENFORCEMENT
+        // Total outputs cannot exceed input value
+        // Ensures fee is always non-negative
+        require(continuationValue + sidecarValue <= inputValue);
+
+        // OUTPUT[0]: PRIMARY — COVENANT CONTINUATION (SELF-REFERENCE)
+        // Output[0] MUST be this exact contract
+        // Self-reference: caller has zero influence on destination type
+        require(
+            tx.outputs[0].lockingBytecode ==
+            tx.inputs[this.activeInputIndex].lockingBytecode
+        );
+
+        // continuationValue is UNTRUSTED (caller-provided)
+        // Bound SOLELY by equality with consensus-enforced output value
+        require(tx.outputs[0].value == continuationValue);
+
+        // BCH-only enforcement on continuation output
+        require(tx.outputs[0].tokenCategory == NO_TOKEN);
+        require(tx.outputs[0].tokenAmount == 0);
+
+        // OUTPUT[1]: OPTIONAL SIDECAR
+        // sidecarValue > 0 already guaranteed by consistency invariant
+        // when tx.outputs.length == 2
+        if (tx.outputs.length == 2) {
+            // SIDECAR VALUE BINDING
+            require(tx.outputs[1].value == sidecarValue);
+
+            // SIDECAR TOKEN REJECTION
+            require(tx.outputs[1].tokenCategory == NO_TOKEN);
+            require(tx.outputs[1].tokenAmount == 0);
+
+            // SIDECAR COVENANT EXCLUSION
+            // Since output[0] is already the continuation, output[1]
+            // being a second continuation would be a protocol violation
+            require(
+                tx.outputs[1].lockingBytecode !=
+                tx.inputs[this.activeInputIndex].lockingBytecode
+            );
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// VARIANT C: PRIMARY IS P2SH + OPTIONAL SIDECAR
+// Use when: Contract settles to a script hash destination
+// ═══════════════════════════════════════════════════════════════════════
+
+contract SidecarWithP2SH() {
+    function execute(
+        bytes32 scriptHash,      // Typed P2SH script hash for primary output
+        int primaryValue,        // Value for primary output (untrusted — bound below)
+        int sidecarValue         // Value for sidecar output (MUST be 0 if no sidecar)
+    ) {
+        // TOKEN CATEGORY CONSTANT
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+
+        // ACTIVE INPUT READ — anchored to this.activeInputIndex
+        int inputValue = tx.inputs[this.activeInputIndex].value;
+        require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
+        require(tx.inputs[this.activeInputIndex].tokenAmount == 0);
+
+        // PRIMARY VALUE POSITIVITY
+        require(primaryValue > 0);
+
+        // OUTPUT COUNT ENFORCEMENT: EXACTLY 1 OR 2
+        require(tx.outputs.length >= 1);
+        require(tx.outputs.length <= 2);
+
+        // PARAMETER CONSISTENCY INVARIANT
+        // sidecarValue and tx.outputs.length must always agree
+        require(
+            (tx.outputs.length == 1 && sidecarValue == 0) ||
+            (tx.outputs.length == 2 && sidecarValue > 0)
+        );
+
+        // ECONOMIC CONSISTENCY ENFORCEMENT
+        require(primaryValue + sidecarValue <= inputValue);
+
+        // OUTPUT[0]: PRIMARY — TYPED P2SH DESTINATION
+        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2SH(scriptHash));
+        require(tx.outputs[0].value == primaryValue);
+        require(tx.outputs[0].tokenCategory == NO_TOKEN);
+        require(tx.outputs[0].tokenAmount == 0);
+
+        // OUTPUT[1]: OPTIONAL SIDECAR
+        // sidecarValue > 0 already guaranteed by consistency invariant
+        // when tx.outputs.length == 2
+        if (tx.outputs.length == 2) {
+            require(tx.outputs[1].value == sidecarValue);
+            require(tx.outputs[1].tokenCategory == NO_TOKEN);
+            require(tx.outputs[1].tokenAmount == 0);
+            require(
+                tx.outputs[1].lockingBytecode !=
+                tx.inputs[this.activeInputIndex].lockingBytecode
+            );
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// PARAMETER CONSISTENCY INVARIANT — CANONICAL FORM
+// ═══════════════════════════════════════════════════════════════════════
+
+// The invariant is always expressed as:
+//
+// require(
+//     (tx.outputs.length == 1 && sidecarValue == 0) ||
+//     (tx.outputs.length == 2 && sidecarValue > 0)
+// );
+//
+// This is the only form NexOps should generate and accept.
+// It encodes the complete truth table for sidecar presence:
+//
+// outputs | sidecarValue | valid?
+// --------|--------------|-------
+//    1    |      0       |  YES  ← no sidecar, parameter agrees
+//    1    |     > 0      |  NO   ← sidecar claimed but absent
+//    2    |      0       |  NO   ← sidecar present but value = 0
+//    2    |     > 0      |  YES  ← sidecar present, parameter agrees
+//
+// CONSEQUENCE FOR SIDECAR BRANCH:
+// When we enter if (tx.outputs.length == 2):
+// - sidecarValue > 0 is already proven (by the invariant above)
+// - No re-check of sidecarValue > 0 needed inside the branch
+// This is safe and intentional — the invariant dominates the branch.
+
+// ═══════════════════════════════════════════════════════════════════════
+// ECONOMIC CONSISTENCY MODEL
+// ═══════════════════════════════════════════════════════════════════════
+
+// RULE: primaryValue + sidecarValue <= inputValue
+//
+// Why this matters even though consensus enforces it anyway:
+// - Contract explicitly approves the economic configuration
+// - MCP repair agent can reason about valid value distributions
+// - Audit trail shows contract was aware of value constraints
+// - Prevents contract from "approving" impossible configurations
+//
+// Fee relationship:
+// fee = inputValue - (primaryValue + sidecarValue)
+// fee >= 0 is guaranteed by the constraint above
+// fee is chosen implicitly by the builder (remainder after outputs)
+//
+// Note: This does NOT enforce a minimum fee.
+// Builder could set primaryValue + sidecarValue == inputValue (zero fee).
+// That is a valid choice — miners accept zero-fee transactions at discretion.
+
+// ═══════════════════════════════════════════════════════════════════════
+// SIDECAR RULES SUMMARY
+// ═══════════════════════════════════════════════════════════════════════
+
+// SIDECAR MUST (when present):
+// ✓ Have sidecarValue > 0 (guaranteed by consistency invariant)
+// ✓ Have tokenCategory == NO_TOKEN (BCH-only)
+// ✓ Have tokenAmount == 0 (no fungible tokens)
+// ✓ NOT have lockingBytecode == this contract (no covenant cloning)
+
+// SIDECAR MUST (when absent):
+// ✓ Have sidecarValue == 0 (parameter consistency)
+// ✓ Not appear in output set (tx.outputs.length == 1)
+
+// SIDECAR MAY:
+// ✓ Go to any P2PKH address (builder-controlled destination)
+// ✓ Go to any P2SH script hash (builder-controlled destination)
+// ✓ Go to a different contract entirely (just not THIS contract)
+
+// SIDECAR MUST NOT:
+// ✗ Have sidecarValue > 0 when absent (parameter mismatch)
+// ✗ Have value == 0 when present (prevented by consistency invariant)
+// ✗ Carry any token category (token injection prevention)
+// ✗ Recreate this contract (covenant clone prevention)
+// ✗ Be at index > 1 (only one sidecar permitted)
+// ✗ Cause primaryValue + sidecarValue > inputValue (economic consistency)
+
+// ═══════════════════════════════════════════════════════════════════════
+// SEVERITY CLASSIFICATION
+// ═══════════════════════════════════════════════════════════════════════
+
+// SEVERITY: Critical (Uncontrolled Sidecar Token)
+// - Sidecar exists but tokenCategory not validated
+// - Consequence: Token injection through sidecar slot
+// - Prevention: Mandatory tokenCategory == NO_TOKEN in sidecar branch
+
+// SEVERITY: Critical (Covenant Cloning via Sidecar)
+// - Sidecar allowed to recreate this contract
+// - Consequence: Unauthorized parallel covenant instances
+// - Prevention: Mandatory lockingBytecode != self in sidecar branch
+
+// SEVERITY: Critical (Missing Upper Bound)
+// - Using >= 1 without <= 2
+// - Consequence: Unlimited outputs, full injection attack
+// - Prevention: require(tx.outputs.length <= 2)
+
+// SEVERITY: High (Parameter/Structure Mismatch)
+// - sidecarValue > 0 when tx.outputs.length == 1
+// - Consequence: Semantic inconsistency, audit confusion, MCP repair hazard
+// - Prevention: Mandatory consistency invariant
+
+// SEVERITY: High (Economic Inconsistency)
+// - primaryValue + sidecarValue > inputValue allowed
+// - Consequence: Contract approves impossible configuration
+// - Prevention: require(primaryValue + sidecarValue <= inputValue)
+
+// SEVERITY: High (Sidecar Value Not Bound)
+// - sidecarValue used before binding to output
+// - Consequence: Logic on unvalidated data
+// - Prevention: require(tx.outputs[1].value == sidecarValue)
+
+// ═══════════════════════════════════════════════════════════════════════
+// STRUCTURAL INVARIANT FOR NEXOPS
+// ═══════════════════════════════════════════════════════════════════════
+
+// AST-Level Rule: Sidecar Safety Invariant
+//
+// 1. OUTPUT BOUND INVARIANT:
+//    require(tx.outputs.length >= 1) AND require(tx.outputs.length <= 2)
+//    Both must be present. Bare >= 1 is a CRITICAL violation.
+//
+// 2. CONSISTENCY INVARIANT (MANDATORY):
+//    require(
+//        (tx.outputs.length == 1 && sidecarValue == 0) ||
+//        (tx.outputs.length == 2 && sidecarValue > 0)
+//    )
+//    Must appear before any output validation.
+//    Missing this invariant: HIGH violation.
+//
+// 3. ECONOMIC INVARIANT:
+//    require(primaryValue + sidecarValue <= inputValue)
+//    Must appear before output validation.
+//    Missing: MEDIUM violation.
+//
+// 4. OUTPUT[0] COVERAGE INVARIANT:
+//    lockingBytecode (typed constructor or self-reference — no raw bytes)
+//    value (equality binding)
+//    tokenCategory == NO_TOKEN
+//    tokenAmount == 0
+//
+// 5. SIDECAR BRANCH INVARIANT (inside if tx.outputs.length == 2):
+//    require(tx.outputs[1].value == sidecarValue)
+//    require(tx.outputs[1].tokenCategory == NO_TOKEN)
+//    require(tx.outputs[1].tokenAmount == 0)
+//    require(tx.outputs[1].lockingBytecode != activeInput.lockingBytecode)
+//    All four mandatory. sidecarValue > 0 is implicit (guaranteed by invariant 2).
+
+// ═══════════════════════════════════════════════════════════════════════
+// NEXOPS ENFORCEMENT CHECKLIST
+// ═══════════════════════════════════════════════════════════════════════
+
+// NexOps MUST verify:
+// [ ] tx.outputs.length >= 1 exists
+// [ ] tx.outputs.length <= 2 exists
+// [ ] Consistency invariant present (both branches of || covered)
+// [ ] Economic invariant present (sum <= inputValue)
+// [ ] output[0] lockingBytecode via typed constructor or self-reference
+// [ ] output[0] value binding
+// [ ] output[0] tokenCategory == NO_TOKEN
+// [ ] output[0] tokenAmount == 0
+// [ ] Sidecar branch: tx.outputs[1].value == sidecarValue
+// [ ] Sidecar branch: tx.outputs[1].tokenCategory == NO_TOKEN
+// [ ] Sidecar branch: tx.outputs[1].tokenAmount == 0
+// [ ] Sidecar branch: lockingBytecode != self
+// [ ] No raw bytes for lockingBytecode destinations
+
+// NexOps MUST flag:
+// - Missing consistency invariant: HIGH
+// - Missing economic invariant: MEDIUM
+// - Missing tx.outputs.length <= 2: CRITICAL
+// - Missing sidecar tokenCategory check: CRITICAL
+// - Missing sidecar covenant exclusion: CRITICAL
+// - Missing sidecar value binding: HIGH
+// - Raw bytes as destination: CRITICAL
+
+// ═══════════════════════════════════════════════════════════════════════
+// TESTING CHECKLIST
+// ═══════════════════════════════════════════════════════════════════════
+
+// Consistency invariant:
+// [ ] outputs.length == 1 AND sidecarValue == 0 (should succeed)
+// [ ] outputs.length == 1 AND sidecarValue > 0 (should FAIL — mismatch)
+// [ ] outputs.length == 2 AND sidecarValue == 0 (should FAIL — mismatch)
+// [ ] outputs.length == 2 AND sidecarValue > 0 (should succeed)
+
+// Economic invariant:
+// [ ] primaryValue + sidecarValue < inputValue (succeeds, leaves fee)
+// [ ] primaryValue + sidecarValue == inputValue (succeeds, zero fee)
+// [ ] primaryValue + sidecarValue > inputValue (should FAIL)
+
+// Output count:
+// [ ] 0 outputs (should fail)
+// [ ] 1 output, valid (should succeed)
+// [ ] 2 outputs, valid (should succeed)
+// [ ] 3 outputs (should fail)
+
+// Sidecar output[1]:
+// [ ] tokenCategory != NO_TOKEN (should fail)
+// [ ] tokenAmount > 0 (should fail)
+// [ ] lockingBytecode == this contract (should fail)
+// [ ] lockingBytecode == different contract (should succeed)
+// [ ] value != sidecarValue parameter (should fail)
+
+// Primary output[0]:
+// [ ] Wrong destination (should fail)
+// [ ] value == 0 (should fail)
+// [ ] tokenCategory != NO_TOKEN (should fail)

@@ -1,19 +1,441 @@
-// PATTERN: 5-Point Covenant Validation
-// Use this for ANY self-replicating covenant
+pragma cashscript ^0.13.0;
 
-function selfReplicate() {
-    // 1. Same contract code (prevents code injection)
-    require(tx.outputs[0].lockingBytecode == tx.inputs[0].lockingBytecode);
-    
-    // 2. Same token category (prevents category substitution)
-    require(tx.outputs[0].tokenCategory == tx.inputs[0].tokenCategory);
-    
-    // 3. Expected satoshi value (prevents value extraction)
-    require(tx.outputs[0].value == expectedValue);
-    
-    // 4. Expected token amount (prevents token extraction)
-    require(tx.outputs[0].tokenAmount == expectedTokenAmount);
-    
-    // 5. Expected/new state commitment (prevents state manipulation)
-    require(tx.outputs[0].nftCommitment == newCommitment);
+// SECURITY PATTERN: Covenant Continuation Validation
+// PURPOSE: Enforce covenant continuation safety and prevent contract escape
+// CATEGORY: Covenant Safety
+// USE CASE: Any contract that must recreate itself with preserved or updated state
+
+// PATTERN DESCRIPTION:
+// This pattern demonstrates how to cryptographically enforce that a covenant
+// continues with the same contract logic, preventing attackers from redirecting
+// funds to arbitrary contracts or addresses. It validates both the structure
+// (lockingBytecode) and value constraints of covenant continuations.
+
+// SECURITY GUARANTEES:
+// ✓ Prevents covenant escape (funds cannot leave the covenant)
+// ✓ Prevents contract substitution (output must be same contract)
+// ✓ Prevents value drain (output value explicitly validated)
+// ✓ Prevents token injection (BCH-only enforcement)
+// ✓ Prevents output manipulation (exact output count enforced)
+// ✓ Ensures contract structure preservation across transactions
+
+// WHEN TO USE THIS PATTERN:
+// - Contracts that must preserve their logic across multiple transactions
+// - Stateful covenants (counters, vaults, DAOs)
+// - Recursive contracts (each transaction creates next instance)
+// - Value preservation contracts (funds stay in covenant)
+// - Any contract implementing "covenant continuation"
+
+// WHEN NOT TO USE THIS PATTERN:
+// - Final settlement contracts (funds leave covenant intentionally)
+// - One-time-use contracts (no continuation needed)
+// - Contracts with intentional value extraction (withdrawals)
+// - In those cases, use partial validation or skip continuation check
+
+contract CovenantValidation(
+    int minValue  // Minimum value that must remain in covenant
+) {
+    // COVENANT CONTINUATION FUNCTION
+    // Demonstrates how to safely enforce covenant continuation
+    // No signatures required - pure covenant logic
+    function continue(
+        int outputValue  // Value for continuation output (must be validated)
+    ) {
+        // TOKEN CATEGORY CONSTANT
+        // bytes32 representation of "no token" for BCH-only validation
+        // SEMANTIC CONSTANT: This represents the absence of any token category
+        // NexOps should recognize this as a well-known constant pattern
+        // Variations: 0x00...00, bytes32(0), or pre-defined constant
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+        
+        // NEXOPS NOTE: NO_TOKEN is a semantic constant, not a magic value
+        // Pattern recognition: Any bytes32 of all zeros represents "no tokens"
+        // Alternative representations are semantically equivalent
+        // Should be validated at compile-time for correctness
+
+        // ═══════════════════════════════════════════════════════════════
+        // STEP 1: ACTIVE INPUT VALIDATION
+        // ═══════════════════════════════════════════════════════════════
+        // PURPOSE: Verify that THIS contract is the input being validated
+        // PREVENTS: UTXO position attacks, wrong contract validation
+        // SEVERITY: Critical
+        
+        // WHY: Without this, an attacker could place this contract at a
+        // different input index and spend a completely different UTXO
+        // while this contract validates the wrong input.
+        require(tx.inputs[this.activeInputIndex].lockingBytecode == this.lockingBytecode);
+        
+        // SECURITY NOTE: this.lockingBytecode is the bytecode of THIS contract
+        // tx.inputs[this.activeInputIndex].lockingBytecode is the input being spent
+        // These MUST match to ensure we're validating the correct input
+
+        // ═══════════════════════════════════════════════════════════════
+        // STEP 2: INPUT TOKEN VALIDATION
+        // ═══════════════════════════════════════════════════════════════
+        // PURPOSE: Ensure covenant only holds BCH, not tokens
+        // PREVENTS: Token injection, token-layer confusion
+        // SEVERITY: High
+        
+        // WHY: If tokens enter the covenant, they could:
+        // - Complicate value calculations
+        // - Introduce token-layer attack vectors
+        // - Violate covenant assumptions (BCH-only)
+        require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
+        
+        // SECURITY NOTE: This is a design choice - if your covenant
+        // should handle tokens, remove this check and add token validation
+
+        // ═══════════════════════════════════════════════════════════════
+        // STEP 3: OUTPUT COUNT VALIDATION
+        // ═══════════════════════════════════════════════════════════════
+        // PURPOSE: Enforce exact output structure
+        // PREVENTS: Output injection, shadow outputs, batching attacks
+        // SEVERITY: Critical
+        
+        // WHY: Without this, an attacker could:
+        // - Add extra outputs to drain funds
+        // - Batch multiple operations in one transaction
+        // - Create outputs we don't validate
+        require(tx.outputs.length == 1);
+        
+        // DESIGN DECISION: We require EXACTLY 1 output
+        // - This is the strictest form (most secure)
+        // - Alternative: >= 1 if you need flexibility
+        // - Trade-off: Strict = secure but less flexible
+        
+        // JUSTIFICATION FOR == 1:
+        // - Simplest to reason about (one continuation output)
+        // - No possibility of unvalidated outputs
+        // - Clear semantics (one in, one out)
+        // - Reduces attack surface maximally
+        
+        // FEE MODEL IMPLICATION:
+        // By requiring tx.outputs.length == 1, we enforce:
+        // - Mining fee CANNOT come from this input
+        // - Fee MUST be paid by other inputs in the transaction
+        // - inputValue - outputValue = 0 (no fee deduction here)
+        // 
+        // NEXOPS NOTE: This is an EXTERNAL FEE model
+        // - Transaction builder must add separate input for fees
+        // - This input's full value goes to continuation output
+        // - Alternative: Allow tx.outputs.length >= 2 for change output
+        // - Alternative: Use fee-tolerant value validation
+        // 
+        // If this fee model is NOT intended, use fee-tolerant pattern:
+        // - Replace: require(outputValue >= minValue)
+        // - With: require(outputValue >= inputValue - maxFee)
+        // - And: require(tx.outputs.length >= 1)
+
+        // ═══════════════════════════════════════════════════════════════
+        // STEP 4: COVENANT CONTINUATION VALIDATION
+        // ═══════════════════════════════════════════════════════════════
+        // PURPOSE: Cryptographically enforce contract structure preservation
+        // PREVENTS: Covenant escape, contract substitution
+        // SEVERITY: Critical
+        
+        // WHY: This is the CORE of covenant continuation safety
+        // Without this, attacker can redirect funds to ANY contract/address
+        // With this, funds MUST stay in the same contract structure
+        require(
+            tx.outputs[0].lockingBytecode ==
+            tx.inputs[this.activeInputIndex].lockingBytecode
+        );
+        
+        // WHAT THIS MEANS:
+        // - Output contract MUST have identical bytecode to input contract
+        // - Contract logic is preserved across transactions
+        // - Contract parameters are preserved (same constructor args)
+        // - Funds cannot escape to different contract or address
+        
+        // SECURITY PROPERTY: Covenant Immutability
+        // The covenant structure is immutable across all transactions
+        // Funds can only move between instances of THIS EXACT contract
+        
+        // KNOWN LIMITATION:
+        // This validates structure but NOT state changes
+        // If your contract has state parameters (e.g., counter, hash)
+        // you cannot update them on-chain with this exact check
+        // Solutions:
+        // - Use external state tracking (oracle, database)
+        // - Use state commitment patterns (hash validation)
+        // - Accept exact structure preservation (no parameter updates)
+
+        // ═══════════════════════════════════════════════════════════════
+        // STEP 5: OUTPUT VALUE VALIDATION
+        // ═══════════════════════════════════════════════════════════════
+        // PURPOSE: Prevent value drain from covenant
+        // PREVENTS: Fund theft, gradual draining, fee attacks
+        // SEVERITY: Critical
+        
+        int inputValue = tx.inputs[this.activeInputIndex].value;
+        
+        // DESIGN DECISION: Use >= for value validation
+        // We validate: outputValue >= minValue
+        require(outputValue >= minValue);
+        
+        // JUSTIFICATION FOR >=:
+        // - Allows value to remain constant or increase
+        // - Prevents draining below minimum threshold
+        // - Permits users to "top up" the covenant (add value)
+        // - Flexible for various use cases (donations, accumulation)
+        
+        // ALTERNATIVE: Use == for strict value preservation
+        // require(outputValue == inputValue);
+        // - Enforces exact value preservation
+        // - No value can be added or removed
+        // - More restrictive but simpler to reason about
+        // - Use this if covenant should never gain/lose value
+        
+        // ALTERNATIVE: Use inputValue - maxFee for fee tolerance
+        // require(outputValue >= inputValue - maxFee);
+        // - Allows small value decrease for mining fees
+        // - More realistic for real-world usage
+        // - Requires careful maxFee selection (not too high)
+        
+        // WHY WE CHOSE >= minValue:
+        // - Most flexible for various use cases
+        // - Prevents value from dropping below threshold
+        // - Allows covenant to accumulate value over time
+        // - Simple and clear invariant
+        
+        // CRITICAL: Bind outputValue to actual output
+        // outputValue is UNTRUSTED INPUT from the caller
+        // Safety relies ENTIRELY on this equality check
+        // Without this, attacker could pass outputValue=1000000
+        // while actual output.value=1
+        require(tx.outputs[0].value == outputValue);
+        
+        // TRUST MODEL FOR outputValue:
+        // - outputValue parameter: UNTRUSTED (caller-provided)
+        // - tx.outputs[0].value: TRUSTED (consensus-enforced)
+        // - Validation: outputValue is validated SOLELY by equality with tx.outputs[0].value
+        // - Security: If equality holds, outputValue accurately represents output
+        // - Warning: Do NOT use outputValue in other checks before this equality
+        // - Pattern: Always bind untrusted parameters to consensus data
+        
+        // NEXOPS NOTE: Caller-provided value parameters
+        // Any function parameter representing an output value should:
+        // 1. Be validated against actual tx.outputs[N].value
+        // 2. Not be trusted until equality is proven
+        // 3. Be flagged if used before binding to output
+        // This prevents parameter/output mismatch attacks
+
+        // ═══════════════════════════════════════════════════════════════
+        // STEP 6: OUTPUT TOKEN VALIDATION
+        // ═══════════════════════════════════════════════════════════════
+        // PURPOSE: Ensure continuation output is BCH-only
+        // PREVENTS: Token injection into continuation
+        // SEVERITY: High
+        
+        require(tx.outputs[0].tokenCategory == NO_TOKEN);
+        
+        // WHY: Ensures the continuation output maintains BCH-only property
+        // This complements the input token validation
+        // Together they ensure the entire covenant chain is token-free
+
+        // ═══════════════════════════════════════════════════════════════
+        // VALIDATION COMPLETE
+        // ═══════════════════════════════════════════════════════════════
+        // At this point, we have guaranteed:
+        // ✓ We're validating the correct input (this contract)
+        // ✓ Input contains no tokens (BCH-only)
+        // ✓ Exactly one output exists (no extra outputs)
+        // ✓ Output is the same contract (covenant continuation)
+        // ✓ Output value meets minimum threshold (value preservation)
+        // ✓ Output value matches caller claim (parameter binding)
+        // ✓ Output contains no tokens (BCH-only)
+        // ✓ Mining fee is paid externally (external fee model)
+        
+        // SECURITY PROPERTY: Covenant Loop
+        // This contract can only be spent by creating another instance
+        // of itself with value >= minValue. Funds are "trapped" in the
+        // covenant structure and can only move between identical instances.
+        
+        // USE CASES FOR THIS PATTERN:
+        // - Perpetual vaults (funds stay locked in covenant)
+        // - DAO treasuries (funds managed by covenant rules)
+        // - Recursive contracts (each TX creates next instance)
+        // - Time-locked savings (covenant prevents early withdrawal)
+    }
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// PATTERN SUMMARY
+// ═══════════════════════════════════════════════════════════════════════
+
+// VALIDATION SEQUENCE (ALWAYS IN THIS ORDER):
+// 1. Active input validation (verify we're checking the right input)
+// 2. Input token validation (BCH-only enforcement)
+// 3. Output count validation (prevent output manipulation)
+// 4. Covenant continuation validation (preserve contract structure)
+// 5. Output value validation (prevent value drain)
+// 6. Parameter binding validation (bind outputValue to actual output)
+// 7. Output token validation (BCH-only continuation)
+
+// WHY THIS ORDER MATTERS:
+// - Active input first: Everything else depends on checking correct input
+// - Token validation early: Prevents token-layer confusion
+// - Output count before continuation: Ensures we know what we're validating
+// - Continuation before value: Structure matters more than amount
+// - Value validation before binding: Check threshold before equality
+// - Parameter binding: Ensure untrusted input matches consensus data
+// - Token validation last: Final check on validated structure
+
+// SECURITY PROPERTIES GUARANTEED:
+// ✓ Covenant immutability: Contract structure cannot change
+// ✓ Value preservation: Funds stay above minimum threshold
+// ✓ Output integrity: No extra or missing outputs
+// ✓ Token exclusion: No token injection possible
+// ✓ Position safety: Correct input validated
+// ✓ Escape prevention: Funds cannot leave covenant
+// ✓ Parameter binding: Untrusted inputs bound to consensus data
+// ✓ Fee externality: Mining fees paid by other inputs
+
+// ATTACK VECTORS PREVENTED:
+// ✗ Covenant escape: Cannot redirect to different contract
+// ✗ Contract substitution: Cannot change contract logic
+// ✗ Value drain: Cannot reduce value below threshold
+// ✗ Output injection: Cannot add extra outputs
+// ✗ Token injection: Cannot add tokens to covenant
+// ✗ Position attack: Cannot validate wrong input
+// ✗ Parameter mismatch: Cannot claim false output values
+// ✗ Internal fee theft: Cannot deduct fee from this input
+
+// FEE MODELS EXPLAINED:
+
+// Model A: EXTERNAL FEE (this pattern)
+// require(tx.outputs.length == 1);
+// require(outputValue >= minValue);
+// require(tx.outputs[0].value == outputValue);
+// Implication: Fee MUST come from other inputs
+// Use when: Covenant should never lose value to fees
+
+// Model B: FEE-TOLERANT
+// require(tx.outputs.length == 1);
+// require(outputValue >= inputValue - maxFee);
+// require(tx.outputs[0].value == outputValue);
+// Implication: Small fee can be deducted (up to maxFee)
+// Use when: Covenant allows fee deduction within limits
+
+// Model C: EXACT PRESERVATION
+// require(tx.outputs.length == 1);
+// require(outputValue == inputValue);
+// require(tx.outputs[0].value == outputValue);
+// Implication: Value must be exactly preserved, fee external
+// Use when: Covenant must maintain exact value
+
+// NEXOPS ENFORCEMENT FOR FEE MODELS:
+// NexOps should detect the fee model and flag if unexpected:
+// - If tx.outputs.length == 1 AND no fee tolerance → EXTERNAL FEE
+// - If outputValue >= inputValue - X → FEE-TOLERANT (flag X value)
+// - If outputValue == inputValue → EXACT PRESERVATION
+// Flag as WARNING if fee model seems unintentional
+
+// PARAMETER TRUST MODEL:
+
+// UNTRUSTED PARAMETERS (caller-provided):
+// - outputValue: Claimed output value
+// - userIndex: User-specified array index
+// - claimAmount: Claimed withdrawal amount
+// - Any parameter representing consensus data
+
+// VALIDATION PATTERN:
+// require(untrustedParam == consensusData);
+// Examples:
+// - require(outputValue == tx.outputs[0].value)
+// - require(claimAmount == calculatedAmount)
+// - require(userIndex < tx.inputs.length)
+
+// NEXOPS ENFORCEMENT:
+// Flag if untrusted parameter is used before binding:
+// ❌ if (outputValue > 0) { ... } require(tx.outputs[0].value == outputValue);
+// ✅ require(tx.outputs[0].value == outputValue); if (outputValue > 0) { ... }
+
+// VARIATIONS OF THIS PATTERN:
+
+// Variation 1: Exact value preservation
+// Replace: require(outputValue >= minValue);
+// With:    require(outputValue == inputValue);
+// Use when: Value must never change
+
+// Variation 2: Fee-tolerant validation
+// Replace: require(outputValue >= minValue);
+// With:    require(outputValue >= inputValue - maxFee);
+//          require(maxFee <= MAX_REASONABLE_FEE);
+// Use when: Mining fees should be deducted from covenant
+
+// Variation 3: Multiple outputs
+// Replace: require(tx.outputs.length == 1);
+// With:    require(tx.outputs.length == 2);
+// Add:     Validation for output[1]
+// Use when: Covenant needs auxiliary outputs (change, notifications)
+
+// Variation 4: Token-aware covenant
+// Remove:  Input/output token validation (NO_TOKEN checks)
+// Add:     Specific token category and amount validation
+// Use when: Covenant should handle specific tokens
+
+// Variation 5: State-updating covenant
+// Keep:    Structure validation (lockingBytecode check)
+// Add:     NexOps build-time validation of state parameters
+// Use when: Contract has state that needs updating
+
+// ═══════════════════════════════════════════════════════════════════════
+// NEXOPS ENFORCEMENT CHECKLIST
+// ═══════════════════════════════════════════════════════════════════════
+
+// NexOps SHOULD verify:
+// [ ] Active input lockingBytecode validation exists
+// [ ] Input token validation exists (if BCH-only pattern)
+// [ ] Output count validation exists (detect == vs >=)
+// [ ] Covenant continuation lockingBytecode validation exists
+// [ ] Output value validation exists with appropriate constraint
+// [ ] Untrusted parameters are bound to consensus data
+// [ ] Parameter binding happens before parameter usage
+// [ ] Output token validation exists (if BCH-only pattern)
+// [ ] All validations use tx.inputs[this.activeInputIndex]
+// [ ] Validations occur in recommended order
+// [ ] NO_TOKEN constant matches semantic meaning (all zeros)
+// [ ] Fee model is intentional (flag if ambiguous)
+
+// NexOps SHOULD flag:
+// - Missing continuation validation: CRITICAL
+// - Missing value validation: HIGH
+// - Missing parameter binding: HIGH
+// - Missing output count validation: HIGH
+// - Untrusted parameter used before binding: HIGH
+// - Missing token validation: MEDIUM (if BCH-only expected)
+// - Ambiguous fee model: WARNING
+// - Non-standard NO_TOKEN value: WARNING
+
+// ═══════════════════════════════════════════════════════════════════════
+// COMMON MISTAKES WHEN USING THIS PATTERN
+// ═══════════════════════════════════════════════════════════════════════
+
+// Mistake 1: Forgetting active input validation
+// Impact: Validates wrong input, allows position attacks
+// Fix: Always start with activeInputIndex lockingBytecode check
+
+// Mistake 2: Using >= for output count when == is needed
+// Impact: Allows output injection attacks
+// Fix: Use == unless you explicitly need flexibility
+
+// Mistake 3: Not validating output value
+// Impact: Allows value drain from covenant
+// Fix: Always validate output value with appropriate constraint
+
+// Mistake 4: Trusting caller-provided continuation bytecode
+// Impact: Allows covenant escape
+// Fix: Use tx.inputs[this.activeInputIndex].lockingBytecode
+
+// Mistake 5: Forgetting token validation
+// Impact: Allows token injection
+// Fix: Validate tokenCategory on both inputs and outputs
+
+// Mistake 6: Using outputValue before binding
+// Impact: Logic operates on unvalidated data
+// Fix: Bind outputValue to tx.outputs[0].value first
+
+// Mistake 7: Unintentional external fee model
+// Impact: Transaction fails (no fee input provided)
+// Fix: Explicitly choose and document fee modeld

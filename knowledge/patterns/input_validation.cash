@@ -1,17 +1,1077 @@
-// PATTERN: Input Validation
-// ALWAYS validate all function parameters
+// SECURITY PATTERN: Input Validation
+// PURPOSE: Prevent UTXO position and value confusion attacks
+// PROTECTION: Explicit input identity, value, and token validation
+//
+// This file demonstrates secure patterns for validating input properties in
+// covenant contracts. It shows how to prevent input position attacks, value
+// confusion, and token manipulation by explicitly validating the active input's
+// identity, value, and token state against expected parameters.
+//
+// CashScript Version: ^0.13.0
+// Network: Bitcoin Cash (BCH)
+// Security Level: PRODUCTION-READY PATTERN
 
-contract SecureContract(pubkey owner, int maxAmount) {
-    function spend(sig userSig, int amount, bytes data) {
-        // Validate signature
-        require(checkSig(userSig, owner));
+// ============================================================================
+// SEMANTIC CONSTANTS
+// ============================================================================
+//
+// NO_TOKEN: Represents absence of CashTokens
+// - Type: bytes32
+// - Value: 0x0000000000000000000000000000000000000000000000000000000000000000
+// - Usage: Compare against tokenCategory to enforce pure BCH (no tokens)
+// - 32 bytes = 64 hexadecimal characters
+//
+// This constant must be defined inside each contract/function that uses it.
+// CashScript does not support global constants before pragma directive.
+
+// ============================================================================
+// PATTERN 1: Basic Input Identity Validation
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// PATTERN: Validate the active input is the expected contract
+// USE CASE: Prevent input substitution in multi-input transactions
+// SECURITY: Ensures correct UTXO is being spent
+contract BasicInputIdentity() {
+    // SECURE: Validates input lockingBytecode matches this contract
+    function validate() {
+        // CRITICAL: Validate active input IS this contract
+        // Prevents attacker from substituting different contract at activeInputIndex
+        bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+        require(thisBytecode == this.lockingBytecode);
         
-        // Validate amount
-        require(amount > 0);
-        require(amount <= maxAmount);
-        
-        // Validate data
-        require(data.length > 0);
-        require(data.length <= 256);  // Reasonable limit
+        // SECURITY PROPERTIES:
+        // ✓ Input identity verified (lockingBytecode match)
+        // ✓ Prevents wrong contract at activeInputIndex
+        // ✓ No input substitution possible
+        // ✓ Validates WHAT the input is, not WHERE it is
+        //
+        // WHY THIS IS SECURE:
+        // - this.lockingBytecode is the contract's own bytecode
+        // - tx.inputs[this.activeInputIndex] is the input being spent
+        // - Exact bytecode match proves input is this contract instance
+        // - Attacker cannot substitute different contract
+        //
+        // WHY THIS IS NECESSARY:
+        // In multi-input transactions, attacker controls:
+        // - Which inputs are included
+        // - Order of inputs
+        // - Which input spends which UTXO
+        //
+        // Without this check, attacker could:
+        // - Place this contract at input[2]
+        // - Place malicious contract at input[0]
+        // - If contract assumes input[0], validates wrong UTXO
+        //
+        // This check prevents position-based confusion
     }
 }
+
+// ============================================================================
+// PATTERN 2: Input Value Validation
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// PATTERN: Validate input value matches expected amount
+// USE CASE: Prevent value confusion and dust attacks
+// SECURITY: Ensures correct value is being spent
+contract InputValueValidation(
+    int expectedValue  // The exact value this UTXO should have
+) {
+    // SECURE: Validates input identity AND value
+    function validate() {
+        // Step 1: CRITICAL - Validate input identity
+        bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+        require(thisBytecode == this.lockingBytecode);
+        
+        // Step 2: CRITICAL - Capture input value explicitly
+        // Get the value of the input being spent
+        int inputValue = tx.inputs[this.activeInputIndex].value;
+        
+        // Step 3: CRITICAL - Validate value matches expectation
+        // Prevents value confusion and dust attacks
+        require(inputValue == expectedValue);
+        
+        // SECURITY PROPERTIES:
+        // ✓ Input identity verified
+        // ✓ Input value captured explicitly
+        // ✓ Value validated against expected amount
+        // ✓ Prevents value confusion attacks
+        // ✓ Prevents dust UTXO exploitation
+        //
+        // WHY THIS IS SECURE:
+        // - Input identity check ensures correct contract
+        // - Explicit value capture from activeInputIndex
+        // - Exact value match prevents substitution
+        // - Attacker cannot use wrong-value UTXO
+        //
+        // USE CASES:
+        // - Fixed-value covenants (e.g., 1,000,000 sat vault)
+        // - Prevent dust attacks (reject < minimum value)
+        // - Validate UTXO meets protocol requirements
+        // - Ensure sufficient value for operations
+    }
+}
+
+// ============================================================================
+// PATTERN 3: Input Value Range Validation
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// PATTERN: Validate input value is within acceptable range
+// USE CASE: Flexible value acceptance with bounds
+// SECURITY: Prevents value-based attacks while allowing variance
+contract InputValueRange(
+    int minimumValue,  // Minimum acceptable input value
+    int maximumValue   // Maximum acceptable input value
+) {
+    // SECURE: Validates input identity and value range
+    function validate() {
+        // Step 1: CRITICAL - Validate input identity
+        bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+        require(thisBytecode == this.lockingBytecode);
+        
+        // Step 2: CRITICAL - Capture input value
+        int inputValue = tx.inputs[this.activeInputIndex].value;
+        
+        // Step 3: CRITICAL - Validate value is within range
+        require(inputValue >= minimumValue);
+        require(inputValue <= maximumValue);
+        
+        // SECURITY PROPERTIES:
+        // ✓ Input identity verified
+        // ✓ Value bounded by minimum and maximum
+        // ✓ Rejects dust inputs (< minimum)
+        // ✓ Rejects excessive inputs (> maximum)
+        // ✓ Allows controlled variance
+        //
+        // WHY THIS IS SECURE:
+        // - Both bounds enforced (prevents edge cases)
+        // - Dust attacks rejected (minimum check)
+        // - Overflow attacks prevented (maximum check)
+        // - Clear acceptable value range
+        //
+        // USE CASES:
+        // - Accept UTXOs between 100k - 1M sats
+        // - Prevent dust (minimum > dust threshold)
+        // - Prevent overflow (maximum < int max)
+        // - Protocol-specific value requirements
+    }
+}
+
+// ============================================================================
+// PATTERN 4: Token-Free Validation (Enforce NO_TOKEN)
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// PATTERN: Enforce input has no tokens (pure BCH)
+// USE CASE: Prevent token injection attacks
+// SECURITY: Validates input is pure BCH, no CashTokens
+contract TokenFreeValidation(
+    int expectedValue
+) {
+    // SECURE: Validates input identity, value, and token absence
+    function validate() {
+        // Define NO_TOKEN constant (32 zero bytes)
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+        
+        // Step 1: CRITICAL - Validate input identity
+        bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+        require(thisBytecode == this.lockingBytecode);
+        
+        // Step 2: CRITICAL - Capture input value
+        int inputValue = tx.inputs[this.activeInputIndex].value;
+        require(inputValue == expectedValue);
+        
+        // Step 3: CRITICAL - Enforce NO_TOKEN
+        // Validates input has no CashTokens (fungible or NFT)
+        bytes32 inputTokenCategory = tx.inputs[this.activeInputIndex].tokenCategory;
+        require(inputTokenCategory == NO_TOKEN);
+        
+        // SECURITY PROPERTIES:
+        // ✓ Input identity verified
+        // ✓ Input value validated
+        // ✓ Token category enforced as empty (NO_TOKEN)
+        // ✓ Prevents token injection attacks
+        // ✓ Ensures pure BCH input
+        //
+        // WHY THIS IS SECURE:
+        // - tokenCategory == NO_TOKEN proves no tokens present
+        // - Rejects both fungible and NFT tokens
+        // - Prevents token-based attacks
+        // - Enforces pure BCH covenant
+        //
+        // WHY NO_TOKEN MATTERS:
+        // Without this check, attacker could:
+        // - Create UTXO with same bytecode and value
+        // - But include fungible tokens or NFT
+        // - Token presence could affect downstream logic
+        // - Token could be extracted in later operations
+        //
+        // This check ensures input is EXACTLY as expected:
+        // - Correct contract (bytecode)
+        // - Correct value (sats)
+        // - No tokens (pure BCH)
+        //
+        // IMPORTANT: NO_TOKEN constant
+        // - Must be 32 zero bytes (bytes32)
+        // - Represents absence of any token category
+        // - 0x0000...0000 (64 hex characters)
+    }
+}
+
+// ============================================================================
+// PATTERN 5: Explicit Parameter Validation
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// PATTERN: Validate input value matches function parameter
+// USE CASE: Ensure caller provides correct value information
+// SECURITY: Prevents parameter-value mismatch attacks
+contract ExplicitParameterValidation() {
+    // SECURE: Function parameter MUST match actual input value
+    // This prevents caller from lying about input value
+    function validate(int declaredValue) {
+        // Define NO_TOKEN constant
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+        
+        // Step 1: CRITICAL - Validate input identity
+        bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+        require(thisBytecode == this.lockingBytecode);
+        
+        // Step 2: CRITICAL - Capture actual input value
+        int actualValue = tx.inputs[this.activeInputIndex].value;
+        
+        // Step 3: CRITICAL - Validate parameter matches reality
+        // Prevents caller from providing false value information
+        require(declaredValue == actualValue);
+        
+        // Step 4: CRITICAL - Enforce NO_TOKEN
+        bytes32 inputTokenCategory = tx.inputs[this.activeInputIndex].tokenCategory;
+        require(inputTokenCategory == NO_TOKEN);
+        
+        // Now we can safely use declaredValue in logic
+        // We know it accurately represents the input value
+        
+        // SECURITY PROPERTIES:
+        // ✓ Input identity verified
+        // ✓ Declared value validated against actual value
+        // ✓ Parameter-value mismatch prevented
+        // ✓ No token injection possible
+        // ✓ Safe to use declaredValue in calculations
+        //
+        // WHY THIS IS SECURE:
+        // - Caller provides declaredValue as parameter
+        // - Contract reads actualValue from blockchain
+        // - Comparison ensures they match
+        // - If caller lies, transaction fails
+        // - Downstream logic can trust declaredValue
+        //
+        // WHY THIS IS NECESSARY:
+        // Function parameters are attacker-controlled
+        // Without validation, attacker could:
+        // - Provide declaredValue = 1,000,000
+        // - But actual input value = 100,000
+        // - Contract uses declaredValue in logic
+        // - Logic operates on false assumptions
+        //
+        // This pattern forces parameter honesty
+    }
+}
+
+// ============================================================================
+// PATTERN 6: Multi-Property Input Validation
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// PATTERN: Validate all input properties comprehensively
+// USE CASE: Maximum security for critical covenants
+// SECURITY: Complete input validation (identity, value, tokens)
+contract ComprehensiveInputValidation(
+    int minimumValue,
+    int maximumValue
+) {
+    // SECURE: Validates every input property
+    function validate(int declaredValue) {
+        // Define NO_TOKEN constant
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+        
+        // Step 1: CRITICAL - Validate input identity
+        // Ensures activeInputIndex is this contract
+        bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+        require(thisBytecode == this.lockingBytecode);
+        
+        // Step 2: CRITICAL - Capture actual input value
+        int actualValue = tx.inputs[this.activeInputIndex].value;
+        
+        // Step 3: CRITICAL - Validate declared value matches actual
+        require(declaredValue == actualValue);
+        
+        // Step 4: CRITICAL - Validate value is within acceptable range
+        require(actualValue >= minimumValue);
+        require(actualValue <= maximumValue);
+        
+        // Step 5: CRITICAL - Enforce NO_TOKEN
+        bytes32 inputTokenCategory = tx.inputs[this.activeInputIndex].tokenCategory;
+        require(inputTokenCategory == NO_TOKEN);
+        
+        // Step 6: OPTIONAL - Validate no NFT commitment
+        // (tokenCategory == NO_TOKEN already ensures this, but explicit check available)
+        // bytes inputNftCommitment = tx.inputs[this.activeInputIndex].nftCommitment;
+        // bytes EMPTY_COMMITMENT = 0x;
+        // require(inputNftCommitment == EMPTY_COMMITMENT);
+        
+        // All input properties validated
+        // Safe to proceed with covenant logic
+        
+        // SECURITY PROPERTIES:
+        // ✓ Input identity verified (lockingBytecode)
+        // ✓ Parameter honesty enforced (declared == actual)
+        // ✓ Value bounds validated (min/max range)
+        // ✓ Token presence rejected (NO_TOKEN)
+        // ✓ Complete input integrity guaranteed
+        //
+        // WHY THIS IS SECURE:
+        // - Every input property explicitly validated
+        // - No assumptions about input state
+        // - All attack vectors covered:
+        //   * Position confusion (identity check)
+        //   * Value confusion (parameter validation)
+        //   * Dust attacks (minimum value)
+        //   * Overflow attacks (maximum value)
+        //   * Token injection (NO_TOKEN enforcement)
+        // - Defense in depth approach
+        //
+        // USE WHEN:
+        // - High-value covenants (vaults, treasuries)
+        // - Critical protocol infrastructure
+        // - Maximum security required
+        // - Input properties affect behavior
+    }
+}
+
+// ============================================================================
+// PATTERN 7: Input Validation with Position Awareness
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// PATTERN: Validate input and optionally verify position
+// USE CASE: When input position has semantic meaning in protocol
+// SECURITY: Input identity + optional position validation
+//
+// ⚠️ SECURITY CAVEAT: Position validation adds CONSTRAINT, not SECURITY
+// The declaredPosition parameter is attacker-controlled
+// This check enforces protocol ordering but doesn't provide cryptographic security
+contract InputValidationWithPosition(
+    int expectedValue
+) {
+    // SECURE: Validates input properties with optional position check
+    function validate(int declaredPosition) {
+        // Define NO_TOKEN constant
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+        
+        // Step 1: CRITICAL - Validate input identity
+        bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+        require(thisBytecode == this.lockingBytecode);
+        
+        // Step 2: OPTIONAL - Validate position if needed
+        // ⚠️ CAVEAT: This is a CONSTRAINT, not cryptographic security
+        // - declaredPosition is attacker-controlled
+        // - Attacker sets declaredPosition = this.activeInputIndex
+        // - Check enforces protocol ordering, not authenticity
+        // - Only use when position has semantic meaning in protocol
+        require(this.activeInputIndex == declaredPosition);
+        
+        // Step 3: CRITICAL - Validate value
+        int actualValue = tx.inputs[this.activeInputIndex].value;
+        require(actualValue == expectedValue);
+        
+        // Step 4: CRITICAL - Enforce NO_TOKEN
+        bytes32 inputTokenCategory = tx.inputs[this.activeInputIndex].tokenCategory;
+        require(inputTokenCategory == NO_TOKEN);
+        
+        // SECURITY PROPERTIES:
+        // ✓ Input identity verified
+        // ~ Position validated (constraint, not security)
+        // ✓ Value validated
+        // ✓ No tokens allowed
+        //
+        // ⚠️ POSITION VALIDATION CAVEAT:
+        // Position validation (Step 2) is only useful when:
+        // - Protocol specifies inputs must be in specific order
+        // - Position has semantic meaning (e.g., input[0] = pool A)
+        // - External tools depend on specific ordering
+        //
+        // WHAT IT DOES:
+        // - Enforces attacker places this input at declared position
+        // - Adds constraint to transaction construction
+        // - Does NOT provide cryptographic authentication
+        //
+        // WHAT IT DOES NOT DO:
+        // - Does NOT prevent attacker from controlling position
+        // - Does NOT validate position is "correct" independently
+        // - Attacker still controls declaredPosition parameter
+        //
+        // For most contracts, input IDENTITY is sufficient
+        // Position validation adds constraint but not security
+        //
+        // USE POSITION VALIDATION WHEN:
+        // - Protocol requires specific input order
+        // - Position maps to semantic roles
+        // - External indexers expect fixed positions
+        //
+        // SKIP POSITION VALIDATION WHEN:
+        // - Input identity is sufficient
+        // - Flexibility in input order desired
+        // - No semantic meaning to position
+    }
+}
+
+// ============================================================================
+// PATTERN 8: Pure Validation Contract (No Outputs)
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// PATTERN: Pure input validation without output constraints
+// USE CASE: Validation-only contracts, testing, conditional gates
+// SECURITY: Validates inputs but allows any outputs
+contract PureValidationContract(
+    int expectedValue
+) {
+    // SECURE: Validates input properties only
+    // Does NOT constrain outputs (by design)
+    function validate() {
+        // Define NO_TOKEN constant
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+        
+        // Step 1: CRITICAL - Validate input identity
+        bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+        require(thisBytecode == this.lockingBytecode);
+        
+        // Step 2: CRITICAL - Validate input value
+        int actualValue = tx.inputs[this.activeInputIndex].value;
+        require(actualValue == expectedValue);
+        
+        // Step 3: CRITICAL - Enforce NO_TOKEN
+        bytes32 inputTokenCategory = tx.inputs[this.activeInputIndex].tokenCategory;
+        require(inputTokenCategory == NO_TOKEN);
+        
+        // NO output validation
+        // Outputs can be anything (by design)
+        
+        // SECURITY PROPERTIES:
+        // ✓ Input identity verified
+        // ✓ Input value validated
+        // ✓ No tokens allowed
+        // ✗ Outputs unconstrained (intentional)
+        //
+        // WHY NO OUTPUT VALIDATION:
+        // This pattern is for pure validation scenarios:
+        // - Input must meet requirements
+        // - But outputs are flexible
+        // - Use case: conditional spending gate
+        //
+        // WHEN TO USE:
+        // - Validation-only contracts
+        // - Testing input properties
+        // - Conditional gates (if input valid, allow any output)
+        // - Burn contracts (validate input, outputs don't matter)
+        //
+        // WHEN NOT TO USE:
+        // - If covenant continuation needed
+        // - If value preservation required
+        // - If output destinations matter
+        //
+        // For most covenants, output validation IS required
+        // This pattern is special case for validation-only logic
+    }
+}
+
+// ============================================================================
+// PATTERN 9: Signature-Free Input Validation
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// PATTERN: Input validation without signature requirements
+// USE CASE: Anyone-can-spend with input constraints
+// SECURITY: Validates input properties, no authorization needed
+contract SignatureFreeValidation(
+    int expectedValue
+) {
+    // SECURE: Validates inputs without requiring signatures
+    // Anyone can spend IF input meets requirements
+    function validate() {
+        // Define NO_TOKEN constant
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+        
+        // Step 1: CRITICAL - Validate input identity
+        bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+        require(thisBytecode == this.lockingBytecode);
+        
+        // Step 2: CRITICAL - Validate input value
+        int actualValue = tx.inputs[this.activeInputIndex].value;
+        require(actualValue == expectedValue);
+        
+        // Step 3: CRITICAL - Enforce NO_TOKEN
+        bytes32 inputTokenCategory = tx.inputs[this.activeInputIndex].tokenCategory;
+        require(inputTokenCategory == NO_TOKEN);
+        
+        // NO signature required (anyone-can-spend)
+        // As long as input is valid, spending is allowed
+        
+        // SECURITY PROPERTIES:
+        // ✓ Input identity verified
+        // ✓ Input value validated
+        // ✓ No tokens allowed
+        // ✓ Anyone can spend (if input valid)
+        // ✗ No authorization (intentional)
+        //
+        // WHY NO SIGNATURES:
+        // This pattern enables anyone-can-spend scenarios:
+        // - Input constraints, not authorization
+        // - Use case: public goods, bounties, faucets
+        // - Anyone can claim IF requirements met
+        //
+        // SECURITY MODEL:
+        // - Protection is INPUT validation, not authorization
+        // - Anyone can spend CORRECT inputs
+        // - Cannot spend INCORRECT inputs
+        //
+        // USE CASES:
+        // - Faucets (anyone can claim fixed amount)
+        // - Bounties (anyone can claim if conditions met)
+        // - Public pools (anyone can interact)
+        // - Testing/development contracts
+        //
+        // WARNINGS:
+        // - Anyone CAN spend this UTXO
+        // - Do NOT use for private value
+        // - Input validation is ONLY protection
+        // - Consider adding authorization for most use cases
+    }
+}
+
+// ============================================================================
+// PATTERN 10: Complete Production Input Validation
+// ============================================================================
+
+pragma cashscript ^0.13.0;
+
+// PATTERN: Production-ready comprehensive input validation
+// Combines all best practices for maximum security
+contract ProductionInputValidation(
+    int minimumValue,
+    int maximumValue
+) {
+    // SECURE: Complete input validation with all checks
+    function validate(int declaredValue) {
+        // Define NO_TOKEN constant (32 zero bytes for bytes32)
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+        
+        // VALIDATION SEQUENCE (order matters for clarity):
+        
+        // 1. IDENTITY - Validate this is the correct contract
+        bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+        require(thisBytecode == this.lockingBytecode);
+        
+        // 2. VALUE CAPTURE - Get actual input value from blockchain
+        int actualValue = tx.inputs[this.activeInputIndex].value;
+        
+        // 3. PARAMETER HONESTY - Ensure declared value matches actual
+        require(declaredValue == actualValue);
+        
+        // 4. MINIMUM VALUE - Prevent dust attacks
+        require(actualValue >= minimumValue);
+        
+        // 5. MAXIMUM VALUE - Prevent overflow attacks
+        require(actualValue <= maximumValue);
+        
+        // 6. TOKEN ENFORCEMENT - Reject any tokens (pure BCH)
+        bytes32 inputTokenCategory = tx.inputs[this.activeInputIndex].tokenCategory;
+        require(inputTokenCategory == NO_TOKEN);
+        
+        // All validations complete
+        // Input is guaranteed to be:
+        // - This contract instance (identity)
+        // - Within acceptable value range (bounds)
+        // - Correctly represented in parameters (honesty)
+        // - Free of tokens (pure BCH)
+        
+        // SECURITY PROPERTIES:
+        // ✓ Input identity verified (position attack prevention)
+        // ✓ Parameter-value match enforced (lying prevention)
+        // ✓ Value bounds validated (dust/overflow prevention)
+        // ✓ Token injection blocked (pure BCH enforcement)
+        // ✓ All input properties validated
+        // ✓ Zero assumptions about input state
+        //
+        // ATTACK VECTORS MITIGATED:
+        // ✗ Position confusion (identity check)
+        // ✗ Value confusion (parameter validation)
+        // ✗ Dust attacks (minimum value)
+        // ✗ Overflow attacks (maximum value)
+        // ✗ Token injection (NO_TOKEN enforcement)
+        // ✗ Parameter lying (declared == actual)
+        //
+        // PRODUCTION DEPLOYMENT:
+        // This pattern is suitable for:
+        // - High-value vaults
+        // - Protocol infrastructure
+        // - Critical financial contracts
+        // - Any covenant where input integrity is essential
+        //
+        // RECOMMENDED FOR:
+        // All production covenants should implement these checks
+        // Defense in depth - validate everything explicitly
+        // No assumptions - verify all properties
+    }
+}
+
+// ============================================================================
+// SECURITY PRINCIPLES FOR INPUT VALIDATION
+// ============================================================================
+
+// PRINCIPLE 1: ALWAYS VALIDATE INPUT IDENTITY
+// --------------------------------------------
+// CRITICAL: Every covenant must validate activeInputIndex is the expected contract
+//
+// REQUIRED:
+//   bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+//   require(thisBytecode == this.lockingBytecode);
+//
+// WHY:
+// - Prevents input position attacks
+// - Ensures correct UTXO is being spent
+// - Validates WHAT the input is, not WHERE it is
+// - Foundation for all other input validations
+//
+// WITHOUT THIS CHECK:
+// - Attacker can substitute different contract
+// - Wrong UTXO could be spent
+// - All downstream logic operates on wrong input
+
+// PRINCIPLE 2: CAPTURE INPUT VALUE EXPLICITLY
+// -------------------------------------------
+// CRITICAL: Always read input value from tx.inputs[this.activeInputIndex].value
+//
+// REQUIRED:
+//   int inputValue = tx.inputs[this.activeInputIndex].value;
+//
+// WHY:
+// - Explicit capture from blockchain state
+// - No assumptions about value
+// - Direct read from UTXO
+// - Foundation for value validation
+//
+// NEVER:
+// - Assume input value
+// - Use hardcoded values without validation
+// - Trust function parameters without verification
+
+// PRINCIPLE 3: VALIDATE PARAMETERS AGAINST REALITY
+// ------------------------------------------------
+// CRITICAL: If function takes value parameter, validate it matches actual value
+//
+// PATTERN:
+//   function f(int declaredValue) {
+//       int actualValue = tx.inputs[this.activeInputIndex].value;
+//       require(declaredValue == actualValue);
+//   }
+//
+// WHY:
+// - Function parameters are attacker-controlled
+// - Without validation, attacker can lie about value
+// - Downstream logic trusts incorrect information
+// - Parameter-value mismatch enables attacks
+//
+// ENSURES:
+// - Parameter honesty
+// - Safe to use declaredValue in calculations
+// - No parameter-based confusion attacks
+
+// PRINCIPLE 4: ENFORCE VALUE BOUNDS
+// ---------------------------------
+// RECOMMENDED: Validate input value is within acceptable range
+//
+// PATTERN:
+//   require(inputValue >= minimumValue);
+//   require(inputValue <= maximumValue);
+//
+// WHY:
+// - Prevents dust attacks (minimum)
+// - Prevents overflow attacks (maximum)
+// - Enforces protocol requirements
+// - Bounds acceptable variance
+//
+// CHOOSE BOUNDS BASED ON:
+// - Dust threshold (e.g., 546 sats minimum)
+// - Protocol requirements (e.g., 1M sats minimum)
+// - Overflow prevention (e.g., int max / 2 maximum)
+// - Economic security model
+
+// PRINCIPLE 5: ENFORCE NO_TOKEN WHEN APPLICABLE
+// ---------------------------------------------
+// CRITICAL: For pure BCH covenants, reject token inputs
+//
+// REQUIRED (if pure BCH):
+//   bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+//   bytes32 inputTokenCategory = tx.inputs[this.activeInputIndex].tokenCategory;
+//   require(inputTokenCategory == NO_TOKEN);
+//
+// WHY:
+// - Prevents token injection attacks
+// - Ensures pure BCH input
+// - Blocks fungible token presence
+// - Blocks NFT presence
+//
+// IMPORTANT - NO_TOKEN CONSTANT:
+// - Must be bytes32 type (32 bytes)
+// - Value: 0x0000...0000 (64 hex characters = 32 bytes)
+// - Represents empty/absent token category
+// - Must be defined inside contract/function (no global constants allowed)
+//
+// WHEN TO ENFORCE:
+// - Pure BCH covenants (no token logic)
+// - Value-only contracts
+// - When tokens would break assumptions
+//
+// WHEN TO SKIP:
+// - Token-aware covenants
+// - Contracts designed for CashTokens
+// - When token presence is expected
+
+// PRINCIPLE 6: VALIDATION ORDER MATTERS
+// -------------------------------------
+// RECOMMENDED: Validate in logical order for clarity
+//
+// OPTIMAL ORDER:
+// 1. Input identity (lockingBytecode)
+// 2. Value capture (get actual value)
+// 3. Parameter validation (if applicable)
+// 4. Value bounds (min/max)
+// 5. Token enforcement (if applicable)
+//
+// WHY THIS ORDER:
+// - Identity first (ensure correct input)
+// - Capture before validation (get truth from blockchain)
+// - Validate parameters against truth
+// - Apply bounds to validated value
+// - Token check last (property validation)
+//
+// BENEFITS:
+// - Clear logical flow
+// - Easy to audit
+// - Fail fast (identity check rejects early)
+// - Each step builds on previous
+
+// ============================================================================
+// COMMON MISTAKES AND HOW TO AVOID THEM
+// ============================================================================
+
+// MISTAKE 1: Not Validating Input Identity
+// -----------------------------------------
+// WRONG:
+//   function validate(int expectedValue) {
+//       int inputValue = tx.inputs[this.activeInputIndex].value;
+//       require(inputValue == expectedValue);
+//       // Missing identity check!
+//   }
+//
+// WHY WRONG:
+// - No validation that activeInputIndex is this contract
+// - Attacker could place different contract at activeInputIndex
+// - Value check passes but wrong UTXO spent
+//
+// CORRECT:
+//   function validate(int expectedValue) {
+//       bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+//       require(thisBytecode == this.lockingBytecode);
+//       int inputValue = tx.inputs[this.activeInputIndex].value;
+//       require(inputValue == expectedValue);
+//   }
+
+// MISTAKE 2: Assuming Input Value
+// --------------------------------
+// WRONG:
+//   function validate() {
+//       // Assumes input value is 1,000,000 without checking
+//       int assumedValue = 1000000;
+//       // Uses assumedValue in logic without validation
+//   }
+//
+// WHY WRONG:
+// - No validation of actual input value
+// - Logic operates on assumption, not reality
+// - Attacker can use different value UTXO
+//
+// CORRECT:
+//   function validate(int expectedValue) {
+//       bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+//       require(thisBytecode == this.lockingBytecode);
+//       int actualValue = tx.inputs[this.activeInputIndex].value;
+//       require(actualValue == expectedValue);
+//   }
+
+// MISTAKE 3: Trusting Function Parameters
+// ----------------------------------------
+// WRONG:
+//   function validate(int declaredValue) {
+//       // Uses declaredValue without verification
+//       require(declaredValue >= 100000);
+//       // Assumes declaredValue is truthful
+//   }
+//
+// WHY WRONG:
+// - Function parameter is attacker-controlled
+// - No validation against actual input value
+// - Attacker can lie about value
+//
+// CORRECT:
+//   function validate(int declaredValue) {
+//       bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+//       require(thisBytecode == this.lockingBytecode);
+//       int actualValue = tx.inputs[this.activeInputIndex].value;
+//       require(declaredValue == actualValue);  // Honesty check
+//       require(actualValue >= 100000);
+//   }
+
+// MISTAKE 4: Invalid NO_TOKEN Literal
+// ------------------------------------
+// WRONG:
+//   bytes32 inputTokenCategory = tx.inputs[this.activeInputIndex].tokenCategory;
+//   require(inputTokenCategory == 0x);
+//   // 0x is ambiguous/invalid for bytes32!
+//
+// WHY WRONG:
+// - 0x is not a valid bytes32 literal
+// - May fail parsing or behave inconsistently
+// - Ambiguous type (could be bytes, bytes32, etc.)
+//
+// CORRECT:
+//   bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+//   bytes32 inputTokenCategory = tx.inputs[this.activeInputIndex].tokenCategory;
+//   require(inputTokenCategory == NO_TOKEN);
+//   // Explicit 32-byte constant (64 hex chars)
+
+// MISTAKE 5: Not Validating Value Bounds
+// ---------------------------------------
+// WRONG:
+//   function validate() {
+//       bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+//       require(thisBytecode == this.lockingBytecode);
+//       // No value bounds - accepts any value including dust
+//   }
+//
+// WHY WRONG:
+// - Accepts dust inputs (e.g., 1 sat)
+// - No protection against extreme values
+// - Could affect economic security
+//
+// CORRECT:
+//   function validate() {
+//       bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+//       require(thisBytecode == this.lockingBytecode);
+//       int inputValue = tx.inputs[this.activeInputIndex].value;
+//       require(inputValue >= 100000);  // Minimum 100k sats
+//       require(inputValue <= 10000000);  // Maximum 10M sats
+//   }
+
+// MISTAKE 6: Checking Input Position Instead of Identity
+// -------------------------------------------------------
+// WRONG:
+//   function validate(int expectedPosition) {
+//       require(this.activeInputIndex == expectedPosition);
+//       // Validates position, not identity!
+//   }
+//
+// WHY WRONG:
+// - expectedPosition is attacker-controlled
+// - Check is tautological (always passes)
+// - Doesn't validate WHAT the input is
+//
+// CORRECT:
+//   function validate() {
+//       bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+//       require(thisBytecode == this.lockingBytecode);
+//       // Validates IDENTITY, not position
+//   }
+
+// MISTAKE 7: Reading Wrong Input
+// -------------------------------
+// WRONG:
+//   function validate() {
+//       int inputValue = tx.inputs[0].value;  // WRONG INDEX!
+//       require(inputValue == 1000000);
+//   }
+//
+// WHY WRONG:
+// - Reads input[0], not the active input
+// - If this UTXO is at input[1], checks wrong value
+// - Attacker can manipulate input[0] value
+//
+// CORRECT:
+//   function validate() {
+//       bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+//       require(thisBytecode == this.lockingBytecode);
+//       int inputValue = tx.inputs[this.activeInputIndex].value;
+//       require(inputValue == 1000000);
+//   }
+
+// ============================================================================
+// TESTING RECOMMENDATIONS
+// ============================================================================
+
+// Test Case 1: Valid Input (Identity Match)
+// ------------------------------------------
+// Setup: Input lockingBytecode matches contract
+// Expected: Transaction succeeds
+// Validates: Identity check works
+
+// Test Case 2: Invalid Input (Identity Mismatch)
+// -----------------------------------------------
+// Setup: Input lockingBytecode is different contract
+// Expected: Transaction FAILS
+// Validates: Identity check rejects wrong contract
+
+// Test Case 3: Valid Input (Correct Value)
+// -----------------------------------------
+// Setup: Input value matches expected value
+// Expected: Transaction succeeds
+// Validates: Value validation works
+
+// Test Case 4: Invalid Input (Wrong Value)
+// -----------------------------------------
+// Setup: Input value differs from expected
+// Expected: Transaction FAILS
+// Validates: Value validation rejects
+
+// Test Case 5: Parameter Honesty (Truth)
+// ---------------------------------------
+// Setup: Declared value matches actual value
+// Expected: Transaction succeeds
+// Validates: Parameter validation accepts truth
+
+// Test Case 6: Parameter Dishonesty (Lie)
+// ----------------------------------------
+// Setup: Declared value differs from actual value
+// Expected: Transaction FAILS
+// Validates: Parameter validation catches lies
+
+// Test Case 7: Dust Attack (Below Minimum)
+// -----------------------------------------
+// Setup: Input value below minimum threshold
+// Expected: Transaction FAILS
+// Validates: Minimum value bound enforced
+
+// Test Case 8: Overflow Attack (Above Maximum)
+// ---------------------------------------------
+// Setup: Input value above maximum threshold
+// Expected: Transaction FAILS
+// Validates: Maximum value bound enforced
+
+// Test Case 9: Token Injection (Fungible)
+// ----------------------------------------
+// Setup: Input has fungible tokens
+// Expected: Transaction FAILS
+// Validates: NO_TOKEN enforcement rejects tokens
+
+// Test Case 10: Token Injection (NFT)
+// ------------------------------------
+// Setup: Input has NFT
+// Expected: Transaction FAILS
+// Validates: NO_TOKEN enforcement rejects NFTs
+
+// Test Case 11: Multi-Input Position
+// -----------------------------------
+// Setup: This contract at input[2], other inputs present
+// Expected: Transaction succeeds
+// Validates: activeInputIndex correctly identifies input
+
+// Test Case 12: Pure BCH Input
+// -----------------------------
+// Setup: Input has correct identity, value, no tokens
+// Expected: Transaction succeeds
+// Validates: All validations pass for correct input
+
+// ============================================================================
+// DEPLOYMENT CHECKLIST
+// ============================================================================
+//
+// Before deploying input validation patterns:
+//
+// [ ] DOES validate input identity (lockingBytecode == this.lockingBytecode)
+// [ ] DOES capture input value explicitly (tx.inputs[this.activeInputIndex].value)
+// [ ] DOES validate parameters match actual values (if using parameters)
+// [ ] DOES enforce value bounds (minimum and maximum)
+// [ ] DOES enforce NO_TOKEN correctly (bytes32 with 32-byte constant)
+// [ ] DOES define NO_TOKEN inside each contract/function (no global constants)
+// [ ] Does NOT use invalid 0x literal for NO_TOKEN comparison
+// [ ] Does NOT assume input value without validation
+// [ ] Does NOT trust function parameters without verification
+// [ ] Does NOT read from wrong input index
+// [ ] Does NOT validate position instead of identity
+// [ ] Test with correct input (all checks pass)
+// [ ] Test with wrong identity (must fail)
+// [ ] Test with wrong value (must fail)
+// [ ] Test with lying parameters (must fail)
+// [ ] Test with dust inputs (must fail if minimum enforced)
+// [ ] Test with token inputs (must fail if NO_TOKEN enforced)
+// [ ] Verify activeInputIndex usage is correct throughout
+// [ ] Verify NO_TOKEN constant is 32 bytes (64 hex characters)
+
+// ============================================================================
+// USAGE EXAMPLES
+// ============================================================================
+
+// Example 1: Fixed-Value Vault
+// -----------------------------
+// Use Pattern 2: InputValueValidation
+// - Vault holds exactly 1,000,000 sats
+// - Validates input is correct contract
+// - Validates input value is exactly 1M sats
+// - Rejects any other value
+
+// Example 2: Flexible-Value Covenant
+// -----------------------------------
+// Use Pattern 3: InputValueRange
+// - Accept inputs between 100k - 10M sats
+// - Rejects dust (< 100k)
+// - Rejects excessive (> 10M)
+// - Allows variance within bounds
+
+// Example 3: Pure BCH Protocol
+// -----------------------------
+// Use Pattern 4: TokenFreeValidation
+// - Enforces pure BCH inputs
+// - Rejects any token presence
+// - Validates value and identity
+// - No token logic needed
+
+// Example 4: Parameter-Driven Covenant
+// -------------------------------------
+// Use Pattern 5: ExplicitParameterValidation
+// - Function takes declared value parameter
+// - Validates parameter matches actual
+// - Prevents parameter lying
+// - Safe to use parameter in logic
+
+// Example 5: High-Security Vault
+// -------------------------------
+// Use Pattern 10: ProductionInputValidation
+// - Maximum security for critical funds
+// - All validations enabled
+// - Defense in depth
+// - Zero assumptions about input state
+
+// ============================================================================
+// END OF FILE
+// ============================================================================
