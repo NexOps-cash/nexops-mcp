@@ -54,15 +54,19 @@ class GenerationController:
         # ── Phase 2 + Phase 3 with retry loop ─────────────────────
         code = ""
         toll_gate: TollGateResult = TollGateResult(passed=False)
-        violations = None
+        cumulative_violations: List[ViolationDetail] = []
 
         for attempt in range(MAX_RETRIES):
             # Phase 2: Logic Fill
             try:
+                # Lower temperature on retries to encourage deterministic compliance
+                temperature = 0.7 if attempt == 0 else (0.4 if attempt == 1 else 0.1)
+                
                 code = await Phase2.run(
                     ir=ir,
-                    violations=violations,
+                    violations=cumulative_violations,
                     retry_count=attempt,
+                    temperature=temperature
                 )
             except Exception as e:
                 logger.error(f"Phase 2 failed (attempt {attempt + 1}): {e}")
@@ -82,7 +86,11 @@ class GenerationController:
                 f"Toll gate FAILED (attempt {attempt + 1}/{MAX_RETRIES}): "
                 f"{len(toll_gate.violations)} violations"
             )
-            violations = toll_gate.violations
+            
+            # ACCUMULATE violations so LLM doesn't forget previous fixes
+            for v in toll_gate.violations:
+                if not any(cv.rule == v.rule and cv.location == v.location for cv in cumulative_violations):
+                    cumulative_violations.append(v)
 
         # ── Final result ──────────────────────────────────────────
         if not toll_gate.passed:

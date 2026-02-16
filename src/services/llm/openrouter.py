@@ -14,13 +14,14 @@ class OpenRouterProvider(LLMProvider):
         )
         self.model = "openai/gpt-oss-120b"
 
-    async def complete(self, prompt: str) -> str:
+    async def complete(self, prompt: str, **kwargs) -> str:
         try:
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "user", "content": prompt}
                 ],
+                **kwargs
             )
             return response.choices[0].message.content
         except Exception as e:

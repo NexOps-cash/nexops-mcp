@@ -24,7 +24,7 @@ class GroqProvider(LLMProvider):
 
 
 
-    async def complete(self, prompt: str) -> str:
+    async def complete(self, prompt: str, **kwargs) -> str:
 
         try:
 
@@ -37,6 +37,8 @@ class GroqProvider(LLMProvider):
                     {"role": "user", "content": prompt}
 
                 ],
+
+                **kwargs
 
             )
 

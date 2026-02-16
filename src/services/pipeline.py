@@ -61,6 +61,7 @@ class Phase2:
         ir: ContractIR,
         violations: Optional[List[ViolationDetail]] = None,
         retry_count: int = 0,
+        temperature: float = 0.7,
     ) -> str:
         """Take ContractIR (and optional prior violations) and produce .cash code."""
 
@@ -86,13 +87,13 @@ class Phase2:
         )
 
         llm = LLMFactory.get_provider("phase2")
-        raw_response = await llm.complete(prompt)
+        raw_response = await llm.complete(prompt, temperature=temperature)
 
         # Extract .cash code from response
         code = _extract_cash_code(raw_response)
         ir.metadata.generation_phase = 2
         ir.metadata.retry_count = retry_count
-        logger.info(f"Phase 2 complete: {len(code)} chars, retry={retry_count}")
+        logger.info(f"Phase 2 complete: {len(code)} chars, retry={retry_count}, temp={temperature}")
         return code
 
 
@@ -207,57 +208,61 @@ def _build_phase2_prompt(
     constraint_summary: str,
     violation_context: str,
 ) -> str:
-    """Build the Phase 2 LLM prompt."""
+    """Build the Phase 2 LLM prompt with a focus on structural fixes and distinctness."""
+    
+    # Check for multisig context to inject explicit distinctness rule
+    is_multisig = "pubkey" in skeleton_code and skeleton_code.count("pubkey") >= 2
+    distinctness_rule = ""
+    if is_multisig:
+        distinctness_rule = "\n16. MULTISIG SAFETY: Signatures MUST originate from distinct public keys. Enforce `require(pk1 != pk2);` for all pubkey pairs."
+
     violation_section = ""
     if violation_context:
         violation_section = f"""
-PREVIOUS ATTEMPT FAILED VALIDATION. You MUST fix these violations:
+!!! MANDATORY FIXES FOR PREVIOUS VIOLATIONS !!!
+You previously failed security validation. You MUST implement the structural patterns provided below.
+Failure to use these EXACT patterns will result in immediate rejection.
+
 {violation_context}
 """
 
-    return f"""You are a CashScript implementation engine operating under strict constraints.
+    return f"""You are a CashScript implementation engine operating under strict security protocols.
 
-You are NOT a designer. You are NOT allowed to invent features. You are NOT allowed to modify structure.
+Your objective: Implement the logic for the provided CashScript skeleton while satisfying all security invariants.
 
-Your task: Implement the logic for the provided CashScript skeleton.
-
-Hard Rules:
-1. Do NOT change the contract name.
-2. Do NOT add or remove functions.
-3. Do NOT change function parameters.
-4. Do NOT introduce unused variables.
-5. Do NOT use Solidity/EVM syntax (no msg.sender, no mapping, no emit, no payable).
-6. Every public function MUST contain at least one require(...) enforcing a transaction constraint.
-7. All require(...) conditions MUST reference explicit transaction state (tx, sig, outputs, inputs).
-8. ALWAYS validate this.activeInputIndex in every function.
-9. ALWAYS validate tx.outputs.length in every function.
-10. ALWAYS validate tx.outputs[N].lockingBytecode before using other output properties.
-11. NEVER assume output ordering — validate semantically.
-12. NEVER calculate fees (no inputValue - outputValue patterns).
-13. Use >= for "at or after" time checks, < for "before" — NEVER use >.
-14. If dividing, ALWAYS require(divisor > 0) before the division.
-15. Use `pragma cashscript ^0.10.0;` at the top.
-
-Security Rules:
-- Assume adversarial callers.
-- Prefer explicit checks over implicit assumptions.
-- Enforce minimal correctness, not feature completeness.
 {violation_section}
 
-SECURITY PRIMITIVES (use these patterns):
+### HARD RULES (NON-NEGOTIABLE):
+1. Do NOT change the contract name, function names, or parameters.
+2. Every public function MUST contain at least one require(...) enforcing a transaction constraint.
+3. ALWAYS validate `this.activeInputIndex` in every function.
+4. ALWAYS validate `tx.outputs.length` in every function.
+5. ALWAYS validate `tx.outputs[N].lockingBytecode` BEFORE using other properties of that output.
+6. NEVER assume output ordering — validate semantically via lockingBytecode.
+7. NEVER calculate fees (no inputValue - outputValue patterns).
+8. Use `>=` for "at or after" time checks, `<` for "before" — NEVER use `>`.
+9. If dividing, ALWAYS `require(divisor > 0)` before the division.
+10. Use `pragma cashscript ^0.10.0;` at the top.
+11. REMOVE all Solidity/EVM syntax (msg.sender, mapping, etc.).
+12. Ensure all `require()` comparisons use compatible types (no bytes vs bytes32/NO_TOKEN).
+13. Spending functions MUST validate output values or use a strict `tx.outputs.length == 1` anchor.
+14. Escrow/Multisig functions MUST bind outputs to a specific `lockingBytecode`.
+15. NO PLACEHOLDER COMMENTS. Functional code only.{distinctness_rule}
+
+### SECURITY PRIMITIVES (MANDATORY PATTERNS):
 {primitives_context}
 
-CONSTRAINTS (violations are FATAL):
+### ANTI-PATTERN SUMMARY:
 {constraint_summary}
 
-SKELETON TO IMPLEMENT:
+### SKELETON TO IMPLEMENT:
 ```cashscript
 {skeleton_code}
 ```
 
-User intent (for context only): "{intent}"
+Intent: "{intent}"
 
-Output ONLY valid CashScript code. No explanations. No markdown fences. No commentary."""
+Output ONLY the complete .cash code. No explanation. No markdown fences."""
 
 
 def _parse_phase1_response(raw: str, intent: str, security_level: str) -> ContractIR:
@@ -337,30 +342,59 @@ def _build_violation_context(
     retry_count: int,
     kb: object,
 ) -> str:
-    """Build violation context for retry prompts."""
-    parts = ["The following violations were found in your previous output:\n"]
+    """Build violation context with mandatory structural patterns and targeted KB retrieval."""
+    parts = ["### THE FOLLOWING VIOLATIONS WERE DETECTED (MUST BE FIXED):\n"]
 
+    # 1. Provide concrete mandatory structural patterns
+    parts.append("#### MANDATORY STRUCTURAL CONSTRAINTS")
+    parts.append("You MUST incorporate these exact patterns into your code to pass validation:")
+    
+    unique_rules = {v.rule.replace(".cash", "") for v in violations}
+    for rule in unique_rules:
+        pattern = _derive_mandatory_pattern(rule)
+        parts.append(f"- [{rule.upper()}]: `{pattern}`")
+    parts.append("")
+
+    # 2. Detailed violation list
+    parts.append("#### VIOLATION DETAILS")
     for i, v in enumerate(violations, 1):
         parts.append(f"{i}. [{v.severity.upper()}] {v.rule}: {v.reason}")
-        if v.fix_hint:
-            parts.append(f"   FIX: {v.fix_hint}")
+        parts.append(f"   REASON: {v.exploit}")
         parts.append("")
 
-    # On retry >= 2, inject full anti-pattern docs for violated rules
-    if retry_count >= 2 and hasattr(kb, 'get_category_content'):
-        parts.append("\n--- DETAILED ANTI-PATTERN REFERENCE ---\n")
-        violated_rules = {v.rule.replace(".cash", "") for v in violations}
-        anti_pattern_content = kb.get_category_content("anti_pattern")
-        if anti_pattern_content:
-            for rule in violated_rules:
-                if rule in anti_pattern_content:
-                    parts.append(f"## {rule}")
-                    # Truncate to 100 lines per pattern
-                    pattern_lines = anti_pattern_content.split("\n")[:100]
-                    parts.append("\n".join(pattern_lines))
-                    parts.append("")
-
+    # 3. Targeted Anti-Pattern Retrieval (Retry >= 1 ensures better focus)
+    if retry_count >= 1 and hasattr(kb, 'get_category_content'):
+        parts.append("#### TARGETED ANTI-PATTERN DOCUMENTATION")
+        for rule in unique_rules:
+            # Query KB for specific anti-pattern documentation
+            doc = kb.get_category_content("anti_pattern", keywords=[rule])
+            if doc:
+                # Limit to 50 lines per doc to keep context tight
+                doc_lines = doc.split("\n")[:50]
+                parts.append("\n".join(doc_lines))
+                parts.append("---")
+    
     return "\n".join(parts)
+
+
+def _derive_mandatory_pattern(rule: str) -> str:
+    """Return a deterministic structural code pattern for a given violation."""
+    patterns = {
+        "implicit_output_ordering": "require(tx.outputs[N].lockingBytecode == target); // FIRST check for index N",
+        "missing_output_limit": "require(tx.outputs.length == FIXED_COUNT);",
+        "unvalidated_position": "require(this.activeInputIndex == 0);",
+        "fee_assumption_violation": "// REMOVE all inputValue - outputValue patterns",
+        "evm_hallucination": "// REMOVE all msg.sender, mapping, emit, and payable terms",
+        "empty_function_body": "require(checkSig(sig, pk)); // Add at least one constraint",
+        "semantic_type_mismatch": "require(tx.outputs[N].lockingBytecode == bytes(target)); // No bytes32/NO_TOKEN",
+        "multisig_distinctness_flaw": "require(pk1 != pk2); // Enforce distinctness for all pubkey pairs",
+        "missing_value_enforcement": "require(tx.outputs[N].value == amount); OR require(tx.outputs.length == 1);",
+        "weak_output_count_limit": "require(tx.outputs.length == 1); // Use exact match instead of >=",
+        "missing_output_anchor": "require(tx.outputs[0].lockingBytecode == target_script);",
+        "time_validation_error": "require(tx.time >= deadline); // NEVER use >",
+        "division_by_zero": "require(divisor > 0); a / divisor;",
+    }
+    return patterns.get(rule, "// Review anti-pattern docs for structural requirements.")
 
 
 def _derive_fix_hint(rule: str) -> str:
@@ -372,6 +406,11 @@ def _derive_fix_hint(rule: str) -> str:
         "fee_assumption_violation": "Remove fee calculations. Let the caller specify exact output amounts.",
         "evm_hallucination": "Remove all Solidity/EVM syntax. Use CashScript constructs only.",
         "empty_function_body": "Add require() statements enforcing transaction constraints.",
+        "semantic_type_mismatch": "Type mismatch in comparison. Do not compare bytes (lockingBytecode) to bytes32 (tokenCategory/NO_TOKEN).",
+        "multisig_distinctness_flaw": "Multisig pubkeys must be distinct. Add require(pk1 != pk2).",
+        "missing_value_enforcement": "Spending functions must validate output values or use a strict single-output anchor (== 1).",
+        "weak_output_count_limit": "Replace >= with an exact match (==) or add an upper bound for tx.outputs.length.",
+        "missing_output_anchor": "Escrow functions must have a hard output anchor (lockingBytecode or value validation).",
     }
     # Strip .cash suffix for lookup
     clean_rule = rule.replace(".cash", "")

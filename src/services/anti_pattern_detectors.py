@@ -379,6 +379,140 @@ class EmptyFunctionDetector(AntiPatternDetector):
         return None
 
 
+class SemanticTypeValidationDetector(AntiPatternDetector):
+    """
+    Detects comparisons between incompatible types in require statements.
+    
+    VIOLATION: require(tx.outputs[0].lockingBytecode == NO_TOKEN)
+    """
+    id = "semantic_type_mismatch"
+    
+    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        for v in ast.validations:
+            for comp in v.comparisons:
+                if comp.is_type_mismatch:
+                    return Violation(
+                        rule=self.id,
+                        reason=f"Type mismatch: Comparing '{comp.left}' and '{comp.right}' in {v.location.function}",
+                        exploit="The comparison is logically broken (comparing bytes vs bytes32). "
+                                "This will either always fail or pass unexpectedly, breaking contract logic. "
+                                "CashScript bytecode comparisons must use compatible types.",
+                        location={"line": comp.location.line, "function": comp.location.function}
+                    )
+        # Check for cross-field confusion
+        if ("tokenCategory" in ast.code and "lockingBytecode" in ast.code):
+             # Heuristic: if category is assigned to something called 'bytecode' or vice versa
+             pass 
+        return None
+
+
+class MultisigDistinctnessDetector(AntiPatternDetector):
+    """
+    Detects lack of distinctness check for multisig pubkeys.
+    """
+    id = "multisig_distinctness_flaw"
+    
+    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        if ast.is_multisig_like:
+            pk_names = [p['name'] for p in ast.constructor_params if p['type'] == 'pubkey']
+            # Look for require(pk1 != pk2)
+            has_distinctness = False
+            for v in ast.validations:
+                if '!=' in v.condition and pk_names[0] in v.condition and pk_names[1] in v.condition:
+                    has_distinctness = True
+                    break
+            
+            if not has_distinctness:
+                return Violation(
+                    rule=self.id,
+                    reason=f"Multisig pubkeys ({', '.join(pk_names)}) are not enforced to be distinct",
+                    exploit="Collusion vulnerability. If pk1 == pk2, one person can satisfy a 2-of-2 "
+                            "multisig alone. Public keys should be explicitly compared with !=.",
+                    severity="medium",
+                    location={"line": 0, "function": "constructor"}
+                )
+        return None
+
+
+class SpendingPathSecurityDetector(AntiPatternDetector):
+    """
+    Ensures spending functions either validate output values or use strict anchors.
+    """
+    id = "missing_value_enforcement"
+    
+    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        spending_fns = ast.get_spending_functions()
+        for fn in spending_fns:
+            fn_validations = [v for v in ast.validations if v.location.function == fn]
+            validates_val = any(v.validates_value is not None for v in fn_validations)
+            is_strict_single = ast.validates_output_count() and any("== 1" in v.condition for v in fn_validations)
+            
+            if not (validates_val or is_strict_single):
+                return Violation(
+                    rule=self.id,
+                    reason=f"Spending function '{fn}' missing output value validation or strict output count anchor",
+                    exploit="Value extraction. Attacker can redirect funds to themselves or "
+                            "drain the contract by adding unexpected outputs if the contract "
+                            "doesn't explicitly lock the output amount or total counts.",
+                    severity="high",
+                    location={"line": 0, "function": fn}
+                )
+        return None
+
+
+class WeakOutputLimitDetector(AntiPatternDetector):
+    """
+    Detects weak output length checks (>= 1 without upper bound).
+    """
+    id = "weak_output_count_limit"
+    
+    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        for v in ast.validations:
+            if "tx.outputs.length" in v.condition and ">=" in v.condition:
+                # Check if there is also an equality or less-than check in the same function
+                fn_validations = [v2 for v2 in ast.validations if v2.location.function == v.location.function]
+                has_upper = any(("==" in v2.condition or "<" in v2.condition) and "tx.outputs.length" in v2.condition for v2 in fn_validations)
+                if not has_upper:
+                    return Violation(
+                        rule=self.id,
+                        reason="Weak output count check (>=) used without an upper bound or exact match",
+                        exploit="Attacker can append extra outputs to the transaction. "
+                                "While the first output is validated, extra outputs could "
+                                "be used to drain the UTXO's remaining value or mint tokens.",
+                        severity="medium",
+                        location={"line": v.location.line, "function": v.location.function}
+                    )
+        return None
+
+
+class EscrowRoleEnforcementDetector(AntiPatternDetector):
+    """
+    Ensures escrow-like contracts have at least one hard spending constraint.
+    """
+    id = "missing_output_anchor"
+    
+    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        if ast.is_escrow_like and not ast.is_stateful:
+            # Check for at least one hard spending function (all must be secure)
+            for fn in ast.get_spending_functions():
+                fn_validations = [v for v in ast.validations if v.location.function == fn]
+                # Requires lockingBytecode validation OR value validation OR strict single output
+                has_anchor = any(v.validates_locking_bytecode or v.validates_value is not None for v in fn_validations)
+                strict_single = any("tx.outputs.length == 1" in v.condition for v in fn_validations)
+                
+                if not (has_anchor or strict_single):
+                    return Violation(
+                        rule=self.id,
+                        reason=f"Escrow function '{fn}' missing hard output anchor (lockingBytecode or value validation)",
+                        exploit="Contract anchor bypass. In escrow roles, at least one output "
+                                "must be strictly bound to a target destination or value to prevent "
+                                "the arbiter/party from redirecting funds to an arbitrary script.",
+                        severity="high",
+                        location={"line": 0, "function": fn}
+                    )
+        return None
+
+
 # Registry of all detectors
 DETECTOR_REGISTRY = [
     ImplicitOutputOrderingDetector(),
@@ -391,7 +525,13 @@ DETECTOR_REGISTRY = [
     TimeOperatorViolationDetector(),
     HardcodedInputIndexDetector(),
     EVMHallucinationDetector(),
-    EmptyFunctionDetector()
+    EmptyFunctionDetector(),
+    SemanticTypeValidationDetector(),
+    MultisigDistinctnessDetector(),
+    SpendingPathSecurityDetector(),
+    WeakOutputLimitDetector(),
+    EscrowRoleEnforcementDetector()
 ]
+
 
 
