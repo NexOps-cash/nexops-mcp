@@ -42,6 +42,17 @@ class ValidationCheck:
     validates_locking_bytecode: bool = False
     validates_output_count: bool = False
     validates_position: bool = False
+    validates_token_category: Optional[int] = None
+    validates_token_amount: Optional[int] = None
+    is_time_check: bool = False
+
+
+@dataclass
+class ArithmeticOp:
+    """Represents an arithmetic operation"""
+    op: str  # "/", "%", "+", "*"
+    location: Location
+    divisor_expression: Optional[str] = None
 
 
 class CashScriptAST:
@@ -58,7 +69,9 @@ class CashScriptAST:
         # Parsed elements
         self.output_references: List[OutputReference] = []
         self.validations: List[ValidationCheck] = []
+        self.arithmetic_ops: List[ArithmeticOp] = []
         self.functions: List[str] = []
+        self.is_stateful = False
         
         # Parse the code
         self._parse()
@@ -77,6 +90,10 @@ class CashScriptAST:
                     current_function = func_match.group(1)
                     self.functions.append(current_function)
             
+            # Detect stateful patterns (hash256 of state)
+            if 'hash256(' in stripped and 'state' in stripped.lower():
+                self.is_stateful = True
+            
             # Detect output references
             output_refs = re.findall(r'tx\.outputs\[(\d+)\]\.(\w+)', stripped)
             for index_str, property_name in output_refs:
@@ -84,6 +101,15 @@ class CashScriptAST:
                     index=int(index_str),
                     location=Location(line=line_num, column=0, function=current_function),
                     property_accessed=property_name
+                ))
+            
+            # Detect division/modulo operations
+            div_matches = re.findall(r'(\w+)\s*([/%])\s*(\w+)', stripped)
+            for left, op, right in div_matches:
+                self.arithmetic_ops.append(ArithmeticOp(
+                    op=op,
+                    location=Location(line=line_num, column=0, function=current_function),
+                    divisor_expression=right
                 ))
             
             # Detect validation checks
@@ -103,6 +129,19 @@ class CashScriptAST:
                 if 'this.activeInputIndex' in stripped and '==' in stripped:
                     validation.validates_position = True
                 
+                # Token checks
+                token_cat_match = re.search(r'tx\.outputs\[(\d+)\]\.tokenCategory', stripped)
+                if token_cat_match:
+                    validation.validates_token_category = int(token_cat_match.group(1))
+                
+                token_amt_match = re.search(r'tx\.outputs\[(\d+)\]\.tokenAmount', stripped)
+                if token_amt_match:
+                    validation.validates_token_amount = int(token_amt_match.group(1))
+                
+                # Time checks
+                if 'tx.time' in stripped:
+                    validation.is_time_check = True
+                
                 self.validations.append(validation)
     
     def find_output_references(self) -> List[OutputReference]:
@@ -112,18 +151,12 @@ class CashScriptAST:
     def validates_locking_bytecode_for(self, output_ref: OutputReference) -> bool:
         """
         Check if lockingBytecode is validated for a specific output index.
-        
-        This is a semantic check: does the code verify that the output at this
-        index has the expected script (covenant continuation, recipient address, etc.)?
         """
-        # Look for validations in the same function
         for validation in self.validations:
             if validation.location.function == output_ref.location.function:
                 if validation.validates_locking_bytecode:
-                    # Check if it validates the same output index
                     if f'tx.outputs[{output_ref.index}].lockingBytecode' in validation.condition:
                         return True
-        
         return False
     
     def validates_output_count(self) -> bool:
@@ -137,30 +170,47 @@ class CashScriptAST:
     def has_fee_calculation(self) -> bool:
         """Check if code calculates fee as input - output"""
         for line in self.lines:
-            # Look for patterns like: int fee = ... - ...
-            if re.search(r'\bfee\s*=.*-', line):
-                return True
-            if re.search(r'assumedFee\s*=.*-', line):
-                return True
+            if re.search(r'\bfee\s*=.*-', line): return True
+            if re.search(r'assumedFee\s*=.*-', line): return True
         return False
     
+    def has_unguarded_division(self) -> List[ArithmeticOp]:
+        """Find division operations without dominating require(divisor > 0)"""
+        unguarded = []
+        for op in self.arithmetic_ops:
+            if op.op in ('/', '%'):
+                # Check for dominating require in same function
+                guarded = False
+                for v in self.validations:
+                    if v.location.function == op.location.function and v.location.line < op.location.line:
+                        if op.divisor_expression in v.condition and ('> 0' in v.condition or '!= 0' in v.condition):
+                            guarded = True
+                            break
+                if not guarded:
+                    unguarded.append(op)
+        return unguarded
+    
+    def find_token_pair_violations(self) -> List[int]:
+        """Find output indices with tokenCategory check but no tokenAmount check"""
+        cats = {v.validates_token_category for v in self.validations if v.validates_token_category is not None}
+        amts = {v.validates_token_amount for v in self.validations if v.validates_token_amount is not None}
+        return list(cats - amts)
+    
+    def has_time_validation_error(self) -> bool:
+        """Detect using > or <= instead of >= and < for time checks"""
+        for v in self.validations:
+            if v.is_time_check:
+                if '>' in v.condition and '>=' not in v.condition: return True
+                if '<=' in v.condition: return True
+        return False
+
     def references_output_by_index_without_semantic_validation(self) -> List[OutputReference]:
-        """
-        Find output references that use index without validating semantic role.
-        
-        This is the core check for implicit output ordering anti-pattern.
-        """
+        """Find output references that use index without validating semantic role."""
         violations = []
-        
         for output_ref in self.output_references:
-            # Skip if this is a lockingBytecode access (that's the validation itself)
-            if output_ref.property_accessed == 'lockingBytecode':
-                continue
-            
-            # Check if lockingBytecode is validated for this output
+            if output_ref.property_accessed == 'lockingBytecode': continue
             if not self.validates_locking_bytecode_for(output_ref):
                 violations.append(output_ref)
-        
         return violations
     
     def to_dict(self) -> Dict[str, Any]:
@@ -170,5 +220,6 @@ class CashScriptAST:
             "output_references": len(self.output_references),
             "validations": len(self.validations),
             "validates_output_count": self.validates_output_count(),
-            "validates_input_position": self.validates_input_position()
+            "is_stateful": self.is_stateful
         }
+

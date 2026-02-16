@@ -197,10 +197,201 @@ class FeeAssumptionViolationDetector(AntiPatternDetector):
         return None
 
 
+class DivisionByZeroDetector(AntiPatternDetector):
+    """
+    Detects division or modulo without a dominating non-zero check.
+    
+    VIOLATION: a / b where require(b > 0) is missing.
+    """
+    id = "division_by_zero"
+    
+    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        unguarded = ast.has_unguarded_division()
+        if unguarded:
+            first = unguarded[0]
+            return Violation(
+                rule=f"{self.id}.cash",
+                reason=f"Division/modulo operation '{first.op}' on variable '{first.divisor_expression}' without non-zero guard",
+                exploit="Transaction will fail and contract will be bricked if divisor is 0. "
+                        "CashScript does not handle division by zero safely - it results in an "
+                        "unspendable UTXO. Contracts must explicitly validate divisors.",
+                location={
+                    "line": first.location.line,
+                    "function": first.location.function,
+                    "operator": first.op,
+                    "divisor": first.divisor_expression
+                }
+            )
+        return None
+
+
+class TokenPairValidationDetector(AntiPatternDetector):
+    """
+    Detects tokenCategory checks without a corresponding tokenAmount check.
+    
+    VIOLATION: require(tx.outputs[N].tokenCategory == category) found, but tokenAmount is ignored.
+    """
+    id = "missing_token_amount_validation"
+    
+    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        violations = ast.find_token_pair_violations()
+        if violations:
+            idx = violations[0]
+            return Violation(
+                rule=f"{self.id}.cash",
+                reason=f"Output {idx} has tokenCategory validation but is missing tokenAmount validation",
+                exploit="Token inflation/duplication. Attacker can set an arbitrary tokenAmount "
+                        "if the contract only validates the category. Both must be checked to "
+                        "preserve token integrity.",
+                location={
+                    "line": 0,
+                    "function": "all",
+                    "output_index": idx
+                }
+            )
+        return None
+
+
+class CovenantContinuationDetector(AntiPatternDetector):
+    """
+    Detects stateful covenants that forget to validate lockingBytecode continuation.
+    """
+    id = "vulnerable_covenant"
+    
+    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        if ast.is_stateful:
+            # Check if any function validates lockingBytecode continuation
+            has_continuation = any(v.validates_locking_bytecode for v in ast.validations)
+            if not has_continuation:
+                return Violation(
+                    rule=f"{self.id}.cash",
+                    reason="Stateful covenant detected but no lockingBytecode continuation check found",
+                    exploit="Covenant escape. Attacker can redirect funds to any script by "
+                            "providing a different lockingBytecode in the transaction output. "
+                            "Stateful contracts must enforce that they recreate themselves.",
+                    location={
+                        "line": 0,
+                        "function": "all",
+                        "missing": "require(tx.outputs[N].lockingBytecode == ...)"
+                    }
+                )
+        return None
+
+
+class TimeOperatorViolationDetector(AntiPatternDetector):
+    """
+    Detects usage of > or <= in time checks.
+    
+    VIOLATION: require(tx.time > deadline) or require(tx.time <= deadline)
+    """
+    id = "time_validation_error"
+    
+    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        if ast.has_time_validation_error():
+            return Violation(
+                rule=f"{self.id}.cash",
+                reason="Invalid time comparison operator used for tx.time",
+                exploit="Off-by-one block/timestamp errors. CashScript development standards "
+                        "require using >= for 'at or after' and < for 'before' to ensure "
+                        "clear, gap-free time boundaries.",
+                location={
+                    "line": 0,
+                    "function": "all",
+                    "pattern": "Use >= or < for time gating"
+                }
+            )
+        return None
+
+
+class HardcodedInputIndexDetector(AntiPatternDetector):
+    """
+    Detects hardcoded indices for inputs other than this.activeInputIndex.
+    """
+    id = "unvalidated_position"
+    
+    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        # Simple check for tx.inputs[0] or similar being used without position validation
+        code_str = ast.code
+        if ("tx.inputs[0]" in code_str or "tx.inputs[1]" in code_str) and not ast.validates_input_position():
+            return Violation(
+                rule=f"{self.id}.cash",
+                reason="Literal input index used without this.activeInputIndex validation",
+                exploit="Position-dependent logic bypass. Attacker can shift contract position "
+                        "to a different index (1 instead of 0) to make it read the wrong data.",
+                location={
+                    "line": 0,
+                    "function": "all",
+                    "missing": "require(this.activeInputIndex == 0)"
+                }
+            )
+        return None
+
+
+class EVMHallucinationDetector(AntiPatternDetector):
+    """
+    Detects Solidity/EVM hallucinated terms.
+    """
+    id = "evm_hallucination"
+    
+    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        import re
+        evm_patterns = [
+            r'\bmsg\.sender\b', r'\bmsg\.value\b', r'\bmapping\s*\(', r'\bemit\s+\w+',
+            r'\bmodifier\s+\w+', r'\bpayable\b', r'\bview\b', r'\bpure\b',
+            r'\bconstructor\s*\(', r'\bevent\s+\w+', r'\buint256\b'
+        ]
+        for p in evm_patterns:
+            if re.search(p, ast.code, re.IGNORECASE):
+                return Violation(
+                    rule=f"{self.id}",
+                    reason=f"EVM/Solidity pattern '{p}' detected in CashScript source",
+                    exploit="Generated code will fail to compile as it uses Solidity syntax.",
+                    severity="critical",
+                    location={"line": 0, "function": "all"}
+                )
+        return None
+
+
+class EmptyFunctionDetector(AntiPatternDetector):
+    """
+    Detects public functions with no require() statements.
+    """
+    id = "empty_function_body"
+    
+    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        import re
+        # Find function blocks and check for require()
+        fn_pattern = re.compile(r'function\s+(\w+)\s*\([^)]*\)\s*\{([^}]*)\}', re.DOTALL)
+        empty_fns = []
+        for match in fn_pattern.finditer(ast.code):
+            if 'require(' not in match.group(2):
+                empty_fns.append(match.group(1))
+        
+        if empty_fns:
+            return Violation(
+                rule=f"{self.id}",
+                reason=f"Functions with no require() statements: {', '.join(empty_fns)}",
+                exploit="Empty functions allow unrestricted spending of UTXOs by anyone. "
+                        "Every public function must enforce at least one constraint.",
+                severity="critical",
+                location={"line": 0, "function": empty_fns[0]}
+            )
+        return None
+
+
 # Registry of all detectors
 DETECTOR_REGISTRY = [
     ImplicitOutputOrderingDetector(),
     MissingOutputLimitDetector(),
     UnvalidatedPositionDetector(),
     FeeAssumptionViolationDetector(),
+    DivisionByZeroDetector(),
+    TokenPairValidationDetector(),
+    CovenantContinuationDetector(),
+    TimeOperatorViolationDetector(),
+    HardcodedInputIndexDetector(),
+    EVMHallucinationDetector(),
+    EmptyFunctionDetector()
 ]
+
+
