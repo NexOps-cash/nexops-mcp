@@ -1,0 +1,42 @@
+pragma cashscript ^0.13.0;
+
+// PRIMITIVE: Authorization
+// PURPOSE: Explicit execution authorization only (no covenant logic)
+// SCOPE: BCH-only, no tokens
+
+contract Authorization(
+    pubkey key1,
+    pubkey key2,
+    bool requireBoth
+) {
+    function authorize(sig sig1, sig sig2) {
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+
+        // Identity validation
+        require(
+            tx.inputs[this.activeInputIndex].lockingBytecode 
+            == this.lockingBytecode
+        );
+
+        // Enforce BCH-only
+        require(
+            tx.inputs[this.activeInputIndex].tokenCategory 
+            == NO_TOKEN
+        );
+        require(
+            tx.inputs[this.activeInputIndex].tokenAmount 
+            == 0
+        );
+
+        bool valid1 = checkSig(sig1, key1);
+        bool valid2 = checkSig(sig2, key2);
+
+        if (requireBoth) {
+            // Strict 2-of-2
+            require(valid1 && valid2);
+        } else {
+            // Either key may authorize
+            require(valid1 || valid2);
+        }
+    }
+}

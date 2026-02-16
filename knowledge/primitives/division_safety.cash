@@ -1,0 +1,47 @@
+// PRIMITIVE: DivisionSafety
+// PURPOSE: Enforce division and modulo safety
+// SCOPE: Prevent division-by-zero consensus bricking
+// SECURITY LEVEL: CANONICAL NEXOPS PRIMITIVE
+// CashScript Version: ^0.13.0
+
+pragma cashscript ^0.13.0;
+
+contract DivisionSafety() {
+
+    function safeDivide(int numerator, int divisor) {
+
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+
+        // ---------------------------------------------------------------------
+        // 1. IDENTITY VALIDATION
+        // ---------------------------------------------------------------------
+        bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+        require(thisBytecode == this.lockingBytecode);
+
+        // ---------------------------------------------------------------------
+        // 2. TOKEN REJECTION (BCH-ONLY)
+        // ---------------------------------------------------------------------
+        bytes32 inputTokenCategory = tx.inputs[this.activeInputIndex].tokenCategory;
+        require(inputTokenCategory == NO_TOKEN);
+
+        int inputTokenAmount = tx.inputs[this.activeInputIndex].tokenAmount;
+        require(inputTokenAmount == 0);
+
+        // ---------------------------------------------------------------------
+        // 3. CRITICAL DIVISOR VALIDATION
+        // ---------------------------------------------------------------------
+        // Division by zero causes consensus-level script failure.
+        // This permanently bricks the UTXO with no recovery path.
+        //
+        // Validation MUST occur before ANY division or modulo operation.
+        require(divisor > 0);
+
+        // ---------------------------------------------------------------------
+        // 4. SAFE ARITHMETIC (NOW GUARANTEED SAFE)
+        // ---------------------------------------------------------------------
+        int quotient = numerator / divisor;
+        int remainder = numerator % divisor;
+
+        // No assumptions about usage — this primitive only guarantees safety.
+    }
+}

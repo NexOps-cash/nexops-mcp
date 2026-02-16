@@ -1,0 +1,48 @@
+// PRIMITIVE: TimeGating
+// PURPOSE: Enforce strict time-based execution control
+// SCOPE: Validates WHEN execution is allowed (does not validate WHO or WHAT)
+// CashScript Version: ^0.13.0
+
+pragma cashscript ^0.13.0;
+
+contract TimeGating(
+    int deadline
+) {
+    // Enforce execution BEFORE deadline
+    function enforceBefore() {
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+        
+        bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+        require(thisBytecode == this.lockingBytecode);
+        
+        bytes32 inputTokenCategory = tx.inputs[this.activeInputIndex].tokenCategory;
+        require(inputTokenCategory == NO_TOKEN);
+        int inputTokenAmount = tx.inputs[this.activeInputIndex].tokenAmount;
+        require(inputTokenAmount == 0);
+        
+        // FENCEPOST: tx.time < deadline
+        // Allows execution when tx.time is strictly less than deadline
+        // Example: deadline=100 allows tx.time=99 but rejects tx.time=100
+        // Use when deadline is the first EXCLUDED timestamp
+        require(tx.time < deadline);
+    }
+    
+    // Enforce execution AT OR AFTER deadline
+    function enforceAfter() {
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+        
+        bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+        require(thisBytecode == this.lockingBytecode);
+        
+        bytes32 inputTokenCategory = tx.inputs[this.activeInputIndex].tokenCategory;
+        require(inputTokenCategory == NO_TOKEN);
+        int inputTokenAmount = tx.inputs[this.activeInputIndex].tokenAmount;
+        require(inputTokenAmount == 0);
+        
+        // FENCEPOST: tx.time >= deadline
+        // Allows execution when tx.time is greater than or equal to deadline
+        // Example: deadline=100 allows tx.time=100 but rejects tx.time=99
+        // Use when deadline is the first INCLUDED timestamp
+        require(tx.time >= deadline);
+    }
+}

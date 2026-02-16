@@ -1,0 +1,68 @@
+// PRIMITIVE: TokenMintControl
+// PURPOSE: Prevent unauthorized CashToken mint authority leakage
+// SCOPE: Strict token category and mint capability validation
+// SECURITY LEVEL: NEXOPS CANONICAL
+// CashScript Version: ^0.13.0
+
+pragma cashscript ^0.13.0;
+
+contract TokenMintControl(
+    bytes32 expectedCategory,
+    bool mintAllowed
+) {
+    function enforce() {
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+
+        // ---------------------------------------------------------------------
+        // 1. ACTIVE INPUT VALIDATION
+        // ---------------------------------------------------------------------
+        bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+        require(thisBytecode == this.lockingBytecode);
+
+        // ---------------------------------------------------------------------
+        // 2. TOKEN CATEGORY VALIDATION
+        // ---------------------------------------------------------------------
+        bytes32 inputCategory = tx.inputs[this.activeInputIndex].tokenCategory;
+        require(inputCategory == expectedCategory);
+
+        // ---------------------------------------------------------------------
+        // 3. MINT CAPABILITY VALIDATION
+        // ---------------------------------------------------------------------
+        // If minting is NOT allowed, ensure no mint capability exists
+        if (!mintAllowed) {
+            require(tx.inputs[this.activeInputIndex].nftCapability == 0x00);
+        }
+
+        // ---------------------------------------------------------------------
+        // 4. OUTPUT BOUNDS
+        // ---------------------------------------------------------------------
+        require(tx.outputs.length >= 1);
+        require(tx.outputs.length <= 2);
+
+        // ---------------------------------------------------------------------
+        // 5. OUTPUT TOKEN VALIDATION
+        // ---------------------------------------------------------------------
+        for (int i = 0; i < tx.outputs.length; i++) {
+
+            // Token category must remain consistent
+            require(tx.outputs[i].tokenCategory == expectedCategory);
+
+            // Prevent unauthorized mint propagation
+            if (!mintAllowed) {
+                require(tx.outputs[i].nftCapability == 0x00);
+            }
+
+            // Optional strict NFT-only enforcement
+            require(tx.outputs[i].tokenAmount == 0);
+        }
+
+        // ---------------------------------------------------------------------
+        // SECURITY INVARIANTS:
+        // ✓ Active input identity enforced
+        // ✓ Token category locked
+        // ✓ Mint capability cannot leak when disabled
+        // ✓ Output count bounded
+        // ✓ Token propagation explicitly validated
+        // ✓ No implicit mint continuation
+    }
+}

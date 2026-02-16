@@ -1,0 +1,76 @@
+pragma cashscript ^0.13.0;
+
+// PRIMITIVE: StateTransition
+// PURPOSE: Enforce deterministic covenant continuation with controlled state mutation
+// SECURITY MODEL:
+// - Prevent arbitrary script substitution
+// - Prevent token introduction
+// - Prevent uncontrolled value manipulation
+// - Enforce single deterministic continuation output
+// BCH-only
+
+contract StateTransition() {
+
+    function transition(int expectedNewValue) {
+
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+
+        // ---------------------------------------------------------------------
+        // 1. INPUT IDENTITY VALIDATION
+        // ---------------------------------------------------------------------
+
+        require(
+            tx.inputs[this.activeInputIndex].lockingBytecode ==
+            this.lockingBytecode
+        );
+
+        require(
+            tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN
+        );
+
+        require(
+            tx.inputs[this.activeInputIndex].tokenAmount == 0
+        );
+
+        int inputValue = tx.inputs[this.activeInputIndex].value;
+
+        // ---------------------------------------------------------------------
+        // 2. OUTPUT STRUCTURE ENFORCEMENT
+        // ---------------------------------------------------------------------
+
+        // Exactly one continuation output
+        require(tx.outputs.length == 1);
+
+        require(
+            tx.outputs[0].lockingBytecode ==
+            this.lockingBytecode
+        );
+
+        require(
+            tx.outputs[0].tokenCategory == NO_TOKEN
+        );
+
+        require(
+            tx.outputs[0].tokenAmount == 0
+        );
+
+        // ---------------------------------------------------------------------
+        // 3. STATE TRANSITION VALIDATION
+        // ---------------------------------------------------------------------
+
+        int newValue = tx.outputs[0].value;
+
+        // Enforce deterministic state equality
+        require(newValue == expectedNewValue);
+
+        // Prevent value inflation
+        require(newValue <= inputValue);
+
+        // SECURITY INVARIANTS:
+        // ✓ No script substitution
+        // ✓ No token introduction
+        // ✓ Single deterministic continuation
+        // ✓ Explicit state equality
+        // ✓ No value inflation
+    }
+}
