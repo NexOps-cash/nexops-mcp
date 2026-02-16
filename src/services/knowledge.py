@@ -24,6 +24,7 @@ class KnowledgeRetriever:
         self.security_rules: List[Dict[str, Any]] = []
         self.categories: Dict[str, Dict[str, str]] = {
             "patterns": {},       # core/patterns
+            "primitives": {},     # core/primitives
             "templates": {},      # core/templates
             "anti_pattern": {},   # core/anti_pattern
             "mistakes": {},       # core/mistakes
