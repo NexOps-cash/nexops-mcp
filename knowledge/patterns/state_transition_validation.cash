@@ -1,0 +1,548 @@
+pragma cashscript ^0.13.0;
+
+// SECURITY PATTERN: Safe State Commitment and Transition
+// PURPOSE: Enforce deterministic state updates via constructor-committed state
+// CATEGORY: Covenant State Safety
+// USE CASE: Any contract that must advance through a strictly controlled
+//           state machine where each transition is cryptographically verified
+
+// PATTERN DESCRIPTION:
+// This pattern demonstrates how to implement safe, deterministic state
+// transitions in a CashScript covenant. State is committed inside the
+// contract's constructor parameters, which means state is embedded in
+// the contract's lockingBytecode. Every valid state transition produces
+// a new UTXO whose lockingBytecode encodes the updated state.
+//
+// The pattern uses CashScript's constructor recreation syntax to enforce
+// that the continuation output is EXACTLY this contract with EXACTLY the
+// new state value — no raw bytes, no builder discretion, no injection.
+//
+// This is the canonical NexOps pattern for stateful covenants.
+
+// STATE COMMITMENT MODEL:
+// State is stored in constructor parameters, not in NFT commitments.
+// When the contract is deployed with StatefulCounter(N), the value N
+// is compiled into the contract's lockingBytecode.
+//
+// Transition: StatefulCounter(N) → StatefulCounter(N+1)
+//
+// The continuation output must have lockingBytecode equal to
+// new StatefulCounter(newCounter).lockingBytecode, which is computed
+// deterministically by the CashScript compiler from the new state value.
+//
+// This means:
+// - State is public (visible in lockingBytecode on-chain)
+// - State is immutable within a UTXO (cannot be changed without spending)
+// - Transitions are verified on-chain (compiler reconstructs bytecode)
+// - No oracle, no off-chain state, no trust required
+
+// TRANSITION INVARIANT:
+// The ONLY valid transition is: newCounter == counter + 1
+// No skip, no decrement, no jump, no arbitrary update.
+// This is enforced by:
+//   require(newCounter == counter + 1)
+// Combined with the continuation enforcement:
+//   require(tx.outputs[0].lockingBytecode == new StatefulCounter(newCounter).lockingBytecode)
+// Together these two lines guarantee that:
+//   output[0] encodes EXACTLY counter + 1, no more, no less
+
+// ECONOMIC MODEL:
+// This is a pure state transition contract.
+// No value enters or exits during a state transition.
+// inputValue == outputValue (exact value preservation)
+// Mining fee is EXTERNAL — must come from another input in the transaction.
+// This is intentional: the covenant's value is not consumed by operations.
+
+// EXPLICIT DESIGN DECISIONS:
+// - State committed in constructor (not NFT commitment field)
+// - Continuation uses new Contract(params).lockingBytecode (no raw bytes)
+// - Exactly 1 output (no sidecars, no optional outputs)
+// - BCH-only (no token handling)
+// - Exact value preservation (no fee deduction from covenant)
+// - Counter must be non-negative (underflow protection)
+// - Increment by exactly 1 (no arbitrary jumps)
+
+// ATTACKS PREVENTED:
+// ✗ State skip attack: Cannot jump counter from N to N+5
+// ✗ State decrement attack: Cannot reverse counter
+// ✗ Raw bytecode injection: No bytes parameters accepted
+// ✗ Covenant escape: Continuation is cryptographically reconstructed
+// ✗ Value drain: Exact value preservation enforced
+// ✗ Token injection: BCH-only on all inputs and outputs
+// ✗ Output explosion: Exactly 1 output enforced
+// ✗ Hardcoded index attack: All reads via this.activeInputIndex
+// ✗ Underflow abuse: Counter non-negativity enforced
+// ✗ Builder substitution: Continuation not caller-controlled
+
+contract StatefulCounter(
+    int counter    // Current counter value — committed in lockingBytecode
+) {
+    // INCREMENT FUNCTION
+    // The only valid spending path for this contract.
+    // Advances counter by exactly 1 and enforces self-continuation.
+    function increment(
+        int newCounter    // Proposed new counter value — must equal counter + 1
+    ) {
+        // TOKEN CATEGORY CONSTANT
+        // Canonical all-zeros representation of "no token"
+        // Any non-zero value represents a CashToken and must be rejected
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 1: INPUT ANCHORING AND TOKEN VALIDATION
+        // ═══════════════════════════════════════════════════════════════
+        // PURPOSE: Confirm own input properties via consensus-safe reference
+        // SEVERITY: Critical
+        //
+        // All reads of own-input properties MUST use this.activeInputIndex.
+        // this.activeInputIndex is set by the consensus engine and always
+        // refers to the input whose script is currently executing.
+        // Never use tx.inputs[0] or any hardcoded literal index.
+        //
+        // NOTE: We do NOT include:
+        // require(tx.inputs[this.activeInputIndex].lockingBytecode == this.lockingBytecode)
+        // That check is tautologically true in BCH script execution —
+        // if this contract is running, that input IS this contract.
+        // It wastes bytecode without adding security.
+
+        // Capture input value before any branching
+        // This read is safe because it anchors to this.activeInputIndex
+        int inputValue = tx.inputs[this.activeInputIndex].value;
+
+        // BCH-only enforcement on active input
+        // Reject any token-carrying input (minting, mutable, immutable, fungible)
+        require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
+        require(tx.inputs[this.activeInputIndex].tokenAmount == 0);
+
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 2: STATE POSITIVITY CONSTRAINT
+        // ═══════════════════════════════════════════════════════════════
+        // PURPOSE: Prevent underflow abuse and establish audit baseline
+        // SEVERITY: High
+        //
+        // Even though the transition rule enforces +1, we add explicit
+        // positivity checks for audit clarity and defense in depth.
+        // These ensure the invariant holds even if transition logic changes.
+
+        // Current counter must be non-negative
+        // Prevents arithmetic confusion from negative initial state
+        require(counter >= 0);
+
+        // New counter must strictly exceed current counter
+        // Combined with == counter + 1, this prevents any decrement
+        // Redundant with the transition invariant but explicit for auditors
+        require(newCounter > counter);
+
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 3: STATE TRANSITION INVARIANT
+        // ═══════════════════════════════════════════════════════════════
+        // PURPOSE: Enforce exactly +1 increment — no other update allowed
+        // SEVERITY: Critical
+        //
+        // This is the core state machine rule.
+        // newCounter == counter + 1 is the ONLY valid transition.
+        // Any other value (skip, decrement, arbitrary) will fail here.
+        //
+        // Combined with Section 5 (continuation enforcement), these two
+        // checks together guarantee that output[0] commits exactly N+1.
+        require(newCounter == counter + 1);
+
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 4: OUTPUT COUNT ENFORCEMENT
+        // ═══════════════════════════════════════════════════════════════
+        // PURPOSE: Eliminate all unvalidated output space
+        // SEVERITY: Critical
+        //
+        // Exactly 1 output is required.
+        // No sidecars. No optional outputs. No change outputs.
+        // With == 1, there is zero unvalidated output space.
+        // Any attempt to add extra outputs fails at consensus.
+        //
+        // FEE MODEL: EXTERNAL
+        // With exactly 1 output and exact value preservation (Section 6),
+        // mining fee CANNOT come from this input.
+        // The transaction builder must include a separate fee-bearing input.
+        // This is intentional: the covenant's value is never consumed.
+        require(tx.outputs.length == 1);
+
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 5: DETERMINISTIC CONTINUATION ENFORCEMENT
+        // ═══════════════════════════════════════════════════════════════
+        // PURPOSE: Cryptographically enforce exact state commitment in output
+        // SEVERITY: Critical
+        //
+        // This is the core of the state commitment pattern.
+        // new StatefulCounter(newCounter).lockingBytecode reconstructs the
+        // exact bytecode that StatefulCounter would have if deployed with
+        // newCounter as its constructor argument.
+        //
+        // This means:
+        // - The output IS this contract (same bytecode template)
+        // - The output commits EXACTLY newCounter (same constructor value)
+        // - The builder has ZERO discretion over the output script
+        // - No raw bytes are accepted (typed constructor only)
+        //
+        // WHY NOT tx.inputs[this.activeInputIndex].lockingBytecode:
+        // Using the input's own lockingBytecode would enforce that the
+        // output is the SAME state as the input (StatefulCounter(N)).
+        // That would prevent any state transition at all.
+        // We need the output to commit newCounter (N+1), not counter (N).
+        // Therefore we MUST use constructor recreation to encode new state.
+        //
+        // WHY NOT A bytes PARAMETER:
+        // A caller-provided bytes parameter for lockingBytecode is a
+        // covenant escape vector — the caller controls the destination.
+        // Constructor recreation is deterministic and caller-independent.
+        require(
+            tx.outputs[0].lockingBytecode ==
+            new StatefulCounter(newCounter).lockingBytecode
+        );
+
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 6: ECONOMIC CONSISTENCY ENFORCEMENT
+        // ═══════════════════════════════════════════════════════════════
+        // PURPOSE: Enforce exact value preservation across state transition
+        // SEVERITY: High
+        //
+        // This is a pure state transition — no value should enter or exit.
+        // output[0].value MUST equal input value exactly.
+        //
+        // This enforces:
+        // - No value drain (gradual theft via tiny under-payments)
+        // - No value inflation (someone adding value to influence state)
+        // - Strict accounting: covenant BCH is fully preserved
+        //
+        // CONSEQUENCE: Mining fee must be paid by an external input.
+        // The transaction builder must include another BCH input for fees.
+        // This is a design choice that prioritizes covenant integrity
+        // over fee convenience.
+        require(tx.outputs[0].value == inputValue);
+
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 7: OUTPUT TOKEN VALIDATION
+        // ═══════════════════════════════════════════════════════════════
+        // PURPOSE: Prevent token injection into continuation output
+        // SEVERITY: Critical
+        //
+        // Even though no tokens entered via input (Section 1),
+        // a malicious builder could construct a transaction that attaches
+        // a minting NFT to output[0]. Without this check, minting authority
+        // could be laundered through the state transition.
+        //
+        // By requiring NO_TOKEN on the output, we guarantee:
+        // - The continuation output is BCH-only (matches input)
+        // - No token authority can enter the covenant chain
+        // - Minting NFTs cannot be attached to state transitions
+        require(tx.outputs[0].tokenCategory == NO_TOKEN);
+        require(tx.outputs[0].tokenAmount == 0);
+
+        // ═══════════════════════════════════════════════════════════════
+        // VALIDATION COMPLETE
+        // ═══════════════════════════════════════════════════════════════
+        // At this point, we have guaranteed:
+        // ✓ All input reads anchored to this.activeInputIndex
+        // ✓ Active input is BCH-only (no tokens)
+        // ✓ Current counter is non-negative
+        // ✓ New counter strictly exceeds current counter
+        // ✓ Transition is exactly counter + 1 (no skip, no decrement)
+        // ✓ Exactly one output exists (no hidden output space)
+        // ✓ Output commits EXACTLY newCounter via constructor recreation
+        // ✓ Output value equals input value (exact preservation)
+        // ✓ Output is BCH-only (no token injection)
+        // ✓ No raw bytes accepted anywhere
+        // ✓ Mining fee is paid externally (external fee model)
+        //
+        // RESULT: StatefulCounter(counter) → StatefulCounter(counter + 1)
+        // The state machine has advanced by exactly one step.
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// STATE COMMITMENT MODEL — DETAILED
+// ═══════════════════════════════════════════════════════════════════════
+
+// How state is committed in CashScript constructor parameters:
+//
+// Deployment:
+//   const contract = new StatefulCounter(0);
+//   → lockingBytecode encodes counter = 0
+//   → This UTXO IS the state "counter = 0"
+//
+// Transition 1: counter = 0 → counter = 1
+//   Spend StatefulCounter(0) UTXO
+//   Call increment(1)
+//   Output: new StatefulCounter(1).lockingBytecode
+//   → New UTXO IS the state "counter = 1"
+//
+// Transition 2: counter = 1 → counter = 2
+//   Spend StatefulCounter(1) UTXO
+//   Call increment(2)
+//   Output: new StatefulCounter(2).lockingBytecode
+//   → New UTXO IS the state "counter = 2"
+//
+// State history is verifiable on-chain by reading the lockingBytecodes
+// of all UTXOs in the covenant's spending chain.
+//
+// State is NEVER stored off-chain. State is NEVER in NFT commitments.
+// State is ALWAYS in constructor parameters = ALWAYS in lockingBytecode.
+
+// ═══════════════════════════════════════════════════════════════════════
+// CONSTRUCTOR RECREATION PATTERN — CANONICAL UNDERSTANDING
+// ═══════════════════════════════════════════════════════════════════════
+
+// CashScript supports:
+//   new ContractName(param1, param2, ...).lockingBytecode
+//
+// This computes the lockingBytecode that ContractName would have
+// if deployed with the given parameters.
+//
+// This is NOT a deployment — it is a bytecode derivation.
+// The result is a bytes value representing the compiled script.
+//
+// SECURITY PROPERTY:
+// The derivation is deterministic and compiler-enforced.
+// The caller cannot influence the result except through the parameters.
+// If parameters are validated (as newCounter is in Section 3),
+// then the resulting lockingBytecode is also validated.
+//
+// CONTRAST WITH FORBIDDEN PATTERN:
+// ❌ require(tx.outputs[0].lockingBytecode == callerProvidedBytes)
+//    Caller controls destination — covenant escape vector
+//
+// ✅ require(tx.outputs[0].lockingBytecode == new StatefulCounter(newCounter).lockingBytecode)
+//    Compiler derives destination — caller controls only the state value
+//    State value is independently validated (Section 3)
+
+// ═══════════════════════════════════════════════════════════════════════
+// SEVERITY CLASSIFICATION
+// ═══════════════════════════════════════════════════════════════════════
+
+// SEVERITY: Critical (State Skip or Arbitrary Update)
+// - Missing or weakened transition invariant (newCounter == counter + 1)
+// - Consequence: Counter can jump arbitrarily, state machine broken
+// - Detection: AST-level — transition require() weakened or absent
+// - Prevention: Mandatory exact equality transition check
+
+// SEVERITY: Critical (Wrong Continuation Commitment)
+// - Continuation uses tx.inputs[activeInputIndex].lockingBytecode (same state)
+//   OR uses caller-provided bytes parameter
+// - Consequence: State never advances OR covenant escape
+// - Detection: AST-level — continuation not using constructor recreation
+// - Prevention: new StatefulCounter(newCounter).lockingBytecode only
+
+// SEVERITY: Critical (Output Count Violation)
+// - Missing tx.outputs.length == 1 or weakened to >= 1
+// - Consequence: Hidden outputs, fee extraction, token injection
+// - Detection: AST-level — outputs.length check absent or weak
+// - Prevention: Exact count enforcement
+
+// SEVERITY: Critical (Token Injection)
+// - Missing tokenCategory == NO_TOKEN on output
+// - Consequence: Minting authority laundered through state transition
+// - Detection: AST-level — output token check absent
+// - Prevention: Mandatory NO_TOKEN on all outputs
+
+// SEVERITY: High (Value Drift)
+// - Missing exact value preservation check
+// - Consequence: Gradual value drain, covenant balance leaks
+// - Detection: AST-level — output value == input value check absent
+// - Prevention: require(tx.outputs[0].value == inputValue)
+
+// SEVERITY: High (Hardcoded Input Index)
+// - Using tx.inputs[0] instead of tx.inputs[this.activeInputIndex]
+// - Consequence: Wrong input read in multi-input transactions
+// - Detection: AST-level — literal index in input reads
+// - Prevention: Always use this.activeInputIndex
+
+// SEVERITY: High (Counter Underflow)
+// - Missing counter >= 0 check
+// - Consequence: Negative counter arithmetic confusion
+// - Detection: AST-level — counter >= 0 absent
+// - Prevention: Explicit non-negativity enforcement
+
+// SEVERITY: Medium (Redundant Self-Check)
+// - Including require(tx.inputs[activeInputIndex].lockingBytecode == this.lockingBytecode)
+// - Consequence: Wasted bytecode (tautologically true in BCH)
+// - Detection: AST-level — lockingBytecode self-equality pattern
+// - NexOps action: WARNING (unnecessary) — remove from generated code
+
+// ═══════════════════════════════════════════════════════════════════════
+// AST-LEVEL INVARIANTS FOR MCP
+// ═══════════════════════════════════════════════════════════════════════
+
+// Invariant 1: INPUT ANCHORING
+// All MemberExpression nodes tx.inputs[X].* where X is this contract's input
+// must use X == this.activeInputIndex.
+// Violation: X is a numeric literal (0, 1, 2...)
+// Severity: CRITICAL
+
+// Invariant 2: BCH-ONLY INPUT
+// For every function, there must exist:
+// - require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN)
+// - require(tx.inputs[this.activeInputIndex].tokenAmount == 0)
+// Both must dominate all state logic.
+// Severity: CRITICAL
+
+// Invariant 3: EXACT OUTPUT COUNT
+// require(tx.outputs.length == 1) must exist in every function.
+// require(tx.outputs.length >= 1) without == 1 is insufficient.
+// Severity: CRITICAL
+
+// Invariant 4: TRANSITION RULE
+// For increment function:
+// require(newCounter == counter + 1) must exist.
+// Any weaker form (>=, >, !=) is a violation.
+// Severity: CRITICAL
+
+// Invariant 5: CONSTRUCTOR RECREATION CONTINUATION
+// tx.outputs[0].lockingBytecode must be compared to:
+// new StatefulCounter(newCounter).lockingBytecode
+// Not to this.lockingBytecode (same state — no transition)
+// Not to a bytes parameter (caller escape)
+// Severity: CRITICAL
+
+// Invariant 6: VALUE PRESERVATION
+// require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value)
+// must exist. Any < or <= is insufficient.
+// Severity: HIGH
+
+// Invariant 7: OUTPUT TOKEN REJECTION
+// For every output index i in [0..N-1]:
+// require(tx.outputs[i].tokenCategory == NO_TOKEN)
+// require(tx.outputs[i].tokenAmount == 0)
+// Severity: CRITICAL
+
+// Invariant 8: NON-NEGATIVITY
+// require(counter >= 0) must exist before transition logic.
+// Severity: HIGH
+
+// Invariant 9: NO RAW BYTES PARAMETERS
+// No function parameter of type bytes may be used in:
+// require(tx.outputs[N].lockingBytecode == bytesParam)
+// All lockingBytecode comparisons must use typed constructors.
+// Severity: CRITICAL
+
+// Invariant 10: NO REDUNDANT SELF-CHECK
+// require(tx.inputs[this.activeInputIndex].lockingBytecode == this.lockingBytecode)
+// must NOT appear (tautological, wastes bytecode).
+// NexOps generation agents must not emit this.
+// Severity: WARNING
+
+// ═══════════════════════════════════════════════════════════════════════
+// NEXOPS ENFORCEMENT CHECKLIST
+// ═══════════════════════════════════════════════════════════════════════
+
+// NexOps MUST verify:
+// [ ] All input reads use this.activeInputIndex (no literal indices)
+// [ ] No redundant lockingBytecode self-equality check present
+// [ ] tokenCategory == NO_TOKEN on active input
+// [ ] tokenAmount == 0 on active input
+// [ ] counter >= 0 check present
+// [ ] newCounter > counter check present
+// [ ] newCounter == counter + 1 check present
+// [ ] tx.outputs.length == 1 (not >= 1)
+// [ ] Continuation uses new StatefulCounter(newCounter).lockingBytecode
+// [ ] Continuation does NOT use this.lockingBytecode or bytes parameter
+// [ ] tx.outputs[0].value == inputValue (exact equality)
+// [ ] tx.outputs[0].tokenCategory == NO_TOKEN
+// [ ] tx.outputs[0].tokenAmount == 0
+// [ ] No bytes or raw lockingBytecode parameters in any function
+// [ ] NO_TOKEN constant equals 0x0000...0000 (32 zero bytes)
+
+// NexOps MUST flag:
+// - Hardcoded input index: CRITICAL
+// - Weakened transition rule (!= counter + 1): CRITICAL
+// - Continuation uses input lockingBytecode (same state): CRITICAL
+// - Continuation uses bytes parameter: CRITICAL
+// - Missing output tokenCategory check: CRITICAL
+// - Missing tx.outputs.length == 1: CRITICAL
+// - Missing value preservation: HIGH
+// - Missing counter >= 0: HIGH
+// - Redundant lockingBytecode self-check: WARNING
+// - Incorrect NO_TOKEN value: ERROR
+
+// NexOps generation agents MUST NOT emit:
+// - require(tx.inputs[this.activeInputIndex].lockingBytecode == this.lockingBytecode)
+// - tx.inputs[0].* for own-input reads
+// - bytes parameters for lockingBytecode destinations
+
+// ═══════════════════════════════════════════════════════════════════════
+// TESTING CHECKLIST
+// ═══════════════════════════════════════════════════════════════════════
+
+// State transition:
+// [ ] increment(counter + 1) — valid transition (should succeed)
+// [ ] increment(counter + 2) — skip forward (should fail)
+// [ ] increment(counter - 1) — decrement (should fail)
+// [ ] increment(counter) — no-op (should fail)
+// [ ] increment(0) with counter = 5 — wrong value (should fail)
+// [ ] increment(counter + 1) with counter = -1 — negative counter (should fail)
+
+// Continuation enforcement:
+// [ ] Output lockingBytecode == new StatefulCounter(newCounter) (should succeed)
+// [ ] Output lockingBytecode == new StatefulCounter(counter) (same state — should fail)
+// [ ] Output lockingBytecode == new StatefulCounter(counter + 2) (skip — should fail)
+// [ ] Output lockingBytecode == arbitrary script (should fail)
+
+// Value preservation:
+// [ ] output.value == inputValue (should succeed)
+// [ ] output.value < inputValue (should fail)
+// [ ] output.value > inputValue (should fail — impossible, but test)
+
+// Output count:
+// [ ] 0 outputs (should fail)
+// [ ] 1 output — valid (should succeed)
+// [ ] 2 outputs (should fail)
+
+// Token rejection:
+// [ ] Input tokenCategory != NO_TOKEN (should fail)
+// [ ] Input tokenAmount > 0 (should fail)
+// [ ] Output tokenCategory != NO_TOKEN (should fail)
+// [ ] Output tokenAmount > 0 (should fail)
+
+// Multi-input position:
+// [ ] Contract at input index 0 (should succeed)
+// [ ] Contract at input index 1 with fee input at index 0 (should succeed)
+// [ ] Verify value read always comes from contract input, not fee input
+
+// ═══════════════════════════════════════════════════════════════════════
+// EXTENDING THIS PATTERN
+// ═══════════════════════════════════════════════════════════════════════
+
+// To extend this pattern for other state machines:
+//
+// 1. Replace int counter with your state type(s)
+//    - Multiple constructor parameters are allowed
+//    - All parameters are committed in lockingBytecode
+//
+// 2. Replace the transition rule (newCounter == counter + 1)
+//    with your state machine's transition predicate
+//    - Ensure the predicate is fully deterministic
+//    - Ensure all invalid transitions are explicitly rejected
+//
+// 3. Update the constructor recreation call:
+//    new YourContract(newParam1, newParam2).lockingBytecode
+//    - Include ALL constructor parameters
+//    - Parameters that don't change are passed as-is from constructor
+//    - Parameters that change are passed as the new validated values
+//
+// 4. Keep all other security checks unchanged:
+//    - Input anchoring (this.activeInputIndex)
+//    - BCH-only enforcement (NO_TOKEN)
+//    - Output count (== 1 unless pattern specifically requires more)
+//    - Value preservation (unless value should change)
+//    - Output token rejection
+//
+// Example: Two-variable state machine
+// contract TwoStateVars(int alpha, int beta) {
+//     function transition(int newAlpha, int newBeta) {
+//         // ... security checks ...
+//         require(newAlpha == alpha + 1);     // alpha increments
+//         require(newBeta == alpha * newAlpha); // beta is derived
+//         require(
+//             tx.outputs[0].lockingBytecode ==
+//             new TwoStateVars(newAlpha, newBeta).lockingBytecode
+//         );
+//         // ... value and token checks ...
+//     }
+// }
