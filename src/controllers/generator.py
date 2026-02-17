@@ -23,92 +23,42 @@ class GenerationController:
 
     async def generate(self, req: MCPRequest) -> Dict[str, Any]:
         """
-        Full 3-phase generation pipeline.
-
-        1. Phase 1 — LLM produces ContractIR skeleton
-        2. Phase 2 — LLM fills business logic → .cash code
-        3. Phase 3 — Deterministic toll gate validates code
-        4. Retry loop — If P3 fails, re-run P2 with violation context (max 3)
-        5. Store valid result in session
-
-        The user NEVER sees rejected intermediate outputs.
+        Guarded Synthesis Pipeline Orchestration.
+        Delegates to GuardedPipelineEngine for the 4-stage loop.
         """
         intent = req.payload.get("user_request", "")
         if not intent:
             return _error(req.request_id, "MISSING_INTENT", "payload.user_request is required")
 
         session_id = req.payload.get("session_id")
-        security_level = "high"
-        if req.context:
-            security_level = req.context.get("security_level", "high")
+        security_level = req.context.get("security_level", "high") if req.context else "high"
 
         session = self.session_mgr.get_or_create(session_id)
+        
+        # Instantiate the Guarded Engine
+        from src.services.pipeline_engine import get_guarded_pipeline_engine
+        engine = get_guarded_pipeline_engine()
 
-        # ── Phase 1: Skeleton ──────────────────────────────────────
-        try:
-            ir = await Phase1.run(intent, security_level)
-        except Exception as e:
-            logger.error(f"Phase 1 failed: {e}")
-            return _error(req.request_id, "PHASE1_FAILED", str(e))
+        # Run the Guarded Loop
+        result = await engine.generate_guarded(intent, security_level)
 
-        # ── Phase 2 + Phase 3 with retry loop ─────────────────────
-        code = ""
-        toll_gate: TollGateResult = TollGateResult(passed=False)
-        cumulative_violations: List[ViolationDetail] = []
+        if result["type"] == "error":
+            return {
+                "request_id": req.request_id,
+                "type": "error",
+                "error": result["error"]
+            }
 
-        for attempt in range(MAX_RETRIES):
-            # Phase 2: Logic Fill
-            try:
-                # Lower temperature on retries to encourage deterministic compliance
-                temperature = 0.7 if attempt == 0 else (0.4 if attempt == 1 else 0.1)
-                
-                code = await Phase2.run(
-                    ir=ir,
-                    violations=cumulative_violations,
-                    retry_count=attempt,
-                    temperature=temperature
-                )
-            except Exception as e:
-                logger.error(f"Phase 2 failed (attempt {attempt + 1}): {e}")
-                if attempt == MAX_RETRIES - 1:
-                    return _error(req.request_id, "PHASE2_FAILED", str(e))
-                continue
-
-            # Phase 3: Toll Gate
-            toll_gate = Phase3.validate(code)
-
-            if toll_gate.passed:
-                logger.info(f"Toll gate PASSED on attempt {attempt + 1}")
-                break
-
-            # Toll gate failed — prepare for retry
-            logger.warning(
-                f"Toll gate FAILED (attempt {attempt + 1}/{MAX_RETRIES}): "
-                f"{len(toll_gate.violations)} violations"
-            )
-            
-            # ACCUMULATE violations so LLM doesn't forget previous fixes
-            for v in toll_gate.violations:
-                if not any(cv.rule == v.rule and cv.location == v.location for cv in cumulative_violations):
-                    cumulative_violations.append(v)
-
-        # ── Final result ──────────────────────────────────────────
-        if not toll_gate.passed:
-            # All retries exhausted — return structured error
-            return _error(
-                req.request_id,
-                "TOLL_GATE_FAILED",
-                f"Contract failed validation after {MAX_RETRIES} attempts",
-                violations=[v.model_dump() for v in toll_gate.violations],
-            )
-
-        # Store in session
+        data = result["data"]
+        
+        # Store in session (reconstruct dummy IR for backward compatibility if needed)
+        # In a real system, we'd refactor session storage to be more flexible
         self.session_mgr.store_turn(
             session_id=session.session_id,
             intent=intent,
-            contract_ir=ir,
-            final_code=code,
-            toll_gate_result=toll_gate,
+            contract_ir=ContractIR(), # Simplified for now
+            final_code=data["code"],
+            toll_gate_result=TollGateResult(**data["toll_gate"]),
         )
 
         return {
@@ -116,13 +66,12 @@ class GenerationController:
             "type": "success",
             "data": {
                 "stage": "complete",
-                "code": code,
-                "contract_name": ir.contract_name,
+                "code": data["code"],
+                "contract_name": data["contract_name"],
                 "session_id": session.session_id,
-                "toll_gate": {
-                    "passed": True,
-                    "structural_score": toll_gate.structural_score,
-                },
+                "toll_gate": data["toll_gate"],
+                "sanity_check": data.get("sanity_check"),
+                "intent_model": data.get("intent_model")
             },
         }
 

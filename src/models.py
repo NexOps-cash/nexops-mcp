@@ -19,6 +19,17 @@ class MCPResponse(BaseModel):
     error: Optional[Dict[str, Any]] = None
 
 
+# ─── Intent Model (Phase 1 Output) ──────────────────────────────────
+
+class IntentModel(BaseModel):
+    contract_type: str = "generic"
+    features: List[str] = Field(default_factory=list)
+    signers: List[str] = Field(default_factory=list)
+    threshold: Optional[int] = None
+    timeout_days: Optional[int] = None
+    token_id: Optional[str] = None
+    purpose: str = ""
+
 # ─── Contract IR (Intermediate Representation) ───────────────────────
 
 class ParamIR(BaseModel):
@@ -45,10 +56,11 @@ class StateIR(BaseModel):
 
 class ContractMetadata(BaseModel):
     intent: str = ""
-    intent_tags: List[str] = Field(default_factory=list)
+    intent_model: Optional[IntentModel] = None
     security_level: str = "high"
     generation_phase: int = 0
     retry_count: int = 0
+    compile_fix_count: int = 0
     kb_categories_used: List[str] = Field(default_factory=list)
     timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
 

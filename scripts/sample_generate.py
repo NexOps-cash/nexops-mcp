@@ -35,11 +35,11 @@ async def main():
     
     # 2. Check for API keys
     if not os.getenv("OPENROUTER_API_KEY") and not os.getenv("GROQ_API_KEY"):
-        print("❌ ERROR: No API keys found.")
+        print("[FAIL] ERROR: No API keys found.")
         print("Please set OPENROUTER_API_KEY or GROQ_API_KEY in your environment.")
         return
 
-    print(f"\n🚀 Starting Generation Pipeline for:")
+    print(f"\n[START] Starting Generation Pipeline for:")
     print(f"   Intent: \"{intent}\"")
     print("-" * 60)
 
@@ -89,7 +89,7 @@ async def main():
 
     except Exception as e:
         logger.exception("Fatal error during sample generation")
-        print(f"\n💥 CRASH: {e}")
+        print(f"\n[CRASH] CRASH: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())

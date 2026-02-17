@@ -14,6 +14,7 @@ from src.models import (
     ContractIR,
     TollGateResult,
     ViolationDetail,
+    IntentModel,
 )
 from src.services.llm.factory import LLMFactory
 from src.services.knowledge import get_knowledge_retriever
@@ -28,27 +29,23 @@ MAX_RETRIES = 3
 # ─── Phase 1: Skeleton Generator ─────────────────────────────────────
 
 class Phase1:
-    """Generate structural skeleton from user intent. Returns ContractIR."""
+    """Analyze user intent into a structured IntentModel. Returns ContractIR."""
 
     @staticmethod
     async def run(intent: str, security_level: str = "high") -> ContractIR:
-        """Call LLM to produce a contract skeleton as ContractIR."""
+        """Call LLM to parse raw text into an IntentModel."""
 
-        kb = get_knowledge_retriever()
-        # Inject only template skeletons (structural, no logic)
-        template_context = kb.get_category_content("templates")
-        # Keep it lean — strip to first 80 lines per template
-        skeleton_hints = _truncate_kb_context(template_context, max_lines=80)
-
-        prompt = _build_phase1_prompt(intent, security_level, skeleton_hints)
+        prompt = _build_phase1_prompt(intent, security_level)
 
         llm = LLMFactory.get_provider("phase1")
         raw_response = await llm.complete(prompt)
 
-        # Parse LLM JSON response into ContractIR
+        # Parse LLM JSON response into IntentModel and wrap in ContractIR
         ir = _parse_phase1_response(raw_response, intent, security_level)
         ir.metadata.generation_phase = 1
-        logger.info(f"Phase 1 complete: contract={ir.contract_name}, functions={len(ir.functions)}")
+        
+        tags = ir.metadata.intent_model.features if ir.metadata.intent_model else []
+        logger.info(f"Phase 1 complete: type={ir.metadata.intent_model.contract_type if ir.metadata.intent_model else 'unknown'}, tags={tags}")
         return ir
 
 
@@ -62,9 +59,9 @@ class Phase2:
         ir: ContractIR,
         violations: Optional[List[ViolationDetail]] = None,
         retry_count: int = 0,
-        temperature: float = 0.7,
+        temperature: float = 0.3, # Lower temperature for deterministic synthesis
     ) -> str:
-        """Take ContractIR (and optional prior violations) and produce .cash code."""
+        """Stage 2A: Generate .cash code from structured IntentModel."""
 
         kb = get_knowledge_retriever()
         enforcer = get_anti_pattern_enforcer()
@@ -77,17 +74,16 @@ class Phase2:
         violation_context = ""
         if violations and retry_count > 0:
             violation_context = _build_violation_context(violations, retry_count, kb)
-
-        skeleton_code = _ir_to_skeleton_code(ir)
         
-        # Activate Rules based on intent tags
+        # Activate Rules based on intent model features
         rule_engine = get_rule_engine()
-        active_rules = rule_engine.get_rules_for_tags(ir.metadata.intent_tags)
+        intent_model = ir.metadata.intent_model
+        tags = intent_model.features if intent_model else []
+        active_rules = rule_engine.get_rules_for_tags(tags)
         rule_context = rule_engine.format_rules_for_prompt(active_rules)
 
         prompt = _build_phase2_prompt(
-            skeleton_code=skeleton_code,
-            intent=ir.metadata.intent,
+            intent_model=intent_model,
             primitives_context=_truncate_kb_context(primitives_context, max_lines=200),
             constraint_summary=constraint_summary,
             violation_context=violation_context,
@@ -101,7 +97,7 @@ class Phase2:
         code = _extract_cash_code(raw_response)
         ir.metadata.generation_phase = 2
         ir.metadata.retry_count = retry_count
-        logger.info(f"Phase 2 complete: {len(code)} chars, retry={retry_count}, temp={temperature}")
+        logger.info(f"Phase 2A complete: {len(code)} chars, retry={retry_count}, temp={temperature}")
         return code
 
 
@@ -159,134 +155,84 @@ class Phase3:
 # ═══════════════════════════════════════════════════════════════════════
 
 
-def _build_phase1_prompt(intent: str, security_level: str, skeleton_hints: str) -> str:
-    """Build the Phase 1 LLM prompt."""
-    return f"""You are "The Architect", a specialized CashScript contract skeleton generator.
-
-Your ONLY goal is to generate the STRUCTURAL SKELETON of a CashScript contract.
+def _build_phase1_prompt(intent: str, security_level: str) -> str:
+    """Build the Phase 1 Intent Parsing prompt."""
+    return f"""You are the "NexOps Intent Parser". Your goal is to convert raw user requests into a structured machine-readable model.
 
 Rules:
-1. Define the `contract` block with correct constructor parameters.
-2. Define all necessary public `function` signatures with correct parameters (including `sig s` and `pubkey pk` where needed).
-3. Inside every function body, place exactly ONE comment: `// TODO: Implement logic`
-4. DO NOT write any `require(...)` statements.
-5. DO NOT write business logic, arithmetic, or covenant continuation.
-6. DO NOT use Solidity syntax (no msg.sender, no mapping, no emit, no modifier).
-7. Use CashScript ^0.10.0 syntax only.
-8. Include `pragma cashscript ^0.10.0;` at the top.
+1. Identify the high-level `contract_type` (e.g., escrow, multisig, vesting, swap).
+2. Extract specific `features` from this set: [multisig, timelock, stateful, spending, tokens, minting, burn].
+3. Identify `signers` (names or roles mentioned).
+4. Extract `threshold` if multisig is implied.
+5. Extract `timeout_days` if a temporal constraint is mentioned.
+6. Summarize the technical `purpose` in one sentence.
 
-Security Level: {security_level}
-
-Identify relevant Intent Tags from this set: [multisig, escrow, timelock, stateful, spending, tokens].
-
-Reference Templates (for structural patterns only):
-{skeleton_hints}
-
-User Request: {intent}
+User Request: "{intent}"
 
 Output ONLY valid JSON:
 {{
-  "contract_name": "...",
-  "pragma": "cashscript ^0.10.0",
-  "constructor_params": [
-    {{"name": "...", "type": "...", "purpose": "..."}}
-  ],
-  "functions": [
-    {{
-      "name": "...",
-      "params": [{{"name": "...", "type": "..."}}],
-      "visibility": "public",
-      "structural_guards": [],
-      "business_logic": [],
-      "primitives_used": []
-    }}
-  ],
-  "state": {{
-    "is_stateful": false,
-    "state_fields": [],
-    "continuation_required": false
-  }},
-  "metadata": {{
-    "intent_tags": ["multisig", "..."]
-  }}
+  "contract_type": "...",
+  "features": ["...", "..."],
+  "signers": ["...", "..."],
+  "threshold": N,
+  "timeout_days": N,
+  "purpose": "..."
 }}
 
 Return ONLY the JSON object. No markdown fences. No explanation."""
 
 
 def _build_phase2_prompt(
-    skeleton_code: str,
-    intent: str,
+    intent_model: Optional[IntentModel],
     primitives_context: str,
     constraint_summary: str,
     violation_context: str,
     rule_context: str = "",
 ) -> str:
-    """Build the Phase 2 LLM prompt with strict structural security enforcement."""
+    """Stage 2A: Build Implementation Prompt from IntentModel."""
+    
+    intent_json = intent_model.model_dump_json(indent=2) if intent_model else "{}"
     
     violation_section = ""
     if violation_context:
         violation_section = f"""
 ### !!! CRITICAL: FIX PREVIOUS VIOLATIONS !!!
-Your previous attempt failed validation. You MUST implement these exact structural fixes:
 {violation_context}
 """
 
     return f"""You are a "Secure CashScript Implementation Engine". 
-Your goal is to fill the provided skeleton with logic that passes a rigorous structural safety gate (Phase 3).
+Your goal is to generate complete, compilable CashScript code from the provided Intent Model.
 
 {violation_section}
 
 {rule_context}
 
-### EXPLICIT STRUCTURAL PROTOCOLS
-
-#### 1. MULTISIG SAFETY (Threshold = N-of-M)
-- **Distinct Pubkeys**: Use `require(pk1 != pk2);` for every pair of pubkeys in the constructor or setup.
-- **Unique Signatures**: Every public key MUST have its own unique signature variable (e.g., `aliceSig`, `bobSig`).
-- **NO REUSE**: A single signature variable CANNOT be used for multiple checkSig calls.
-  *BAD*: `checkSig(s1, p1) && checkSig(s1, p2)` 
-  *GOOD*: `checkSig(aliceSig, alice) && checkSig(bobSig, bob)`
-
-#### 2. COVENANT PROPERTY ACCESS ORDERING
-- **Validation-First**: Before accessing `tx.outputs[N].value`, `tokenCategory`, or `tokenAmount`, you MUST validate the `lockingBytecode` for that index.
-  *MANDATORY PATTERN*: 
-  ```cashscript
-  require(tx.outputs[0].lockingBytecode == expected_script); // 1. Validate destination
-  require(tx.outputs[0].value == 1000);                      // 2. Safe to access value
-  ```
-
-#### 3. OUTPUT ANCHORING
-- **Strict Limits**: Every spending function MUST have `require(tx.outputs.length == 1);` OR validate the value of every output produced.
-- **Clean Outputs**: For change or payout outputs, explicitly validate:
-  `require(tx.outputs[N].tokenCategory == NO_TOKEN);`
-  `require(tx.outputs[N].tokenAmount == 0);`
-
-#### 4. TEMPORAL ACCURACY
-- **Secure Operators**: ALWAYS use `tx.time >= deadline` for "at or after" checks.
-- **Forbidden**: Never use `>` or `block.timestamp`.
-
-#### 5. GENERAL SAFETY
-- **Input Anchoring**: Always include `require(this.activeInputIndex == 0);` (or correct index).
-- **No Fee Logic**: Never calculate fees. Use hardcoded or formula-based output values.
-- **Type Safety**: Do not compare `lockingBytecode` (bytes) to `bytes32` constants (e.g. NO_TOKEN).
-
-### CONTEXT
-- **Intent**: {intent}
-- **Constraints**: {constraint_summary}
-- **Primitives**: {primitives_context}
-
-### SKELETON (DO NOT EDIT NAMES/PARAMS)
-```cashscript
-{skeleton_code}
+### INTENT MODEL (SOLE SOURCE OF TRUTH)
+```json
+{intent_json}
 ```
 
-Implement the function bodies now. Return ONLY the complete, compilable `.cash` code. No explanation. No markdown fences."""
+### EXPLICIT STRUCTURAL PROTOCOLS
+1. ALWAYS use `pragma cashscript ^0.10.0;`
+2. ALWAYS validate `this.activeInputIndex == 0;`
+3. ALWAYS validate `tx.outputs.length` matching required payouts/change.
+4. Access property ordering: validate `lockingBytecode` BEFORE `value` or tokens.
+5. NO HALLUCINATIONS: Do not use msg.sender, mapping, emit, or .tokenCategory unless intent is token-centric.
+
+### KB PRIMITIVES (REFERENCE)
+{primitives_context}
+
+### ANTI-PATTERN CONSTRAINTS
+{constraint_summary}
+
+Implement the contract now. Return ONLY the complete, compilable `.cash` code. No explanation. No markdown fences."""
 
 
 def _parse_phase1_response(raw: str, intent: str, security_level: str) -> ContractIR:
-    """Parse Phase 1 JSON into ContractIR."""
+    """Parse Phase 1 JSON into ContractIR containing an IntentModel."""
     try:
+        from src.models import IntentModel, ContractMetadata
+        
         # Clean potential markdown from JSON
         json_str = raw.strip()
         if json_str.startswith('```json'):
@@ -295,22 +241,23 @@ def _parse_phase1_response(raw: str, intent: str, security_level: str) -> Contra
             json_str = json_str[:-3].strip()
             
         data = json.loads(json_str)
-        # Ensure metadata is populated
-        metadata = data.get("metadata", {})
-        data["metadata"] = {
-            "intent": intent, 
-            "intent_tags": metadata.get("intent_tags", []),
-            "security_level": security_level,
-            "generation_phase": 1
-        }
-        return ContractIR(**data)
+        model = IntentModel(**data)
+        
+        ir = ContractIR(
+            contract_name="GeneratedContract", # Placeholder, Phase 2 might refine
+            constructor_params=[], # Will be generated in Phase 2
+            functions=[],          # Will be generated in Phase 2
+            metadata=ContractMetadata(
+                intent=intent,
+                intent_model=model,
+                security_level=security_level,
+                generation_phase=1
+            )
+        )
+        return ir
     except Exception as e:
         logger.error(f"Failed to parse Phase 1 response: {e}\nRaw: {raw}")
-        # Return a minimal IR as fallback
         return ContractIR(
-            contract_name="ErrorFallback",
-            constructor_params=[],
-            functions=[],
             metadata={"intent": intent, "security_level": security_level, "generation_phase": 1}
         )
 
