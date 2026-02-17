@@ -1,102 +1,59 @@
-// ============================================================================
-// PRIMITIVE: CovenantEnforcement (NexOps Canonical)
-// PURPOSE: Enforce strict covenant continuation safety
-// SCOPE: Prevent state substitution and covenant bypass
-// NETWORK: Bitcoin Cash (BCH)
-// TOKENS: Explicitly rejected (BCH-only)
-// SECURITY LEVEL: Production-Grade Primitive
-// ============================================================================
-
 pragma cashscript ^0.13.0;
 
 contract CovenantEnforcement() {
 
     function enforce(int expectedContinuationValue) {
-
-        // --------------------------------------------------------------------
-        // CONSTANTS
-        // --------------------------------------------------------------------
         bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
 
-        // --------------------------------------------------------------------
-        // 1. INPUT IDENTITY VALIDATION
-        // Ensures execution originates from THIS contract instance
-        // Prevents input substitution attacks
-        // --------------------------------------------------------------------
-        bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
+        // 1. IDENTITY & POSITION VALIDATION
+        require(this.activeInputIndex == 0);
+        bytes thisBytecode = tx.inputs[0].lockingBytecode;
         require(thisBytecode == this.lockingBytecode);
 
-        // --------------------------------------------------------------------
-        // 2. INPUT TOKEN REJECTION (BCH-only enforcement)
-        // Defensive: Reject any token presence
-        // --------------------------------------------------------------------
-        require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
-        require(tx.inputs[this.activeInputIndex].tokenAmount == 0);
+        // Enforce input is BCH-only
+        require(tx.inputs[0].tokenCategory == NO_TOKEN);
+        require(tx.inputs[0].tokenAmount == 0);
 
-        // Capture input value explicitly
-        int inputValue = tx.inputs[this.activeInputIndex].value;
+        int inputValue = tx.inputs[0].value;
 
-        // --------------------------------------------------------------------
-        // 3. OUTPUT COUNT BOUNDING
-        // Prevent output explosion / hidden output injection
-        // Exactly 1 or 2 outputs allowed
-        // --------------------------------------------------------------------
+        // 2. OUTPUT COUNT BOUNDING
         require(tx.outputs.length >= 1);
         require(tx.outputs.length <= 2);
 
-        // --------------------------------------------------------------------
-        // 4. CONTINUATION SEARCH
-        // Require EXACTLY ONE continuation output
-        // Prevent duplicate covenant recreation
-        // --------------------------------------------------------------------
+        // 3. CONTINUATION SEARCH & PROPERTY ACCESS
         bool continuationFound = false;
 
         // ---- OUTPUT 0 VALIDATION ----
-        require(tx.outputs[0].tokenCategory == NO_TOKEN);
-        require(tx.outputs[0].tokenAmount == 0);
-
+        // ANCHOR: Validate lockingBytecode FIRST before any other property!
         if (tx.outputs[0].lockingBytecode == thisBytecode) {
             continuationFound = true;
-
-            // Enforce deterministic continuation value
+            
+            // Now safe to access other properties
+            require(tx.outputs[0].tokenCategory == NO_TOKEN);
+            require(tx.outputs[0].tokenAmount == 0);
             require(tx.outputs[0].value == expectedContinuationValue);
-
-            // Optional invariant:
-            // For strict state-preserving covenant, enforce equality:
-            // require(tx.outputs[0].value == inputValue);
+        } else {
+            // If not continuation, must still be BCH-only and valid
+            require(tx.outputs[0].tokenCategory == NO_TOKEN);
+            require(tx.outputs[0].tokenAmount == 0);
         }
 
         // ---- OUTPUT 1 VALIDATION (if present) ----
         if (tx.outputs.length == 2) {
-
-            require(tx.outputs[1].tokenCategory == NO_TOKEN);
-            require(tx.outputs[1].tokenAmount == 0);
-
             if (tx.outputs[1].lockingBytecode == thisBytecode) {
-
-                // Prevent multiple continuation outputs
-                require(!continuationFound);
-
+                require(!continuationFound); // Prevent multiple continuations
                 continuationFound = true;
 
+                require(tx.outputs[1].tokenCategory == NO_TOKEN);
+                require(tx.outputs[1].tokenAmount == 0);
                 require(tx.outputs[1].value == expectedContinuationValue);
+            } else {
+                require(tx.outputs[1].tokenCategory == NO_TOKEN);
+                require(tx.outputs[1].tokenAmount == 0);
             }
         }
 
-        // --------------------------------------------------------------------
-        // 5. REQUIRE CONTINUATION
-        // Covenant must recreate itself exactly once
-        // --------------------------------------------------------------------
+        // 4. REQUIRE CONTINUATION
         require(continuationFound);
-
-        // --------------------------------------------------------------------
-        // SECURITY GUARANTEES
-        // ✓ Input identity locked to this contract
-        // ✓ No token injection
-        // ✓ Bounded output count
-        // ✓ Exactly one covenant continuation
-        // ✓ Deterministic value enforcement
-        // ✓ No hidden continuation paths
-        // --------------------------------------------------------------------
     }
 }

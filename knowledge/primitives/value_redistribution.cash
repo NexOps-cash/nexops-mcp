@@ -1,84 +1,42 @@
-// PRIMITIVE: ValueRedistribution
-// PURPOSE: Enforce safe and explicit value redistribution
-// SCOPE: Prevent hidden outputs, fee manipulation, and value leakage
-// SECURITY LEVEL: Canonical NexOps Primitive
-// CashScript Version: ^0.13.0
-
 pragma cashscript ^0.13.0;
 
-contract ValueRedistribution() {
+contract ValueRedistribution(bytes target1, bytes target2) {
     function redistribute() {
         bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
 
-        // ---------------------------------------------------------------------
         // 1. INPUT IDENTITY VALIDATION
-        // ---------------------------------------------------------------------
-        require(
-            tx.inputs[this.activeInputIndex].lockingBytecode
-            == this.lockingBytecode
-        );
+        require(this.activeInputIndex == 0);
+        require(tx.inputs[0].lockingBytecode == this.lockingBytecode);
 
-        // ---------------------------------------------------------------------
-        // 2. BCH-ONLY ENFORCEMENT (NO TOKENS)
-        // ---------------------------------------------------------------------
-        require(
-            tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN
-        );
-        require(
-            tx.inputs[this.activeInputIndex].tokenAmount == 0
-        );
+        // Enforce input is BCH-only
+        require(tx.inputs[0].tokenCategory == NO_TOKEN);
+        require(tx.inputs[0].tokenAmount == 0);
 
-        int inputValue = tx.inputs[this.activeInputIndex].value;
+        int inputValue = tx.inputs[0].value;
 
-        // ---------------------------------------------------------------------
-        // 3. OUTPUT COUNT BOUND (PREVENT OUTPUT EXPLOSION)
-        // ---------------------------------------------------------------------
-        int MAX_OUTPUTS = 3;
+        // 2. OUTPUT COUNT BOUND
         require(tx.outputs.length >= 1);
-        require(tx.outputs.length <= MAX_OUTPUTS);
+        require(tx.outputs.length <= 2);
 
-        // ---------------------------------------------------------------------
-        // 4. EXPLICIT OUTPUT VALIDATION
-        // ---------------------------------------------------------------------
-        int totalOutputValue = 0;
-
-        // OUTPUT 0 (REQUIRED)
+        // 3. EXPLICIT OUTPUT VALIDATION
+        // ANCHOR: Validate lockingBytecode FIRST before any other property!
+        
+        // Output 0
+        require(tx.outputs[0].lockingBytecode == target1);
         require(tx.outputs[0].tokenCategory == NO_TOKEN);
         require(tx.outputs[0].tokenAmount == 0);
         require(tx.outputs[0].value > 0);
-        totalOutputValue = totalOutputValue + tx.outputs[0].value;
+        int val0 = tx.outputs[0].value;
 
-        // OUTPUT 1 (OPTIONAL)
-        if (tx.outputs.length >= 2) {
+        if (tx.outputs.length == 2) {
+            // Output 1
+            require(tx.outputs[1].lockingBytecode == target2);
             require(tx.outputs[1].tokenCategory == NO_TOKEN);
             require(tx.outputs[1].tokenAmount == 0);
             require(tx.outputs[1].value > 0);
-            totalOutputValue = totalOutputValue + tx.outputs[1].value;
+            require(val0 + tx.outputs[1].value <= inputValue);
+        } else {
+            require(val0 <= inputValue);
         }
-
-        // OUTPUT 2 (OPTIONAL)
-        if (tx.outputs.length == 3) {
-            require(tx.outputs[2].tokenCategory == NO_TOKEN);
-            require(tx.outputs[2].tokenAmount == 0);
-            require(tx.outputs[2].value > 0);
-            totalOutputValue = totalOutputValue + tx.outputs[2].value;
-        }
-
-        // ---------------------------------------------------------------------
-        // 5. VALUE CONSERVATION RULE
-        // ---------------------------------------------------------------------
-        // Total redistributed value must not exceed input value.
-        // Any remainder is implicitly miner fee.
-        require(totalOutputValue <= inputValue);
-
-        // SECURITY INVARIANTS:
-        // ✓ Active input validated
-        // ✓ No token usage allowed
-        // ✓ Output count bounded
-        // ✓ All outputs BCH-only
-        // ✓ All outputs positive
-        // ✓ No hidden outputs allowed
-        // ✓ Value leakage prevented
-        // ✓ Mining fee explicitly bounded
     }
 }
