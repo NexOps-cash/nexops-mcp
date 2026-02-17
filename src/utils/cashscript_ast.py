@@ -43,6 +43,13 @@ class Comparison:
     location: Location
     
     @property
+    def is_tautology(self) -> bool:
+        """True if left and right operands are identical after normalization"""
+        def normalize(s: str) -> str:
+            return re.sub(r'\s+', '', s).strip('()')
+        return normalize(self.left) == normalize(self.right)
+
+    @property
     def is_type_mismatch(self) -> bool:
         """Simple heuristic for type mismatches"""
         bytes_fields = {'lockingBytecode'}
@@ -58,6 +65,14 @@ class Comparison:
                 if len(literal) == 66:
                     return True
         return False
+
+
+@dataclass
+class CheckSigCall:
+    """Represents a checkSig() or checkMultiSig() call"""
+    sig: str
+    pubkey: str
+    location: Location
 
 
 @dataclass
@@ -98,6 +113,7 @@ class CashScriptAST:
         self.output_references: List[OutputReference] = []
         self.validations: List[ValidationCheck] = []
         self.arithmetic_ops: List[ArithmeticOp] = []
+        self.check_sig_calls: List[CheckSigCall] = []
         self.functions: List[str] = []
         self.constructor_params: List[Dict[str, str]] = []
         self.is_stateful = False
@@ -111,6 +127,7 @@ class CashScriptAST:
         
         for line_num, line in enumerate(self.lines, start=1):
             stripped = line.strip()
+            if not stripped or stripped.startswith('//'): continue
             
             # Detect constructor parameters
             if re.match(r'contract\s+\w+\s*\(', stripped):
@@ -142,6 +159,14 @@ class CashScriptAST:
                     property_accessed=property_name
                 ))
             
+            # Detect checkSig calls
+            sig_matches = re.findall(r'checkSig\s*\(\s*(\w+)\s*,\s*(\w+)\s*\)', stripped)
+            for sig, pk in sig_matches:
+                self.check_sig_calls.append(CheckSigCall(
+                    sig=sig, pubkey=pk,
+                    location=Location(line=line_num, column=0, function=current_function)
+                ))
+            
             # Detect division/modulo operations
             div_matches = re.findall(r'(\w+)\s*([/%])\s*(\w+)', stripped)
             for left, op, right in div_matches:
@@ -159,11 +184,11 @@ class CashScriptAST:
                     comparisons=[]
                 )
                 
-                # Parse comparisons
-                comp_matches = re.findall(r'([^=!><\s]+)\s*([=!><]+)\s*([^&|)\s]+)', stripped)
+                # Parse comparisons (more robustly)
+                comp_matches = re.findall(r'([^=!><&|()]+)\s*([=!><]+)\s*([^&|)\s,;]+)', stripped)
                 for left, op, right in comp_matches:
                     validation.comparisons.append(Comparison(
-                        left=left, op=op, right=right,
+                        left=left.strip(), op=op.strip(), right=right.strip(),
                         location=validation.location
                     ))
 
@@ -191,7 +216,7 @@ class CashScriptAST:
                     validation.validates_token_amount = int(token_amt_match.group(1))
                 
                 # Time checks
-                if 'tx.time' in stripped or 'tx.age' in stripped or 'tx.blockHeight' in stripped:
+                if any(x in stripped for x in ['tx.time', 'tx.age', 'tx.blockHeight']):
                     validation.is_time_check = True
                 
                 self.validations.append(validation)
@@ -238,6 +263,41 @@ class CashScriptAST:
             if re.search(r'assumedFee\s*=.*-', line): return True
         return False
     
+    def find_tautologies(self) -> List[Comparison]:
+        """Find comparisons where left and right are identical"""
+        tautologies = []
+        for v in self.validations:
+            for comp in v.comparisons:
+                if comp.is_tautology:
+                    tautologies.append(comp)
+        return tautologies
+
+    def find_locking_bytecode_self_comparisons(self) -> List[Comparison]:
+        """Find cases where lockingBytecode is compared to itself"""
+        violations = []
+        for v in self.validations:
+            for comp in v.comparisons:
+                if 'lockingBytecode' in comp.left and comp.left == comp.right:
+                    violations.append(comp)
+        return violations
+
+    def find_signature_reuse(self) -> List[CheckSigCall]:
+        """Find reuse of same signature variable for different pubkeys in same function"""
+        violations = []
+        for func in self.functions:
+            func_calls = [c for c in self.check_sig_calls if c.location.function == func]
+            sig_map = {} # signature -> set of pubkeys
+            for call in func_calls:
+                if call.sig not in sig_map:
+                    sig_map[call.sig] = set()
+                sig_map[call.sig].add(call.pubkey)
+            
+            for sig, pubkeys in sig_map.items():
+                if len(pubkeys) > 1:
+                    # Find first call with this sig to report
+                    violations.append([c for c in func_calls if c.sig == sig][0])
+        return violations
+
     def has_unguarded_division(self) -> List[ArithmeticOp]:
         """Find division operations without dominating require(divisor > 0)"""
         unguarded = []
@@ -285,6 +345,7 @@ class CashScriptAST:
             "validations": len(self.validations),
             "validates_output_count": self.validates_output_count(),
             "is_stateful": self.is_stateful,
-            "is_escrow_like": self.is_escrow_like
+            "is_escrow_like": self.is_escrow_like,
+            "signature_reuse_count": len(self.find_signature_reuse())
         }
 

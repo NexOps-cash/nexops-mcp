@@ -513,6 +513,75 @@ class EscrowRoleEnforcementDetector(AntiPatternDetector):
         return None
 
 
+class TautologicalGuardDetector(AntiPatternDetector):
+    """
+    Detects comparisons where left and right sides are identical.
+    """
+    id = "tautological_guard"
+    
+    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        tautologies = ast.find_tautologies()
+        if tautologies:
+            first = tautologies[0]
+            return Violation(
+                rule=self.id,
+                reason=f"Tautological guard detected: '{first.left} {first.op} {first.right}'",
+                exploit="Bypassed security check. A comparison where both sides are identical "
+                        "always evaluates to true (or false), effectively skipping the intended "
+                        "validation. This is often used by LLMs to 'fake' compliance with "
+                        "structural rules.",
+                severity="critical",
+                location={"line": first.location.line, "function": first.location.function}
+            )
+        return None
+
+
+class InvalidLockingBytecodeSelfComparisonDetector(AntiPatternDetector):
+    """
+    Detects cases where lockingBytecode is compared to itself.
+    """
+    id = "locking_bytecode_self_comparison"
+    
+    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        violations = ast.find_locking_bytecode_self_comparisons()
+        if violations:
+            first = violations[0]
+            return Violation(
+                rule=self.id,
+                reason=f"Invalid self-comparison of lockingBytecode: '{first.left} == {first.right}'",
+                exploit="Critical anchor bypass. Comparing an output's lockingBytecode to itself "
+                        "instead of a known anchor (like this.lockingBytecode) provides zero "
+                        "security. An attacker can set any script they want in the output and "
+                        "the check will still pass.",
+                severity="critical",
+                location={"line": first.location.line, "function": first.location.function}
+            )
+        return None
+
+
+class MultisigSignatureReuseDetector(AntiPatternDetector):
+    """
+    Detects reuse of same signature variable across multiple pubkeys.
+    """
+    id = "multisig_signature_reuse"
+    
+    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        violations = ast.find_signature_reuse()
+        if violations:
+            first = violations[0]
+            return Violation(
+                rule=self.id,
+                reason=f"Signature reuse detected: variable '{first.sig}' used for multiple pubkeys",
+                exploit="Threshold bypass. If the same signature variable is used for two different "
+                        "public keys, a single signature from one party can be used twice to "
+                        "satisfy an N-of-M multisig requirement, reducing the effective security "
+                        "threshold.",
+                severity="high",
+                location={"line": first.location.line, "function": first.location.function}
+            )
+        return None
+
+
 # Registry of all detectors
 DETECTOR_REGISTRY = [
     ImplicitOutputOrderingDetector(),
@@ -530,7 +599,10 @@ DETECTOR_REGISTRY = [
     MultisigDistinctnessDetector(),
     SpendingPathSecurityDetector(),
     WeakOutputLimitDetector(),
-    EscrowRoleEnforcementDetector()
+    EscrowRoleEnforcementDetector(),
+    TautologicalGuardDetector(),
+    InvalidLockingBytecodeSelfComparisonDetector(),
+    MultisigSignatureReuseDetector()
 ]
 
 

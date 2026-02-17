@@ -45,6 +45,7 @@ class StateIR(BaseModel):
 
 class ContractMetadata(BaseModel):
     intent: str = ""
+    intent_tags: List[str] = Field(default_factory=list)
     security_level: str = "high"
     generation_phase: int = 0
     retry_count: int = 0

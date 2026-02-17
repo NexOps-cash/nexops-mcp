@@ -18,6 +18,7 @@ from src.models import (
 from src.services.llm.factory import LLMFactory
 from src.services.knowledge import get_knowledge_retriever
 from src.services.anti_pattern_enforcer import get_anti_pattern_enforcer
+from src.services.rule_engine import get_rule_engine
 
 logger = logging.getLogger("nexops.pipeline")
 
@@ -78,12 +79,19 @@ class Phase2:
             violation_context = _build_violation_context(violations, retry_count, kb)
 
         skeleton_code = _ir_to_skeleton_code(ir)
+        
+        # Activate Rules based on intent tags
+        rule_engine = get_rule_engine()
+        active_rules = rule_engine.get_rules_for_tags(ir.metadata.intent_tags)
+        rule_context = rule_engine.format_rules_for_prompt(active_rules)
+
         prompt = _build_phase2_prompt(
             skeleton_code=skeleton_code,
             intent=ir.metadata.intent,
             primitives_context=_truncate_kb_context(primitives_context, max_lines=200),
             constraint_summary=constraint_summary,
             violation_context=violation_context,
+            rule_context=rule_context,
         )
 
         llm = LLMFactory.get_provider("phase2")
@@ -169,6 +177,8 @@ Rules:
 
 Security Level: {security_level}
 
+Identify relevant Intent Tags from this set: [multisig, escrow, timelock, stateful, spending, tokens].
+
 Reference Templates (for structural patterns only):
 {skeleton_hints}
 
@@ -195,6 +205,9 @@ Output ONLY valid JSON:
     "is_stateful": false,
     "state_fields": [],
     "continuation_required": false
+  }},
+  "metadata": {{
+    "intent_tags": ["multisig", "..."]
   }}
 }}
 
@@ -207,134 +220,134 @@ def _build_phase2_prompt(
     primitives_context: str,
     constraint_summary: str,
     violation_context: str,
+    rule_context: str = "",
 ) -> str:
-    """Build the Phase 2 LLM prompt with a focus on structural fixes and distinctness."""
+    """Build the Phase 2 LLM prompt with strict structural security enforcement."""
     
-    # Check for multisig context to inject explicit distinctness rule
-    is_multisig = "pubkey" in skeleton_code and skeleton_code.count("pubkey") >= 2
-    distinctness_rule = ""
-    if is_multisig:
-        distinctness_rule = "\n16. MULTISIG SAFETY: Signatures MUST originate from distinct public keys. Enforce `require(pk1 != pk2);` for all pubkey pairs."
-
     violation_section = ""
     if violation_context:
         violation_section = f"""
-!!! MANDATORY FIXES FOR PREVIOUS VIOLATIONS !!!
-You previously failed security validation. You MUST implement the structural patterns provided below.
-Failure to use these EXACT patterns will result in immediate rejection.
-
+### !!! CRITICAL: FIX PREVIOUS VIOLATIONS !!!
+Your previous attempt failed validation. You MUST implement these exact structural fixes:
 {violation_context}
 """
 
-    return f"""You are a CashScript implementation engine operating under strict security protocols.
-
-Your objective: Implement the logic for the provided CashScript skeleton while satisfying all security invariants.
+    return f"""You are a "Secure CashScript Implementation Engine". 
+Your goal is to fill the provided skeleton with logic that passes a rigorous structural safety gate (Phase 3).
 
 {violation_section}
 
-### HARD RULES (NON-NEGOTIABLE):
-1. Do NOT change the contract name, function names, or parameters.
-2. Every public function MUST contain at least one require(...) enforcing a transaction constraint.
-3. ALWAYS validate `this.activeInputIndex` in every function.
-4. ALWAYS validate `tx.outputs.length` in every function.
-5. ALWAYS validate `tx.outputs[N].lockingBytecode` BEFORE using other properties of that output.
-6. NEVER assume output ordering — validate semantically via lockingBytecode.
-7. NEVER calculate fees (no inputValue - outputValue patterns).
-8. Use `>=` for "at or after" time checks, `<` for "before" — NEVER use `>`.
-9. If dividing, ALWAYS `require(divisor > 0)` before the division.
-10. Use `pragma cashscript ^0.10.0;` at the top.
-11. REMOVE all Solidity/EVM syntax (msg.sender, mapping, etc.).
-12. Ensure all `require()` comparisons use compatible types (no bytes vs bytes32/NO_TOKEN).
-13. Spending functions MUST validate output values or use a strict `tx.outputs.length == 1` anchor.
-14. Escrow/Multisig functions MUST bind outputs to a specific `lockingBytecode`.
-15. NO PLACEHOLDER COMMENTS. Functional code only.{distinctness_rule}
+{rule_context}
 
-### SECURITY PRIMITIVES (MANDATORY PATTERNS):
-{primitives_context}
+### EXPLICIT STRUCTURAL PROTOCOLS
 
-### ANTI-PATTERN SUMMARY:
-{constraint_summary}
+#### 1. MULTISIG SAFETY (Threshold = N-of-M)
+- **Distinct Pubkeys**: Use `require(pk1 != pk2);` for every pair of pubkeys in the constructor or setup.
+- **Unique Signatures**: Every public key MUST have its own unique signature variable (e.g., `aliceSig`, `bobSig`).
+- **NO REUSE**: A single signature variable CANNOT be used for multiple checkSig calls.
+  *BAD*: `checkSig(s1, p1) && checkSig(s1, p2)` 
+  *GOOD*: `checkSig(aliceSig, alice) && checkSig(bobSig, bob)`
 
-### SKELETON TO IMPLEMENT:
+#### 2. COVENANT PROPERTY ACCESS ORDERING
+- **Validation-First**: Before accessing `tx.outputs[N].value`, `tokenCategory`, or `tokenAmount`, you MUST validate the `lockingBytecode` for that index.
+  *MANDATORY PATTERN*: 
+  ```cashscript
+  require(tx.outputs[0].lockingBytecode == expected_script); // 1. Validate destination
+  require(tx.outputs[0].value == 1000);                      // 2. Safe to access value
+  ```
+
+#### 3. OUTPUT ANCHORING
+- **Strict Limits**: Every spending function MUST have `require(tx.outputs.length == 1);` OR validate the value of every output produced.
+- **Clean Outputs**: For change or payout outputs, explicitly validate:
+  `require(tx.outputs[N].tokenCategory == NO_TOKEN);`
+  `require(tx.outputs[N].tokenAmount == 0);`
+
+#### 4. TEMPORAL ACCURACY
+- **Secure Operators**: ALWAYS use `tx.time >= deadline` for "at or after" checks.
+- **Forbidden**: Never use `>` or `block.timestamp`.
+
+#### 5. GENERAL SAFETY
+- **Input Anchoring**: Always include `require(this.activeInputIndex == 0);` (or correct index).
+- **No Fee Logic**: Never calculate fees. Use hardcoded or formula-based output values.
+- **Type Safety**: Do not compare `lockingBytecode` (bytes) to `bytes32` constants (e.g. NO_TOKEN).
+
+### CONTEXT
+- **Intent**: {intent}
+- **Constraints**: {constraint_summary}
+- **Primitives**: {primitives_context}
+
+### SKELETON (DO NOT EDIT NAMES/PARAMS)
 ```cashscript
 {skeleton_code}
 ```
 
-Intent: "{intent}"
-
-Output ONLY the complete .cash code. No explanation. No markdown fences."""
+Implement the function bodies now. Return ONLY the complete, compilable `.cash` code. No explanation. No markdown fences."""
 
 
 def _parse_phase1_response(raw: str, intent: str, security_level: str) -> ContractIR:
-    """Parse LLM JSON output into ContractIR."""
-    # Strip markdown fences if present
-    clean = raw.strip()
-    if clean.startswith("```"):
-        lines = clean.split("\n")
-        lines = [l for l in lines if not l.strip().startswith("```")]
-        clean = "\n".join(lines)
-
+    """Parse Phase 1 JSON into ContractIR."""
     try:
-        data = json.loads(clean)
-    except json.JSONDecodeError as e:
-        logger.error(f"Phase 1 JSON parse failed: {e}. Raw: {raw[:200]}")
-        raise ValueError(f"Phase 1 returned invalid JSON: {e}")
-
-    ir = ContractIR(**data)
-    ir.metadata.intent = intent
-    ir.metadata.security_level = security_level
-    return ir
+        # Clean potential markdown from JSON
+        json_str = raw.strip()
+        if json_str.startswith('```json'):
+            json_str = json_str[7:].strip()
+        if json_str.endswith('```'):
+            json_str = json_str[:-3].strip()
+            
+        data = json.loads(json_str)
+        # Ensure metadata is populated
+        metadata = data.get("metadata", {})
+        data["metadata"] = {
+            "intent": intent, 
+            "intent_tags": metadata.get("intent_tags", []),
+            "security_level": security_level,
+            "generation_phase": 1
+        }
+        return ContractIR(**data)
+    except Exception as e:
+        logger.error(f"Failed to parse Phase 1 response: {e}\nRaw: {raw}")
+        # Return a minimal IR as fallback
+        return ContractIR(
+            contract_name="ErrorFallback",
+            constructor_params=[],
+            functions=[],
+            metadata={"intent": intent, "security_level": security_level, "generation_phase": 1}
+        )
 
 
 def _ir_to_skeleton_code(ir: ContractIR) -> str:
-    """Convert ContractIR to a .cash skeleton string for Phase 2 input."""
+    """Reconstruct a skeletal .cash file from IR."""
     lines = [f"pragma {ir.pragma};", ""]
-
-    # Contract declaration
-    params_str = ", ".join(
-        f"{p.type} {p.name}" for p in ir.constructor_params
-    )
-    lines.append(f"contract {ir.contract_name}({params_str}) {{")
-
+    
+    params = ", ".join([f"{p.type} {p.name}" for p in ir.constructor_params])
+    lines.append(f"contract {ir.contract_name}({params}) {{")
+    
     for fn in ir.functions:
-        fn_params_str = ", ".join(f"{p.type} {p.name}" for p in fn.params)
-        lines.append(f"    function {fn.name}({fn_params_str}) {{")
+        params = ", ".join([f"{p.type} {p.name}" for p in fn.params])
+        lines.append(f"    function {fn.name}({params}) {{")
         lines.append("        // TODO: Implement logic")
         lines.append("    }")
-        lines.append("")
-
+    
     lines.append("}")
     return "\n".join(lines)
 
 
 def _extract_cash_code(raw: str) -> str:
-    """Extract CashScript code from LLM response, stripping markdown fences."""
-    clean = raw.strip()
-
-    # Remove ```cashscript ... ``` or ``` ... ``` wrappers
-    if clean.startswith("```"):
-        lines = clean.split("\n")
-        # Drop first line (```cashscript or ```)
-        lines = lines[1:]
-        # Drop last ``` if present
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        clean = "\n".join(lines).strip()
-
-    if not clean:
-        raise ValueError("Phase 2 returned empty code")
-
-    return clean
+    """Extract code from potential markdown fences."""
+    if '```' in raw:
+        # Search for cashscript or plain fences
+        match = re.search(r'```(?:cashscript)?\s*(.*?)\s*```', raw, re.DOTALL)
+        if match:
+            return match.group(1).strip()
+    return raw.strip()
 
 
 def _truncate_kb_context(context: str, max_lines: int) -> str:
-    """Truncate KB context to fit within token budget."""
-    if not context:
-        return ""
-    lines = context.split("\n")
+    """Truncate KB context to fit within prompt limits."""
+    lines = context.split('\n')
     if len(lines) <= max_lines:
         return context
-    return "\n".join(lines[:max_lines]) + "\n// ... (truncated for context window)"
+    return '\n'.join(lines[:max_lines]) + "\n... (context truncated)"
 
 
 def _build_violation_context(
@@ -380,21 +393,24 @@ def _build_violation_context(
 def _derive_mandatory_pattern(rule: str) -> str:
     """Return a deterministic structural code pattern for a given violation."""
     patterns = {
-        "implicit_output_ordering": "require(tx.outputs[N].lockingBytecode == target); // FIRST check for index N",
-        "missing_output_limit": "require(tx.outputs.length == FIXED_COUNT);",
+        "implicit_output_ordering": "require(tx.outputs[0].lockingBytecode == expectedScript); // AND ONLY THEN reference value/tokens",
+        "missing_output_limit": "require(tx.outputs.length == 1); // Or exact expected count",
         "unvalidated_position": "require(this.activeInputIndex == 0);",
-        "fee_assumption_violation": "// REMOVE all inputValue - outputValue patterns",
-        "evm_hallucination": "// REMOVE all msg.sender, mapping, emit, and payable terms",
-        "empty_function_body": "require(checkSig(sig, pk)); // Add at least one constraint",
-        "semantic_type_mismatch": "require(tx.outputs[N].lockingBytecode == bytes(target)); // No bytes32/NO_TOKEN",
-        "multisig_distinctness_flaw": "require(pk1 != pk2); // Enforce distinctness for all pubkey pairs",
-        "missing_value_enforcement": "require(tx.outputs[N].value == amount); OR require(tx.outputs.length == 1);",
-        "weak_output_count_limit": "require(tx.outputs.length == 1); // Use exact match instead of >=",
+        "fee_assumption_violation": "// REMOVE all (inputValue - outputValue) patterns",
+        "evm_hallucination": "// REMOVE msg.sender, mapping, emit, etc.",
+        "empty_function_body": "require(checkSig(sig, pk));",
+        "semantic_type_mismatch": "require(tx.outputs[N].lockingBytecode == bytes(target)); // Cast to bytes if needed",
+        "multisig_distinctness_flaw": "require(pk1 != pk2); require(pk1 != pk3); // For ALL pairs",
+        "missing_value_enforcement": "require(tx.outputs[0].value == amount);",
+        "weak_output_count_limit": "require(tx.outputs.length == 1);",
         "missing_output_anchor": "require(tx.outputs[0].lockingBytecode == target_script);",
-        "time_validation_error": "require(tx.time >= deadline); // NEVER use >",
-        "division_by_zero": "require(divisor > 0); a / divisor;",
+        "time_validation_error": "require(tx.time >= timeout);",
+        "division_by_zero": "require(divisor > 0);",
+        "tautological_guard": "// DELETE meaningless checks like require(x == x)",
+        "locking_bytecode_self_comparison": "require(tx.outputs[0].lockingBytecode == this.lockingBytecode);",
+        "multisig_signature_reuse": "require(checkSig(sigAlice, alice) && checkSig(sigBob, bob)); // UNIQUE VARS",
     }
-    return patterns.get(rule, "// Review anti-pattern docs for structural requirements.")
+    return patterns.get(rule, "// Review docs for structural requirements.")
 
 
 def _derive_fix_hint(rule: str) -> str:
@@ -403,14 +419,17 @@ def _derive_fix_hint(rule: str) -> str:
         "implicit_output_ordering": "Validate lockingBytecode on every tx.outputs[N] before accessing other properties.",
         "missing_output_limit": "Add require(tx.outputs.length == N) in every function.",
         "unvalidated_position": "Add require(this.activeInputIndex == 0) or validate via lockingBytecode.",
-        "fee_assumption_violation": "Remove fee calculations. Let the caller specify exact output amounts.",
-        "evm_hallucination": "Remove all Solidity/EVM syntax. Use CashScript constructs only.",
+        "fee_assumption_violation": "Remove fee calculations. Use exact output amounts.",
+        "evm_hallucination": "Remove all Solidity/EVM syntax.",
         "empty_function_body": "Add require() statements enforcing transaction constraints.",
-        "semantic_type_mismatch": "Type mismatch in comparison. Do not compare bytes (lockingBytecode) to bytes32 (tokenCategory/NO_TOKEN).",
+        "semantic_type_mismatch": "Do not compare bytes (lockingBytecode) to bytes32 (tokenCategory/NO_TOKEN).",
         "multisig_distinctness_flaw": "Multisig pubkeys must be distinct. Add require(pk1 != pk2).",
-        "missing_value_enforcement": "Spending functions must validate output values or use a strict single-output anchor (== 1).",
+        "missing_value_enforcement": "Spending functions must validate output values or use a strict single-output anchor.",
         "weak_output_count_limit": "Replace >= with an exact match (==) or add an upper bound for tx.outputs.length.",
-        "missing_output_anchor": "Escrow functions must have a hard output anchor (lockingBytecode or value validation).",
+        "missing_output_anchor": "Escrow functions must have a hard output anchor.",
+        "tautological_guard": "Remove tautological comparisons (e.g., x == x).",
+        "locking_bytecode_self_comparison": "Do not compare lockingBytecode to itself. Compare it to an anchor.",
+        "multisig_signature_reuse": "Use distinct signature variables (s1, s2, ...) for each public key in a multisig check.",
     }
     # Strip .cash suffix for lookup
     clean_rule = rule.replace(".cash", "")
