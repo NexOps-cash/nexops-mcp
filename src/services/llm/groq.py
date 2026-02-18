@@ -1,26 +1,19 @@
 from .base import LLMProvider
-
 import os
-
+from typing import Optional
 from groq import AsyncGroq
 
 
 
 class GroqProvider(LLMProvider):
 
-    def __init__(self):
-
+    def __init__(self, model: Optional[str] = None):
         api_key = os.getenv("GROQ_API_KEY")
-
         if not api_key:
-
             raise ValueError("GROQ_API_KEY is not set")
-
             
-
         self.client = AsyncGroq(api_key=api_key)
-
-        self.model = "llama-3.3-70b-versatile" # Updated from decommissioned mixtral-8x7b-32768
+        self.model = model or "llama-3.3-70b-versatile" # Updated from decommissioned mixtral-8x7b-32768
 
 
 

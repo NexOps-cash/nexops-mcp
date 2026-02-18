@@ -13,6 +13,10 @@ import logging
 from typing import Dict, Any
 from dotenv import load_dotenv
 
+# Fix Windows console encoding for special characters
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 # Load environment variables from .env file
 load_dotenv()
 

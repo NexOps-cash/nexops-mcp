@@ -3,21 +3,16 @@ import os
 from typing import Optional
 from openai import AsyncOpenAI
 
-class OpenRouterProvider(LLMProvider):
+class OpenAIProvider(LLMProvider):
     def __init__(self, model: Optional[str] = None):
-        api_key = os.getenv("OPENROUTER_API_KEY")
+        api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
-            raise ValueError("OPENROUTER_API_KEY is not set")
+            raise ValueError("OPENAI_API_KEY is not set")
             
         self.client = AsyncOpenAI(
-            base_url="https://openrouter.ai/api/v1",
             api_key=api_key,
-            default_headers={
-                "HTTP-Referer": "http://localhost",
-                "X-Title": "NexOps",
-            }
         )
-        self.model = model or "openai/gpt-oss-120b"
+        self.model = model or "gpt-4o"
 
     async def complete(self, prompt: str, **kwargs) -> str:
         try:
@@ -30,4 +25,4 @@ class OpenRouterProvider(LLMProvider):
             )
             return response.choices[0].message.content
         except Exception as e:
-            raise RuntimeError(f"OpenRouter completion failed: {e}")
+            raise RuntimeError(f"OpenAI completion failed: {e}")

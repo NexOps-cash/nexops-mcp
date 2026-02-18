@@ -39,21 +39,24 @@ class GuardedPipelineEngine:
         # PHASE 2: Constrained Generation Loop
         max_gen_retries = 2
         last_error = "None"
+        previous_violations: Optional[List[ViolationDetail]] = None
         for gen_attempt in range(max_gen_retries):
             logger.info(f"--- Generation Attempt {gen_attempt + 1} ---")
             
             # Step 2A: Draft
-            # Note: We pass violations if this is a retry from Phase 3/4 failure
-            code = await Phase2.run(ir, retry_count=gen_attempt)
+            # Pass violations from previous Phase 3 failure for targeted retry feedback
+            code = await Phase2.run(ir, violations=previous_violations, retry_count=gen_attempt)
             
             # Step 2B: Language Guard (Fast Static Filter)
             guard_failure = self.language_guard.validate(code)
             if guard_failure:
                 logger.warning(f"Language Guard failed: {guard_failure}. Regenerating...")
+                # Clear previous violations since this is a language-level failure
+                previous_violations = None
                 continue # Retry generation
 
             # Step 2C: Compile Gate (Internal Fix Loop)
-            max_fix_retries = 5
+            max_fix_retries = 3
             compile_success = False
             last_error = ""
             
@@ -74,21 +77,25 @@ class GuardedPipelineEngine:
 
             if not compile_success:
                 logger.error(f"Compile loop exhausted after {max_fix_retries} attempts. Retrying full generation...")
+                # Clear previous violations since syntax errors need full regeneration
+                previous_violations = None
                 continue # Full Generation Retry
 
             # PHASE 3: Toll Gate (Security Invariants)
             toll_gate = Phase3.validate(code)
             if not toll_gate.passed:
-                logger.warning(f"Toll Gate failed with {len(toll_gate.violations)} violations. Retrying full generation...")
-                # Update IR for retry context (Phase 2 uses this)
+                logger.warning(f"Toll Gate failed with {len(toll_gate.violations)} violations. Retrying with violation feedback...")
+                # Store violations for next retry - Phase2 will use them for targeted fixes
+                previous_violations = toll_gate.violations
                 ir.metadata.retry_count = gen_attempt + 1
-                # In a real implementation, we'd pass these violations back to Phase2.run
-                continue # Full Generation Retry
+                continue # Full Generation Retry with violation context
 
             # PHASE 4: Intent Sanity Check
             sanity_result = self.sanity_checker.validate(code, intent_model)
             if not sanity_result["success"]:
                 logger.warning(f"Sanity Check failed: {sanity_result['violations']}. Retrying full generation...")
+                # Clear previous violations since sanity check failures need full regeneration
+                previous_violations = None
                 continue # Full Generation Retry
 
             # SUCCESS !
@@ -118,11 +125,8 @@ class GuardedPipelineEngine:
         """Helper to call LLM for a targeted syntax fix."""
         from src.services.llm.factory import LLMFactory
         
-        prompt = f"""You are a "Code Syntax Fixer". 
-The following CashScript code failed to compile.
-Your task is to FIX THE SYNTAX ERRORS provided. 
+        prompt = f"""FIX THE SYNTAX ERRORS in the following CashScript code.
 DO NOT change the logic or the intent.
-DO NOT use msg.sender, mappings, or other EVM-isms.
 
 ### COMPILER ERROR:
 {error}
@@ -132,10 +136,10 @@ DO NOT use msg.sender, mappings, or other EVM-isms.
 {code}
 ```
 
-Return ONLY the complete, fixed `.cash` code. No explanation. No markdown fences."""
+Return ONLY the complete, fixed `.cash` code. No explanation. No markdown fences. No reasoning traces."""
         
-        llm = LLMFactory.get_provider("phase2")
-        raw_response = await llm.complete(prompt, temperature=0.2)
+        llm = LLMFactory.get_provider("fix")
+        raw_response = await llm.complete(prompt)
         
         # Borrow extraction logic from Phase 2
         from src.services.pipeline import _extract_cash_code

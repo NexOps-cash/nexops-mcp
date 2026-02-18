@@ -2,12 +2,15 @@
 3-Phase Generation Pipeline
 
 Phase1 — Skeleton generation (LLM → ContractIR)
-Phase2 — Logic fill (ContractIR + KB → .cash code)
+Phase2 — Logic fill (ContractIR + Structured KB → .cash code)
 Phase3 — Toll gate (deterministic validation → TollGateResult)
 """
 
 import json
+import yaml
 import logging
+import re
+from pathlib import Path
 from typing import List, Optional
 
 from src.models import (
@@ -17,13 +20,42 @@ from src.models import (
     IntentModel,
 )
 from src.services.llm.factory import LLMFactory
-from src.services.knowledge import get_knowledge_retriever
 from src.services.anti_pattern_enforcer import get_anti_pattern_enforcer
 from src.services.rule_engine import get_rule_engine
 
 logger = logging.getLogger("nexops.pipeline")
 
 MAX_RETRIES = 3
+
+# ─── Structured Knowledge Loader ─────────────────────────────────────
+
+_structured_knowledge_cache: Optional[str] = None
+
+def load_structured_knowledge() -> str:
+    """Load and cache the 3 YAML knowledge packs as a compact JSON string."""
+    global _structured_knowledge_cache
+    if _structured_knowledge_cache is not None:
+        return _structured_knowledge_cache
+
+    base = Path("src/knowledge/structured")
+    try:
+        with open(base / "cashscript_capabilities.yaml", encoding="utf-8") as f:
+            caps = yaml.safe_load(f)
+        with open(base / "covenant_security_rules.yaml", encoding="utf-8") as f:
+            sec = yaml.safe_load(f)
+        with open(base / "anti_solidity_guard.yaml", encoding="utf-8") as f:
+            guard = yaml.safe_load(f)
+
+        _structured_knowledge_cache = json.dumps(
+            {"capabilities": caps, "security": sec, "guard": guard},
+            separators=(",", ":")
+        )
+        logger.info(f"[KB] Structured knowledge loaded: {len(_structured_knowledge_cache)} chars")
+    except Exception as e:
+        logger.error(f"[KB] Failed to load structured knowledge: {e}")
+        _structured_knowledge_cache = "{}"
+
+    return _structured_knowledge_cache
 
 
 # ─── Phase 1: Skeleton Generator ─────────────────────────────────────
@@ -59,22 +91,18 @@ class Phase2:
         ir: ContractIR,
         violations: Optional[List[ViolationDetail]] = None,
         retry_count: int = 0,
-        temperature: float = 0.3, # Lower temperature for deterministic synthesis
+        temperature: float = 0.3,
     ) -> str:
         """Stage 2A: Generate .cash code from structured IntentModel."""
 
-        kb = get_knowledge_retriever()
-        enforcer = get_anti_pattern_enforcer()
+        # Load structured knowledge (cached after first call)
+        structured_knowledge = load_structured_knowledge()
 
-        # Build KB context: primitives + compressed anti-pattern constraints
-        primitives_context = kb.get_category_content("primitives")
-        constraint_summary = enforcer.get_anti_pattern_context()
-
-        # On retry, inject full anti-pattern docs for each violated rule
+        # Build violation context only on retry
         violation_context = ""
         if violations and retry_count > 0:
-            violation_context = _build_violation_context(violations, retry_count, kb)
-        
+            violation_context = _build_violation_context(violations, retry_count, None)
+
         # Activate Rules based on intent model features
         rule_engine = get_rule_engine()
         intent_model = ir.metadata.intent_model
@@ -84,11 +112,12 @@ class Phase2:
 
         prompt = _build_phase2_prompt(
             intent_model=intent_model,
-            primitives_context=_truncate_kb_context(primitives_context, max_lines=200),
-            constraint_summary=constraint_summary,
+            structured_knowledge=structured_knowledge,
             violation_context=violation_context,
             rule_context=rule_context,
         )
+
+        logger.info(f"[Phase2] Prompt length: {len(prompt)} chars, retry={retry_count}")
 
         llm = LLMFactory.get_provider("phase2")
         raw_response = await llm.complete(prompt, temperature=temperature)
@@ -184,12 +213,11 @@ Return ONLY the JSON object. No markdown fences. No explanation."""
 
 def _build_phase2_prompt(
     intent_model: Optional[IntentModel],
-    primitives_context: str,
-    constraint_summary: str,
+    structured_knowledge: str,
     violation_context: str,
     rule_context: str = "",
 ) -> str:
-    """Stage 2A: Build Implementation Prompt from IntentModel."""
+    """Stage 2A: Build Implementation Prompt from IntentModel using structured knowledge."""
     
     intent_json = intent_model.model_dump_json(indent=2) if intent_model else "{}"
     
@@ -200,32 +228,28 @@ def _build_phase2_prompt(
 {violation_context}
 """
 
-    return f"""You are a "Secure CashScript Implementation Engine". 
-Your goal is to generate complete, compilable CashScript code from the provided Intent Model.
+    rule_section = f"\n{rule_context}\n" if rule_context else ""
+
+    return f"""You are a "Secure CashScript Implementation Engine".
+Generate complete, compilable CashScript code from the provided Intent Model.
 
 {violation_section}
+{rule_section}
+### SYSTEM KNOWLEDGE (STRICT RULES):
+{structured_knowledge}
 
-{rule_context}
-
-### INTENT MODEL (SOLE SOURCE OF TRUTH)
-```json
+### INTENT MODEL (SOLE SOURCE OF TRUTH):
 {intent_json}
-```
 
-### EXPLICIT STRUCTURAL PROTOCOLS
-1. ALWAYS use `pragma cashscript ^0.10.0;`
-2. ALWAYS validate `this.activeInputIndex == 0;`
-3. ALWAYS validate `tx.outputs.length` matching required payouts/change.
-4. Access property ordering: validate `lockingBytecode` BEFORE `value` or tokens.
-5. NO HALLUCINATIONS: Do not use msg.sender, mapping, emit, or .tokenCategory unless intent is token-centric.
+### FINAL OUTPUT INSTRUCTIONS (STRICT)
+- Return ONLY the complete, compilable `.cash` code.
+- DO NOT explain the code.
+- DO NOT include markdown fences (```).
+- DO NOT include reasoning traces or thought chains.
+- DO NOT include any text before or after the code.
+- FAILURE TO COMPLY WILL CAUSE SYSTEM REJECTION.
 
-### KB PRIMITIVES (REFERENCE)
-{primitives_context}
-
-### ANTI-PATTERN CONSTRAINTS
-{constraint_summary}
-
-Implement the contract now. Return ONLY the complete, compilable `.cash` code. No explanation. No markdown fences."""
+Begin code:"""
 
 
 def _parse_phase1_response(raw: str, intent: str, security_level: str) -> ContractIR:
@@ -322,42 +346,34 @@ def _build_violation_context(
         parts.append(f"   REASON: {v.exploit}")
         parts.append("")
 
-    # 3. Targeted Anti-Pattern Retrieval (Retry >= 1 ensures better focus)
-    if retry_count >= 1 and hasattr(kb, 'get_category_content'):
-        parts.append("#### TARGETED ANTI-PATTERN DOCUMENTATION")
-        for rule in unique_rules:
-            # Query KB for specific anti-pattern documentation
-            doc = kb.get_category_content("anti_pattern", keywords=[rule])
-            if doc:
-                # Limit to 50 lines per doc to keep context tight
-                doc_lines = doc.split("\n")[:50]
-                parts.append("\n".join(doc_lines))
-                parts.append("---")
+    # 3. Targeted Anti-Pattern Retrieval (REMOVED CODE INJECTION)
+    # We no longer provide raw .cash code to avoid prompt contamination.
+    # Instead, we rely on the derived mandatory patterns and violation reasons.
     
     return "\n".join(parts)
 
 
 def _derive_mandatory_pattern(rule: str) -> str:
-    """Return a deterministic structural code pattern for a given violation."""
+    """Return a deterministic structural description for a given violation (avoiding forbidden syntax)."""
     patterns = {
-        "implicit_output_ordering": "require(tx.outputs[0].lockingBytecode == expectedScript); // AND ONLY THEN reference value/tokens",
+        "implicit_output_ordering": "Validate destination values ONLY AFTER establishing output count and index consistency.",
         "missing_output_limit": "require(tx.outputs.length == 1); // Or exact expected count",
         "unvalidated_position": "require(this.activeInputIndex == 0);",
-        "fee_assumption_violation": "// REMOVE all (inputValue - outputValue) patterns",
-        "evm_hallucination": "// REMOVE msg.sender, mapping, emit, etc.",
-        "empty_function_body": "require(checkSig(sig, pk));",
-        "semantic_type_mismatch": "require(tx.outputs[N].lockingBytecode == bytes(target)); // Cast to bytes if needed",
-        "multisig_distinctness_flaw": "require(pk1 != pk2); require(pk1 != pk3); // For ALL pairs",
+        "fee_assumption_violation": "REMOVE all (inputValue - outputValue) patterns. Use fixed output values.",
+        "evm_hallucination": "REMOVE msg.sender, mapping, emit, modifier, payable, etc.",
+        "empty_function_body": "Implement function logic using require() checks.",
+        "semantic_type_mismatch": "Ensure type consistency in comparisons.",
+        "multisig_distinctness_flaw": "require(pk1 != pk2); require(pk1 != pk3); // Distinctness check for ALL signer pairs",
         "missing_value_enforcement": "require(tx.outputs[0].value == amount);",
         "weak_output_count_limit": "require(tx.outputs.length == 1);",
-        "missing_output_anchor": "require(tx.outputs[0].lockingBytecode == target_script);",
+        "missing_output_anchor": "Ensure the spending function has a deterministic output target.",
         "time_validation_error": "require(tx.time >= timeout);",
         "division_by_zero": "require(divisor > 0);",
-        "tautological_guard": "// DELETE meaningless checks like require(x == x)",
-        "locking_bytecode_self_comparison": "require(tx.outputs[0].lockingBytecode == this.lockingBytecode);",
-        "multisig_signature_reuse": "require(checkSig(sigAlice, alice) && checkSig(sigBob, bob)); // UNIQUE VARS",
+        "tautological_guard": "REMOVE meaningless checks like require(x == x)",
+        "locking_bytecode_self_comparison": "Avoid self-comparison of transaction properties.",
+        "multisig_signature_reuse": "Use distinct signature variables (sig1, sig2, etc.) for each signer in a multisig check.",
     }
-    return patterns.get(rule, "// Review docs for structural requirements.")
+    return patterns.get(rule, "Implement security logic following the Intent Model.")
 
 
 def _derive_fix_hint(rule: str) -> str:
@@ -408,6 +424,9 @@ _EVM_PATTERNS = [
     r'\boverride\b',
     r'\brevert\b',
     r'\bassembly\s*\{',
+    r'\.lockingBytecode\b',
+    r'\.tokenCategory\b',
+    r'\.tokenAmount\b',
 ]
 
 
