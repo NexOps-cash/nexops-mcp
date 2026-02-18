@@ -1,0 +1,53 @@
+# Covenant security rules — injected ONLY for contracts with covenant, stateful, token, or escrow features.
+# CRITICAL: The correct self-reference in CashScript ^0.13.0 is this.activeBytecode (NOT this.lockingBytecode).
+
+covenant_rules:
+  - id: SEC-OUTPUT-COUNT
+    severity: CRITICAL
+    rule: "Every spending function MUST validate tx.outputs.length == N as the FIRST check."
+
+  - id: SEC-OUTPUT-LOCK
+    severity: CRITICAL
+    rule: "Validate tx.outputs[n].lockingBytecode before trusting any output. Do this BEFORE accessing value."
+
+  - id: SEC-SELF-ANCHOR
+    severity: CRITICAL
+    rule: "Validate tx.inputs[this.activeInputIndex].lockingBytecode == this.activeBytecode in every function."
+    note: "this.activeBytecode is the contract's own bytecode. this.lockingBytecode DOES NOT EXIST."
+
+  - id: SEC-OUTPUT-VALUE
+    severity: HIGH
+    rule: "Spending functions must validate tx.outputs[n].value to prevent value drain."
+
+  - id: SEC-LOCKING-BEFORE-VALUE
+    severity: HIGH
+    rule: "Validate tx.outputs[n].lockingBytecode BEFORE accessing tx.outputs[n].value on the same output."
+
+token_rules:
+  - id: SEC-TOKEN-CATEGORY
+    severity: CRITICAL
+    rule: "When tokens are involved, validate tx.outputs[n].tokenCategory on all relevant outputs."
+
+  - id: SEC-TOKEN-AMOUNT
+    severity: CRITICAL
+    rule: "When tokens are involved, validate tx.outputs[n].tokenAmount on all relevant outputs."
+
+  - id: SEC-TOKEN-OWN-INPUT
+    severity: HIGH
+    rule: "Validate tx.inputs[this.activeInputIndex].tokenCategory when reading own token state."
+
+introspection_fields:
+  - "tx.inputs[this.activeInputIndex].lockingBytecode -> bytes  // Own input P2SH script"
+  - "tx.inputs[this.activeInputIndex].tokenCategory -> bytes32  // Own token category"
+  - "tx.inputs[this.activeInputIndex].tokenAmount -> int        // Own token amount"
+  - "tx.outputs[n].lockingBytecode -> bytes                     // Output destination script"
+  - "tx.outputs[n].tokenCategory -> bytes32                     // Output token category"
+  - "tx.outputs[n].tokenAmount -> int                           // Output token amount"
+  - "this.activeBytecode -> bytes                               // Own contract bytecode (CORRECT self-reference)"
+
+canonical_covenant_pattern:
+  description: "Standard self-preservation check for stateful/covenant contracts"
+  shape: |
+    require(tx.outputs.length == 1);
+    require(tx.outputs[0].lockingBytecode == tx.inputs[this.activeInputIndex].lockingBytecode);
+    require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value - fee);

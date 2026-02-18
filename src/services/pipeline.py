@@ -29,33 +29,47 @@ MAX_RETRIES = 3
 
 # ─── Structured Knowledge Loader ─────────────────────────────────────
 
-_structured_knowledge_cache: Optional[str] = None
+# Tags that require covenant/output/token validation rules
+_COVENANT_TAGS = {"covenant", "stateful", "tokens", "minting", "burn", "escrow", "spending"}
 
-def load_structured_knowledge() -> str:
-    """Load and cache the 3 YAML knowledge packs as a compact JSON string."""
-    global _structured_knowledge_cache
-    if _structured_knowledge_cache is not None:
-        return _structured_knowledge_cache
+# YAML file cache: filename -> parsed dict
+_yaml_cache: dict = {}
 
-    base = Path("src/knowledge/structured")
+def _load_yaml(filename: str) -> dict:
+    """Load and cache a YAML file from src/services/knowledge_structured/."""
+    if filename in _yaml_cache:
+        return _yaml_cache[filename]
+    base = Path("src/services/knowledge_structured")
     try:
-        with open(base / "cashscript_capabilities.yaml", encoding="utf-8") as f:
-            caps = yaml.safe_load(f)
-        with open(base / "covenant_security_rules.yaml", encoding="utf-8") as f:
-            sec = yaml.safe_load(f)
-        with open(base / "anti_solidity_guard.yaml", encoding="utf-8") as f:
-            guard = yaml.safe_load(f)
-
-        _structured_knowledge_cache = json.dumps(
-            {"capabilities": caps, "security": sec, "guard": guard},
-            separators=(",", ":")
-        )
-        logger.info(f"[KB] Structured knowledge loaded: {len(_structured_knowledge_cache)} chars")
+        with open(base / filename, encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+        _yaml_cache[filename] = data
+        return data
     except Exception as e:
-        logger.error(f"[KB] Failed to load structured knowledge: {e}")
-        _structured_knowledge_cache = "{}"
+        logger.error(f"[KB] Failed to load {filename}: {e}")
+        return {}
 
-    return _structured_knowledge_cache
+
+def build_structured_knowledge(ir: ContractIR) -> str:
+    """Build a compact YAML knowledge string, conditionally injecting covenant rules."""
+    intent_model = ir.metadata.intent_model if ir.metadata else None
+    tags = set(intent_model.features if intent_model else [])
+
+    knowledge = {
+        "core": _load_yaml("core_language.yaml"),
+        "synthesis": _load_yaml("synthesis_rules.yaml"),
+    }
+
+    # Inject covenant/token rules only when the contract requires them
+    needs_covenant = bool(tags & _COVENANT_TAGS)
+    if needs_covenant:
+        knowledge["security"] = _load_yaml("covenant_security.yaml")
+
+    injected_layers = list(knowledge.keys())
+    logger.info(f"[Phase2] Injected knowledge layers: {injected_layers} (tags={sorted(tags)})")
+
+    # Emit as YAML string — preserves hierarchy better than JSON for LLM comprehension
+    return yaml.dump(knowledge, sort_keys=False, allow_unicode=True, default_flow_style=False)
 
 
 # ─── Phase 1: Skeleton Generator ─────────────────────────────────────
@@ -75,8 +89,30 @@ class Phase1:
         # Parse LLM JSON response into IntentModel and wrap in ContractIR
         ir = _parse_phase1_response(raw_response, intent, security_level)
         ir.metadata.generation_phase = 1
-        
-        tags = ir.metadata.intent_model.features if ir.metadata.intent_model else []
+
+        # ─── Feature Enrichment Layer (Deterministic) ───────────────────
+        # LLM classifies. Engine enforces structure.
+        # Do NOT rely purely on LLM for escrow tagging.
+        tags = list(ir.metadata.intent_model.features) if ir.metadata.intent_model else []
+
+        # Structural inference: timelock + multisig = escrow pattern
+        if "timelock" in tags and "multisig" in tags:
+            tags.append("escrow")
+
+        # Keyword heuristic: reclaim/refund/timeout intent implies escrow
+        _ESCROW_KEYWORDS = {"refund", "reclaim", "timeout", "after", "expire", "expiry", "deadline"}
+        if any(word in intent.lower() for word in _ESCROW_KEYWORDS):
+            if "multisig" in tags:
+                tags.append("escrow")
+
+        # Deduplicate while preserving order
+        seen = set()
+        tags = [t for t in tags if not (t in seen or seen.add(t))]
+
+        # Write enriched tags back to the model
+        if ir.metadata.intent_model:
+            ir.metadata.intent_model.features = tags
+
         logger.info(f"Phase 1 complete: type={ir.metadata.intent_model.contract_type if ir.metadata.intent_model else 'unknown'}, tags={tags}")
         return ir
 
@@ -95,8 +131,8 @@ class Phase2:
     ) -> str:
         """Stage 2A: Generate .cash code from structured IntentModel."""
 
-        # Load structured knowledge (cached after first call)
-        structured_knowledge = load_structured_knowledge()
+        # Build feature-gated structured knowledge (covenant rules injected conditionally)
+        structured_knowledge = build_structured_knowledge(ir)
 
         # Build violation context only on retry
         violation_context = ""
@@ -110,11 +146,15 @@ class Phase2:
         active_rules = rule_engine.get_rules_for_tags(tags)
         rule_context = rule_engine.format_rules_for_prompt(active_rules)
 
+        # Determine if covenant rules were injected (for conditional prompt instruction)
+        needs_covenant = bool(set(tags) & _COVENANT_TAGS)
+
         prompt = _build_phase2_prompt(
             intent_model=intent_model,
             structured_knowledge=structured_knowledge,
             violation_context=violation_context,
             rule_context=rule_context,
+            needs_covenant=needs_covenant,
         )
 
         logger.info(f"[Phase2] Prompt length: {len(prompt)} chars, retry={retry_count}")
@@ -216,8 +256,9 @@ def _build_phase2_prompt(
     structured_knowledge: str,
     violation_context: str,
     rule_context: str = "",
+    needs_covenant: bool = False,
 ) -> str:
-    """Stage 2A: Build Implementation Prompt from IntentModel using structured knowledge."""
+    """Stage 2A: Build Implementation Prompt from IntentModel using feature-gated knowledge."""
     
     intent_json = intent_model.model_dump_json(indent=2) if intent_model else "{}"
     
@@ -230,6 +271,22 @@ def _build_phase2_prompt(
 
     rule_section = f"\n{rule_context}\n" if rule_context else ""
 
+    # Conditional covenant instruction block
+    if needs_covenant:
+        covenant_instruction = """
+### COVENANT VALIDATION (REQUIRED FOR THIS CONTRACT TYPE)
+This contract requires output preservation, token logic, or stateful behavior.
+You MUST apply the covenant_rules and token_rules from the SYSTEM KNOWLEDGE above."""
+    else:
+        covenant_instruction = """
+### IMPORTANT: SIGNATURE-ONLY CONTRACT
+This is a simple signature-based contract. DO NOT enforce:
+- lockingBytecode equality checks
+- tokenCategory validation
+- tokenAmount validation
+- output anchoring or output count limits
+Only use checkSig() / checkMultiSig() and require() for signature validation."""
+
     return f"""You are a "Secure CashScript Implementation Engine".
 Generate complete, compilable CashScript code from the provided Intent Model.
 
@@ -237,6 +294,7 @@ Generate complete, compilable CashScript code from the provided Intent Model.
 {rule_section}
 ### SYSTEM KNOWLEDGE (STRICT RULES):
 {structured_knowledge}
+{covenant_instruction}
 
 ### INTENT MODEL (SOLE SOURCE OF TRUTH):
 {intent_json}
@@ -304,12 +362,18 @@ def _ir_to_skeleton_code(ir: ContractIR) -> str:
 
 
 def _extract_cash_code(raw: str) -> str:
-    """Extract code from potential markdown fences."""
+    """Extract .cash code from LLM response, stripping chatter and markdown fences."""
+    raw = raw.strip()
+
+    # Strip any LLM chatter before the pragma (e.g. "Here's the fixed code:\n")
+    raw = re.sub(r"^.*?(?=pragma cashscript)", "", raw, flags=re.DOTALL | re.IGNORECASE)
+
+    # Handle markdown fences if pragma stripping didn't find a clean start
     if '```' in raw:
-        # Search for cashscript or plain fences
         match = re.search(r'```(?:cashscript)?\s*(.*?)\s*```', raw, re.DOTALL)
         if match:
             return match.group(1).strip()
+
     return raw.strip()
 
 
@@ -366,8 +430,8 @@ def _derive_mandatory_pattern(rule: str) -> str:
         "multisig_distinctness_flaw": "require(pk1 != pk2); require(pk1 != pk3); // Distinctness check for ALL signer pairs",
         "missing_value_enforcement": "require(tx.outputs[0].value == amount);",
         "weak_output_count_limit": "require(tx.outputs.length == 1);",
-        "missing_output_anchor": "Ensure the spending function has a deterministic output target.",
-        "time_validation_error": "require(tx.time >= timeout);",
+        "missing_output_anchor": "Only required for escrow/stateful contracts. Skip for signature-only contracts. For covenant contracts: require(tx.outputs[0].lockingBytecode == this.activeBytecode);",
+        "time_validation_error": "require(tx.time >= timeout);  // tx.time is block time. NEVER use tx.inputs[i].time — it does not exist.",
         "division_by_zero": "require(divisor > 0);",
         "tautological_guard": "REMOVE meaningless checks like require(x == x)",
         "locking_bytecode_self_comparison": "Avoid self-comparison of transaction properties.",
@@ -401,7 +465,9 @@ def _derive_fix_hint(rule: str) -> str:
 
 import re
 
-# EVM/Solidity terms that must never appear in CashScript
+# EVM/Solidity terms that must NEVER appear in CashScript.
+# NOTE: .lockingBytecode, .tokenCategory, .tokenAmount are VALID CashScript fields.
+# They belong in covenant_security.yaml validation, NOT here.
 _EVM_PATTERNS = [
     r'\bmsg\.sender\b',
     r'\bmsg\.value\b',
@@ -424,9 +490,11 @@ _EVM_PATTERNS = [
     r'\boverride\b',
     r'\brevert\b',
     r'\bassembly\s*\{',
-    r'\.lockingBytecode\b',
-    r'\.tokenCategory\b',
-    r'\.tokenAmount\b',
+    # Invalid CashScript timelock fields — correct fields are tx.time and tx.age
+    r'tx\.inputs\[.*?\]\.time\b',
+    r'tx\.inputs\[.*?\]\.age\b',
+    # Invalid self-reference — correct field is this.activeBytecode
+    r'this\.lockingBytecode\b',
 ]
 
 

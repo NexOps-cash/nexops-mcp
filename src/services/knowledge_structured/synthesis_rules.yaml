@@ -1,0 +1,75 @@
+# Synthesis rules — always injected. High-level structural patterns for contract generation.
+# These are intent-level constraints with canonical code shapes to reduce LLM drift.
+
+multisig:
+  rules:
+    - id: MULTISIG-DISTINCT-KEYS
+      rule: "All pubkeys in a multisig MUST be distinct. Add require(pk1 != pk2) for every pair."
+    - id: MULTISIG-DISTINCT-SIGS
+      rule: "Use distinct signature variable names per signer (aliceSig, bobSig, carolSig)."
+    - id: MULTISIG-THRESHOLD
+      rule: "Implement threshold using integer accumulation of checkSig() results, not nested AND/OR chains."
+
+  canonical_2_of_3:
+    description: "Standard 2-of-3 multisig pattern. Use integer accumulation, not nested booleans."
+    shape: |
+      int valid =
+          (checkSig(sig1, pk1) ? 1 : 0) +
+          (checkSig(sig2, pk2) ? 1 : 0) +
+          (checkSig(sig3, pk3) ? 1 : 0);
+      require(valid >= 2);
+    notes:
+      - "Do NOT require a specific signer — any 2 of 3 must be valid."
+      - "Do NOT use nested AND/OR chains like checkSig(a,A) && (checkSig(b,B) || checkSig(c,C))."
+      - "Distinctness checks: require(pk1 != pk2); require(pk1 != pk3); require(pk2 != pk3);"
+
+  canonical_2_of_2:
+    description: "Standard 2-of-2 multisig pattern."
+    shape: |
+      require(pk1 != pk2);
+      require(checkSig(sig1, pk1));
+      require(checkSig(sig2, pk2));
+
+timelock:
+  rules:
+    - id: TIMELOCK-GTE
+      rule: "Use tx.time >= deadline for absolute timelocks (CLTV). NEVER use tx.inputs[i].time."
+    - id: TIMELOCK-AGE
+      rule: "Use tx.age >= period for relative timelocks (CSV)."
+  canonical_absolute:
+    shape: "require(tx.time >= timeoutTimestamp);"
+    notes:
+      - "tx.time is the block time. It is NOT tx.inputs[i].time — that field does not exist."
+  canonical_relative:
+    shape: "require(tx.age >= 30);"  # 30 blocks
+
+escrow:
+  rules:
+    - id: ESCROW-BRANCH
+      rule: "Escrow contracts must have a release branch (multi-party) and a reclaim branch (timeout)."
+    - id: ESCROW-RECLAIM
+      rule: "Reclaim branch must require both: (1) timeout check and (2) original sender signature."
+
+  release_branch:
+    must:
+      - "Signature threshold logic (e.g. 2-of-3)"
+      - "require(pk1 != pk2) distinctness checks for all signer pairs"
+  reclaim_branch:
+    must:
+      - "require(tx.time >= timeoutTimestamp);  // Absolute timelock"
+      - "require(checkSig(reclaimerSig, originalSender));  // Reclaimer auth"
+    canonical_shape: |
+      function reclaim(sig reclaimerSig, int timeoutTimestamp) {
+          require(tx.time >= timeoutTimestamp);
+          require(checkSig(reclaimerSig, originalSender));
+      }
+
+general:
+  - id: NO-FEE-ASSUMPTION
+    rule: "Do not calculate miner fees via arithmetic (inputValue - outputValue). Use fixed output amounts."
+  - id: NO-DIVISION-ZERO
+    rule: "Before any division, require(divisor > 0) to prevent division-by-zero."
+  - id: NO-TAUTOLOGY
+    rule: "Do not write tautological guards like require(x == x). All guards must be meaningful."
+  - id: NO-EMPTY-FUNCTION
+    rule: "Every function body must contain at least one require() statement."

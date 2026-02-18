@@ -1,0 +1,89 @@
+# Core CashScript language rules — always injected for every contract type.
+# DO NOT include lockingBytecode, tokenCategory, tokenAmount, or output anchoring here.
+
+language:
+  name: CashScript
+  pragma: "^0.13.0"
+
+types:
+  - name: pubkey
+    description: "Public key for signature verification"
+  - name: sig
+    description: "Transaction signature"
+  - name: int
+    description: "Signed 64-bit integer"
+  - name: bytes
+    description: "Arbitrary byte string"
+  - name: bytes20
+    description: "20-byte value (e.g. hash160)"
+  - name: bool
+    description: "Boolean value"
+
+builtins:
+  checkSig:
+    signature: "checkSig(sig s, pubkey pk) -> bool"
+    usage: "Verify a single signature against a public key"
+  checkMultiSig:
+    signature: "checkMultiSig(sig[] sigs, pubkey[] pks) -> bool"
+    usage: "Verify M-of-N multisig"
+  hash160:
+    signature: "hash160(bytes data) -> bytes20"
+  hash256:
+    signature: "hash256(bytes data) -> bytes32"
+  require:
+    signature: "require(bool condition)"
+    usage: "Abort transaction if condition is false. All validation uses require()."
+  tx.time:
+    description: "Block time (CLTV). Use >= for 'at or after' checks. NOT tx.inputs[i].time."
+  tx.age:
+    description: "Relative locktime (CSV). Use >= for 'at or after' checks."
+
+safe_introspection:
+  - "tx.inputs[this.activeInputIndex].value -> int  // Own input value"
+  - "this.activeInputIndex -> int                   // Own input index"
+  - "tx.outputs.length -> int                       // Number of outputs"
+  - "tx.outputs[n].value -> int                     // Output value"
+
+self_reference:
+  correct: "this.activeBytecode"
+  description: "Contract bytecode of the input being evaluated (includes constructor args). Use for covenant self-preservation checks."
+  wrong: "this.lockingBytecode  // DOES NOT EXIST in CashScript ^0.13.0 — use this.activeBytecode"
+
+contract_structure:
+  - "pragma cashscript ^0.13.0;  // REQUIRED first line"
+  - "contract Name(type param1, type param2) { ... }"
+  - "function name(type arg1) { require(...); }"
+  - "Constructor params are immutable contract state"
+  - "Function params are spending arguments"
+  - "No return values from functions"
+
+anti_solidity:
+  forbidden_keywords:
+    - msg.sender
+    - msg.value
+    - address
+    - uint256
+    - mapping
+    - event
+    - modifier
+    - emit
+    - payable
+    - view
+    - pure
+    - constructor
+    - abstract
+    - virtual
+    - override
+    - interface
+    - struct
+    - solidity
+    - revert
+    - assembly
+    - block.timestamp
+    - this.lockingBytecode  # WRONG — use this.activeBytecode
+  forbidden_patterns:
+    - "Hardcoded input indices: tx.inputs[0] — ALWAYS use tx.inputs[this.activeInputIndex]"
+    - "tx.inputs[i].time — WRONG — use tx.time for block time"
+    - "State mutation inside functions"
+    - "Loops or recursion"
+    - "Return statements from spending functions"
