@@ -17,47 +17,98 @@ if OR_KEY:
 else:
     logger.warning("[LLM] Context check: OPENROUTER_API_KEY is MISSING in environment.")
 
+# ─── Task-Specific Max Token Caps ────────────────────────────────────────────
+# CashScript contracts are small. We do NOT need 4096 tokens.
+# These caps prevent runaway billing and reduce cost per call.
+_MAX_TOKENS = {
+    "phase1": 512,    # JSON intent model — tiny
+    "phase2": 1000,   # Full contract synthesis — Sonnet quality in ~800 tokens
+    "phase2_retry": 600,  # Haiku retry — compact fix
+    "fix": 400,       # Syntax fix — minimal change
+    "general": 1000,
+}
+
+
 class LLMFactory:
     @classmethod
     def get_provider(cls, task_type: str = "general") -> LLMProvider:
         """
         Returns a ResilientProvider configured with specialists and fallbacks.
+        max_tokens is set per task type to control cost.
         """
         # Fail-fast check
         if not os.getenv("OPENROUTER_API_KEY") and not os.getenv("GROQ_API_KEY"):
             raise RuntimeError("No LLM API keys found (OPENROUTER_API_KEY or GROQ_API_KEY).")
 
         configs = []
+        has_openrouter = bool(os.getenv("OPENROUTER_API_KEY"))
 
         # 1. Specialist Chains
         if task_type == "phase1":
-            # Groq is primary for Phase 1 now (Llama 3.3 70B is reliable enough)
-            configs.append(LLMConfig(GroqProvider(model="llama-3.3-70b-versatile"), temperature=0.1, label="Groq-Llama-3.3-Phase1-Primary"))
-            # Gemini Flash as fallback if Groq fails
-            configs.append(LLMConfig(OpenRouterProvider(model="google/gemini-2.0-flash-exp"), temperature=0.1, label="Gemini-Flash-Exp-Fallback"))
-        
+            # Groq Llama 3.3 is reliable enough for JSON intent parsing
+            configs.append(LLMConfig(
+                GroqProvider(model="llama-3.3-70b-versatile"),
+                temperature=0.1,
+                label="Groq-Llama-3.3-Phase1-Primary",
+                max_tokens=_MAX_TOKENS["phase1"],
+            ))
+            if has_openrouter:
+                configs.append(LLMConfig(
+                    OpenRouterProvider(model="google/gemini-2.0-flash-exp"),
+                    temperature=0.1,
+                    label="Gemini-Flash-Exp-Fallback",
+                    max_tokens=_MAX_TOKENS["phase1"],
+                ))
+
         elif task_type == "phase2":
-            # Groq is primary for synthesis
-            configs.append(LLMConfig(GroqProvider(model="llama-3.3-70b-versatile"), temperature=0.2, label="Groq-Llama-3.3-Primary"))
-            
-            # Fallbacks (keeping them for resilience, but Groq is first)
-            if os.getenv("OPENAI_API_KEY"):
-                configs.append(LLMConfig(OpenAIProvider(model="gpt-4o"), temperature=0.2, label="OpenAI-GPT4o-Secondary"))
-            configs.append(LLMConfig(OpenRouterProvider(model="deepseek/deepseek-r1"), temperature=0.2, label="DeepSeek-R1-Fallback"))
-        
+            # Claude 3.5 Sonnet via OpenRouter — best instruction-following for CashScript
+            if has_openrouter:
+                configs.append(LLMConfig(
+                    OpenRouterProvider(model="anthropic/claude-3.5-sonnet"),
+                    temperature=0.2,
+                    label="Claude-3.5-Sonnet-Primary",
+                    max_tokens=_MAX_TOKENS["phase2"],
+                ))
+            # Groq as fallback — free, fast, weaker on complex covenants
+            configs.append(LLMConfig(
+                GroqProvider(model="llama-3.3-70b-versatile"),
+                temperature=0.2,
+                label="Groq-Llama-3.3-Fallback",
+                max_tokens=_MAX_TOKENS["phase2"],
+            ))
+
         elif task_type == "fix":
-            # Groq is primary for fixes
-            configs.append(LLMConfig(GroqProvider(model="llama-3.3-70b-versatile"), temperature=0.0, label="Groq-Llama-3.3-Fix-Primary"))
-            
-            # Fallbacks
-            configs.append(LLMConfig(OpenRouterProvider(model="deepseek/deepseek-chat"), temperature=0.0, label="DeepSeek-V3-Fix-Fallback"))
-            if os.getenv("OPENAI_API_KEY"):
-                configs.append(LLMConfig(OpenAIProvider(model="gpt-4o"), temperature=0.0, label="OpenAI-GPT4o-Fix-Fallback"))
-        
+            # Claude Haiku via OpenRouter — cheap, fast, deterministic for syntax fixes
+            if has_openrouter:
+                configs.append(LLMConfig(
+                    OpenRouterProvider(model="anthropic/claude-3-haiku"),
+                    temperature=0.0,
+                    label="Claude-3-Haiku-Fix-Primary",
+                    max_tokens=_MAX_TOKENS["fix"],
+                ))
+            # Groq fallback for fix loop
+            configs.append(LLMConfig(
+                GroqProvider(model="llama-3.3-70b-versatile"),
+                temperature=0.0,
+                label="Groq-Llama-3.3-Fix-Fallback",
+                max_tokens=_MAX_TOKENS["fix"],
+            ))
+
         else:
             # Default general chain
-            configs.append(LLMConfig(GroqProvider(model="llama-3.3-70b-versatile"), temperature=0.2, label="Groq-Llama-3.3-Default"))
-            configs.append(LLMConfig(OpenRouterProvider(model="deepseek/deepseek-r1"), temperature=0.2, label="DeepSeek-R1-Fallback"))
+            configs.append(LLMConfig(
+                GroqProvider(model="llama-3.3-70b-versatile"),
+                temperature=0.2,
+                label="Groq-Llama-3.3-Default",
+                max_tokens=_MAX_TOKENS["general"],
+            ))
+            if has_openrouter:
+                configs.append(LLMConfig(
+                    OpenRouterProvider(model="deepseek/deepseek-r1"),
+                    temperature=0.2,
+                    label="DeepSeek-R1-Fallback",
+                    max_tokens=_MAX_TOKENS["general"],
+                ))
 
         logger.info(f"[LLM] Factory return ResilientProvider for '{task_type}' with {len(configs)} configs.")
         return ResilientProvider(configs[0], configs[1:])

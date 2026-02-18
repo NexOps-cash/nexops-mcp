@@ -134,10 +134,10 @@ class Phase2:
         # Build feature-gated structured knowledge (covenant rules injected conditionally)
         structured_knowledge = build_structured_knowledge(ir)
 
-        # Build violation context only on retry
+        # Build compact violation context only on retry
         violation_context = ""
         if violations and retry_count > 0:
-            violation_context = _build_violation_context(violations, retry_count, None)
+            violation_context = _build_violation_context(violations)
 
         # Activate Rules based on intent model features
         rule_engine = get_rule_engine()
@@ -149,7 +149,8 @@ class Phase2:
         # Determine if covenant rules were injected (for conditional prompt instruction)
         needs_covenant = bool(set(tags) & _COVENANT_TAGS)
 
-        prompt = _build_phase2_prompt(
+        # Build layered system + user prompt
+        system_prompt, user_prompt = _build_phase2_prompt(
             intent_model=intent_model,
             structured_knowledge=structured_knowledge,
             violation_context=violation_context,
@@ -157,10 +158,11 @@ class Phase2:
             needs_covenant=needs_covenant,
         )
 
-        logger.info(f"[Phase2] Prompt length: {len(prompt)} chars, retry={retry_count}")
+        total_chars = len(system_prompt) + len(user_prompt)
+        logger.info(f"[Phase2] Prompt length: {total_chars} chars (sys={len(system_prompt)}, user={len(user_prompt)}), retry={retry_count}")
 
         llm = LLMFactory.get_provider("phase2")
-        raw_response = await llm.complete(prompt, temperature=temperature)
+        raw_response = await llm.complete(user_prompt, system=system_prompt, temperature=temperature)
 
         # Extract .cash code from response
         code = _extract_cash_code(raw_response)
@@ -257,57 +259,61 @@ def _build_phase2_prompt(
     violation_context: str,
     rule_context: str = "",
     needs_covenant: bool = False,
-) -> str:
-    """Stage 2A: Build Implementation Prompt from IntentModel using feature-gated knowledge."""
+) -> tuple:
+    """Build layered Phase 2 prompt. Returns (system_prompt, user_prompt) tuple.
     
-    intent_json = intent_model.model_dump_json(indent=2) if intent_model else "{}"
-    
-    violation_section = ""
-    if violation_context:
-        violation_section = f"""
-### !!! CRITICAL: FIX PREVIOUS VIOLATIONS !!!
-{violation_context}
-"""
-
-    rule_section = f"\n{rule_context}\n" if rule_context else ""
-
-    # Conditional covenant instruction block
+    system_prompt: static role + DSL rules (~800-1200 chars, cacheable)
+    user_prompt: compact intent JSON + KB + optional violations (dynamic)
+    """
+    # ── SYSTEM PROMPT (static, cacheable) ──────────────────────────────
     if needs_covenant:
-        covenant_instruction = """
-### COVENANT VALIDATION (REQUIRED FOR THIS CONTRACT TYPE)
-This contract requires output preservation, token logic, or stateful behavior.
-You MUST apply the covenant_rules and token_rules from the SYSTEM KNOWLEDGE above."""
+        covenant_rule = (
+            "COVENANT: require(tx.outputs.length==N); "
+            "require(tx.outputs[0].lockingBytecode==this.activeBytecode); "
+            "validate value and tokenCategory/tokenAmount if tokens involved."
+        )
     else:
-        covenant_instruction = """
-### IMPORTANT: SIGNATURE-ONLY CONTRACT
-This is a simple signature-based contract. DO NOT enforce:
-- lockingBytecode equality checks
-- tokenCategory validation
-- tokenAmount validation
-- output anchoring or output count limits
-Only use checkSig() / checkMultiSig() and require() for signature validation."""
+        covenant_rule = (
+            "SIGNATURE-ONLY: Use ONLY checkSig()/checkMultiSig() and require(). "
+            "DO NOT add lockingBytecode, tokenCategory, tokenAmount, or output count checks."
+        )
 
-    return f"""You are a "Secure CashScript Implementation Engine".
-Generate complete, compilable CashScript code from the provided Intent Model.
+    system_prompt = f"""You are a Secure CashScript Code Generator. Output ONLY compilable CashScript ^0.13.0 code.
 
-{violation_section}
-{rule_section}
-### SYSTEM KNOWLEDGE (STRICT RULES):
-{structured_knowledge}
-{covenant_instruction}
+DSL RULES (non-negotiable):
+- pragma cashscript ^0.13.0; is REQUIRED as first line
+- Use require() for ALL validation. No return values.
+- Self-reference: this.activeBytecode (NOT this.lockingBytecode — does not exist)
+- Timelock: tx.time >= N (NOT tx.inputs[i].time — does not exist)
+- Own input: tx.inputs[this.activeInputIndex].value (NEVER tx.inputs[0])
+- Multisig threshold: integer accumulation of checkSig() results, NOT nested &&/||
+- Distinctness: require(pk1 != pk2) for ALL pubkey pairs
+- {covenant_rule}
 
-### INTENT MODEL (SOLE SOURCE OF TRUTH):
-{intent_json}
+FORBIDDEN (causes rejection): msg.sender, mapping, emit, modifier, payable, view, pure,
+constructor(), uint256, address, this.lockingBytecode, tx.inputs[i].time
 
-### FINAL OUTPUT INSTRUCTIONS (STRICT)
-- Return ONLY the complete, compilable `.cash` code.
-- DO NOT explain the code.
-- DO NOT include markdown fences (```).
-- DO NOT include reasoning traces or thought chains.
-- DO NOT include any text before or after the code.
-- FAILURE TO COMPLY WILL CAUSE SYSTEM REJECTION.
+OUTPUT: Return ONLY the .cash code. No markdown. No explanation. No reasoning traces."""
 
-Begin code:"""
+    # ── USER PROMPT (dynamic) ───────────────────────────────────────────
+    # Compact intent JSON — no indentation
+    intent_json = intent_model.model_dump_json() if intent_model else "{}"
+
+    parts = []
+
+    if violation_context:
+        parts.append(f"VIOLATIONS TO FIX:\n{violation_context}")
+
+    if rule_context:
+        parts.append(rule_context)
+
+    parts.append(f"KNOWLEDGE:\n{structured_knowledge}")
+    parts.append(f"INTENT:{intent_json}")
+    parts.append("Generate the complete CashScript contract now:")
+
+    user_prompt = "\n\n".join(parts)
+
+    return system_prompt, user_prompt
 
 
 def _parse_phase1_response(raw: str, intent: str, security_level: str) -> ContractIR:
@@ -385,36 +391,14 @@ def _truncate_kb_context(context: str, max_lines: int) -> str:
     return '\n'.join(lines[:max_lines]) + "\n... (context truncated)"
 
 
-def _build_violation_context(
-    violations: List[ViolationDetail],
-    retry_count: int,
-    kb: object,
-) -> str:
-    """Build violation context with mandatory structural patterns and targeted KB retrieval."""
-    parts = ["### THE FOLLOWING VIOLATIONS WERE DETECTED (MUST BE FIXED):\n"]
-
-    # 1. Provide concrete mandatory structural patterns
-    parts.append("#### MANDATORY STRUCTURAL CONSTRAINTS")
-    parts.append("You MUST incorporate these exact patterns into your code to pass validation:")
-    
-    unique_rules = {v.rule.replace(".cash", "") for v in violations}
-    for rule in unique_rules:
-        pattern = _derive_mandatory_pattern(rule)
-        parts.append(f"- [{rule.upper()}]: `{pattern}`")
-    parts.append("")
-
-    # 2. Detailed violation list
-    parts.append("#### VIOLATION DETAILS")
-    for i, v in enumerate(violations, 1):
-        parts.append(f"{i}. [{v.severity.upper()}] {v.rule}: {v.reason}")
-        parts.append(f"   REASON: {v.exploit}")
-        parts.append("")
-
-    # 3. Targeted Anti-Pattern Retrieval (REMOVED CODE INJECTION)
-    # We no longer provide raw .cash code to avoid prompt contamination.
-    # Instead, we rely on the derived mandatory patterns and violation reasons.
-    
-    return "\n".join(parts)
+def _build_violation_context(violations: List[ViolationDetail]) -> str:
+    """Build compact one-liner violation context. No essays, no markdown headers."""
+    lines = []
+    for v in violations:
+        rule = v.rule.replace(".cash", "")
+        hint = _derive_mandatory_pattern(rule)
+        lines.append(f"- {rule} → {hint}")
+    return "\n".join(lines)
 
 
 def _derive_mandatory_pattern(rule: str) -> str:

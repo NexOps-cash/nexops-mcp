@@ -122,26 +122,39 @@ class GuardedPipelineEngine:
         }
 
     async def _request_syntax_fix(self, code: str, error: str, ir: ContractIR) -> str:
-        """Helper to call LLM for a targeted syntax fix."""
+        """Helper to fix syntax errors. Tries deterministic fixes first, then LLM."""
+        import re as _re
+
+        # ── Optimization 5: Deterministic fix for 'Unused variable X' ──────────
+        # This avoids 2-3 wasted LLM calls per failure. Regex strips the declaration.
+        unused_match = _re.search(r"Unused variable (\w+)", error)
+        if unused_match:
+            var_name = unused_match.group(1)
+            # Remove the line declaring this variable (e.g. "int foo = ...")
+            fixed = _re.sub(
+                rf"^\s*\w[\w\[\]]*\s+{_re.escape(var_name)}\s*=.*?;\s*$",
+                "",
+                code,
+                flags=_re.MULTILINE,
+            )
+            if fixed != code:
+                logger.info(f"[Fix] Deterministic: stripped unused variable '{var_name}' (no LLM call)")
+                return fixed.strip()
+
+        # ── LLM fallback for non-deterministic errors ────────────────────────────
         from src.services.llm.factory import LLMFactory
-        
-        prompt = f"""FIX THE SYNTAX ERRORS in the following CashScript code.
-DO NOT change the logic or the intent.
 
-### COMPILER ERROR:
-{error}
+        system = (
+            "You are a CashScript syntax fixer. "
+            "Fix ONLY the compiler error shown. "
+            "Do NOT change logic, intent, or structure. "
+            "Return ONLY the complete fixed .cash code. No markdown. No explanation."
+        )
+        user = f"COMPILER ERROR:\n{error}\n\nCODE:\n{code}\n\nFixed code:"
 
-### ORIGINAL CODE:
-```cashscript
-{code}
-```
-
-Return ONLY the complete, fixed `.cash` code. No explanation. No markdown fences. No reasoning traces."""
-        
         llm = LLMFactory.get_provider("fix")
-        raw_response = await llm.complete(prompt)
-        
-        # Borrow extraction logic from Phase 2
+        raw_response = await llm.complete(user, system=system)
+
         from src.services.pipeline import _extract_cash_code
         return _extract_cash_code(raw_response)
 
