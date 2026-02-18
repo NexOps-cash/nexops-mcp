@@ -1,0 +1,47 @@
+forbidden_patterns:
+  evm_keywords:
+    - msg.sender
+    - msg.value
+    - address
+    - uint256
+    - int256
+    - uint8
+    - mapping
+    - event
+    - modifier
+    - emit
+    - payable
+    - view
+    - pure
+    - constructor
+    - abstract
+    - virtual
+    - override
+    - interface
+    - struct
+    - solidity
+    - revert
+    - assembly
+    - block.timestamp
+    - block.number
+
+  evm_patterns:
+    - "Inheriting from contracts"
+    - "State variable mutation inside functions"
+    - "Return values from spending functions"
+    - "Dynamic arrays or mappings"
+    - "Reentrancy guards"
+    - "External contract calls"
+
+constraints:
+  - "No EVM or Solidity concepts of any kind."
+  - "No Solidity syntax. CashScript is NOT Solidity."
+  - "No state variables outside constructor parameters."
+  - "All validation must use require(). No if/else branching."
+  - "No loops. CashScript has no for/while."
+  - "No return statements. Functions either pass or fail via require()."
+  - "No events. CashScript has no event system."
+  - "No modifiers. All guards must be inline require() calls."
+  - "No address type. Use pubkey or bytes20 for identities."
+  - "No uint256. Use int for integers."
+  - "No mapping. Use constructor parameters for state."

@@ -1,0 +1,60 @@
+covenant_rules:
+  - id: SEC-OUTPUT-LOCK
+    severity: CRITICAL
+    rule: "Validate tx.outputs[n].lockingBytecode before trusting any output."
+
+  - id: SEC-OUTPUT-COUNT
+    severity: CRITICAL
+    rule: "Every spending function MUST validate tx.outputs.length == N as the FIRST check."
+
+  - id: SEC-TOKEN-CATEGORY
+    severity: CRITICAL
+    rule: "When tokens are involved, validate tx.outputs[n].tokenCategory and tx.outputs[n].tokenAmount."
+
+  - id: SEC-INPUT-INDEX
+    severity: CRITICAL
+    rule: "Only access tx.inputs[this.activeInputIndex]. Never use hardcoded indices like tx.inputs[0]."
+
+  - id: SEC-SELF-ANCHOR
+    severity: CRITICAL
+    rule: "Validate tx.inputs[this.activeInputIndex].lockingBytecode == this.lockingBytecode in every function."
+
+  - id: SEC-NO-FEE-ASSUMPTION
+    severity: HIGH
+    rule: "Do not calculate miner fees via arithmetic (inputValue - outputValue). Use fixed output amounts."
+
+  - id: SEC-TEMPORAL-GTE
+    severity: HIGH
+    rule: "Use tx.time >= deadline for 'at or after' checks. Never use > or <=."
+
+  - id: SEC-MULTISIG-DISTINCT
+    severity: HIGH
+    rule: "In multisig, all pubkeys must be distinct. Add require(pk1 != pk2) for every pair."
+
+  - id: SEC-MULTISIG-SIG-VARS
+    severity: HIGH
+    rule: "Use distinct signature variable names per signer (sig1, sig2, aliceSig, bobSig)."
+
+  - id: SEC-OUTPUT-VALUE
+    severity: HIGH
+    rule: "Spending functions must validate tx.outputs[n].value to prevent value drain."
+
+  - id: SEC-LOCKING-BEFORE-VALUE
+    severity: HIGH
+    rule: "Validate tx.outputs[n].lockingBytecode BEFORE accessing tx.outputs[n].value on the same output."
+
+  - id: SEC-NO-EMPTY-FUNCTION
+    severity: CRITICAL
+    rule: "Every function body must contain at least one require() statement."
+
+  - id: SEC-DIVISION-SAFETY
+    severity: MEDIUM
+    rule: "Before any division, require(divisor > 0) to prevent division-by-zero."
+
+  - id: SEC-NO-TAUTOLOGY
+    severity: MEDIUM
+    rule: "Do not write tautological guards like require(x == x). All guards must be meaningful."
+
+  - id: SEC-TOKEN-OWN-INPUT
+    severity: HIGH
+    rule: "When handling own token state, validate tx.inputs[this.activeInputIndex].tokenCategory."

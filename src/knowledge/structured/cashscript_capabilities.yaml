@@ -1,0 +1,70 @@
+language:
+  name: CashScript
+  pragma: "^0.13.0"
+
+types:
+  - name: pubkey
+    description: "Public key for signature verification"
+  - name: sig
+    description: "Transaction signature"
+  - name: int
+    description: "Signed 64-bit integer"
+  - name: bytes
+    description: "Arbitrary byte string"
+  - name: bytes20
+    description: "20-byte value (e.g. hash160)"
+  - name: bytes32
+    description: "32-byte value (e.g. tokenCategory)"
+  - name: bool
+    description: "Boolean value"
+
+builtins:
+  checkSig:
+    signature: "checkSig(sig s, pubkey pk) -> bool"
+    usage: "Verify a signature against a public key"
+  checkMultiSig:
+    signature: "checkMultiSig(sig[] sigs, pubkey[] pks) -> bool"
+    usage: "Verify M-of-N multisig"
+  hash160:
+    signature: "hash160(bytes data) -> bytes20"
+  hash256:
+    signature: "hash256(bytes data) -> bytes32"
+  require:
+    signature: "require(bool condition)"
+    usage: "Abort transaction if condition is false"
+  tx.time:
+    description: "Block time (CLTV). Compare with >= for 'at or after'."
+  tx.age:
+    description: "Relative locktime (CSV). Compare with >= for 'at or after'."
+
+transaction_introspection:
+  inputs:
+    - "tx.inputs.length -> int"
+    - "tx.inputs[this.activeInputIndex].value -> int"
+    - "tx.inputs[this.activeInputIndex].lockingBytecode -> bytes"
+    - "tx.inputs[this.activeInputIndex].tokenCategory -> bytes32"
+    - "tx.inputs[this.activeInputIndex].tokenAmount -> int"
+  outputs:
+    - "tx.outputs.length -> int"
+    - "tx.outputs[n].value -> int"
+    - "tx.outputs[n].lockingBytecode -> bytes"
+    - "tx.outputs[n].tokenCategory -> bytes32"
+    - "tx.outputs[n].tokenAmount -> int"
+  self:
+    - "this.activeInputIndex -> int"
+    - "this.lockingBytecode -> bytes"
+
+contract_structure:
+  - "pragma cashscript ^0.13.0; // REQUIRED first line"
+  - "contract Name(type param1, type param2) { ... }"
+  - "function name(type arg1) { require(...); }"
+  - "All validation must use require()"
+  - "No return values from functions"
+  - "Constructor params are immutable contract state"
+  - "Function params are spending arguments"
+
+forbidden_constructs:
+  - "Hardcoded input indices: tx.inputs[0] — use tx.inputs[this.activeInputIndex]"
+  - "State mutation outside constructor"
+  - "Loops or recursion"
+  - "Dynamic array allocation"
