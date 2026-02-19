@@ -44,8 +44,9 @@ class GuardedPipelineEngine:
         last_error = "None"
         previous_violations: Optional[List[ViolationDetail]] = None
         lint_violation_context: str = ""
+        contract_mode = (intent_model.contract_type or "").lower()
         for gen_attempt in range(max_gen_retries):
-            logger.info(f"--- Generation Attempt {gen_attempt + 1} ---")
+            logger.info(f"--- Generation Attempt {gen_attempt + 1} (mode={contract_mode}) ---")
             
             # Step 2A: Draft
             code = await Phase2.run(ir, violations=previous_violations, retry_count=gen_attempt)
@@ -59,11 +60,10 @@ class GuardedPipelineEngine:
                 continue
 
             # Step 2B.5: DSL Lint Gate — deterministic structural check BEFORE compile
-            # If this fails, we retry Phase 2 directly, skipping the compile loop entirely.
-            # This prevents the fix loop from corrupting structural invariants.
+            # contract_mode drives conditional rules (e.g. LNC-008 skips for multisig)
             max_lint_retries = 2
             for lint_attempt in range(max_lint_retries):
-                lint_result = self.dsl_linter.lint(code)
+                lint_result = self.dsl_linter.lint(code, contract_mode=contract_mode)
                 if lint_result["passed"]:
                     lint_violation_context = ""
                     break

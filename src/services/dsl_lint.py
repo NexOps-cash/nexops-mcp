@@ -270,14 +270,38 @@ def _check_deprecated_patterns(code: str) -> list[dict]:
     return violations
 
 
-def _check_covenant_self_anchor(code: str) -> list[dict]:
+def _check_covenant_self_anchor(code: str, contract_mode: str = "") -> list[dict]:
     """
     LNC-008: Covenant functions that access tx.outputs or token fields MUST
     include a self-anchor: require(tx.outputs[N].lockingBytecode == this.activeBytecode).
 
-    Gap 5 fix: Without this, a covenant is structurally open — any script can
-    satisfy the output check and steal funds on re-spend.
+    MODE-CONDITIONAL — only enforced for stateful/covenant contracts:
+      stateful  → enforce
+      escrow    → enforce
+      vesting   → enforce
+      token     → enforce
+      multisig  → SKIP (stateless, no continuity requirement)
+      unknown   → SKIP (be conservative, don't false-fire)
     """
+    COVENANT_MODES = {"stateful", "escrow", "vesting", "token", "covenant"}
+    SKIP_MODES     = {"multisig", "p2pkh", "stateless", ""}
+
+    # Normalise: lowercase, handle None
+    mode = (contract_mode or "").lower().strip()
+
+    # If mode is explicitly stateless → skip
+    if mode in SKIP_MODES:
+        return []
+
+    # If mode is not explicitly covenant → infer from code content
+    if mode not in COVENANT_MODES:
+        # Heuristic: if the code references token fields it must be covenant
+        has_token_refs = bool(re.search(r"\b(?:tokenCategory|tokenAmount)\b", code))
+        has_output_locking = bool(re.search(r"tx\.outputs\[\d+\]\.lockingBytecode", code))
+        if not (has_token_refs or has_output_locking):
+            # No covenant-grade features — skip LNC-008
+            return []
+
     violations = []
     for func_name, body, start_lineno in _function_bodies(code):
         # Only check functions that touch outputs (covenant candidates)
@@ -308,6 +332,69 @@ def _check_covenant_self_anchor(code: str) -> list[dict]:
     return violations
 
 
+def _check_forbidden_syntax(code: str) -> list[dict]:
+    """
+    LNC-009: Detect CashScript-forbidden language constructs that compile correctly
+    in Solidity/JS but are INVALID in CashScript ^0.13.0.
+
+    These cause the exact 'Token recognition error at ?', 'Extraneous input <EOF>'
+    errors seen in the escrow compile loop.
+
+    Catches before compile → converts compile failure to Phase2 retry.
+    """
+    violations = []
+
+    FORBIDDEN_PATTERNS = [
+        # Ternary operator: condition ? a : b
+        # NOTE: Only flag when ? is not inside a string literal (rough heuristic)
+        (r"[^'\"\w]\?[^\?\s]",
+         "Ternary operator (?:) is NOT supported in CashScript. Use require() instead."),
+        # Compound assignment operators
+        (r"(?<![=!<>])\+=",
+         "+= is NOT supported. CashScript has no mutable variables.  Use: int y = x + n;"),
+        (r"(?<![=!<>])-=",
+         "-= is NOT supported. CashScript has no mutable variables. Use: int y = x - n;"),
+        (r"(?<![=!<>])\*=",
+         "*= is NOT supported. CashScript has no mutable variables."),
+        (r"(?<![=!<>])/=",
+         "/= is NOT supported. CashScript has no mutable variables."),
+        # Increment / decrement
+        (r"\+\+",
+         "++ is NOT supported. CashScript has no mutation. Use: int y = x + 1;"),
+        (r"(?<!-)--(?!-)",
+         "-- is NOT supported. CashScript has no mutation. Use: int y = x - 1;"),
+        # Control flow forbidden in CashScript
+        (r"\bfor\s*\(",
+         "for(...) loops are NOT supported in CashScript. Unroll manually."),
+        (r"\bwhile\s*\(",
+         "while(...) loops are NOT supported in CashScript."),
+        (r"\bswitch\s*\(",
+         "switch(...) is NOT supported in CashScript."),
+        # return statement (functions have no return value)
+        (r"\breturn\b",
+         "return is NOT valid in CashScript functions. Use only require() statements."),
+        # if/else branching (must use require)
+        (r"\bif\s*\(",
+         "if(...) is NOT supported in CashScript. Use require() for all conditionals."),
+        (r"\belse\b",
+         "else is NOT supported in CashScript. Use require() for all conditionals."),
+    ]
+
+    for lineno, line in _lines(code):
+        # Skip comment lines
+        stripped = line.strip()
+        if stripped.startswith("//"):
+            continue
+        for pattern, msg in FORBIDDEN_PATTERNS:
+            if re.search(pattern, line):
+                violations.append({
+                    "rule_id": "LNC-009",
+                    "message": msg,
+                    "line_hint": lineno,
+                })
+    return violations
+
+
 # ── Main DSLLinter class ──────────────────────────────────────────────────────
 
 class DSLLinter:
@@ -319,19 +406,26 @@ class DSLLinter:
     """
 
     RULES = [
-        _check_hardcoded_input_index,   # LNC-001 a/b/c
-        _check_unused_variables,        # LNC-002  (heuristic)
-        _check_value_anchoring,         # LNC-003  (any output index)
-        _check_implicit_output_ordering,# LNC-004  (Gap 4 fix — was missing)
-        _check_fee_arithmetic,          # LNC-005
-        _check_wrong_self_reference,    # LNC-006
-        _check_deprecated_patterns,     # LNC-007
-        _check_covenant_self_anchor,    # LNC-008  (Gap 5 fix — new)
+        _check_hardcoded_input_index,    # LNC-001 a/b/c
+        _check_unused_variables,         # LNC-002  (heuristic)
+        _check_value_anchoring,          # LNC-003  (any output index)
+        _check_implicit_output_ordering, # LNC-004
+        _check_fee_arithmetic,           # LNC-005
+        _check_wrong_self_reference,     # LNC-006
+        _check_deprecated_patterns,      # LNC-007
+        _check_covenant_self_anchor,     # LNC-008  (mode-conditional)
+        _check_forbidden_syntax,         # LNC-009  (ternary, loops, etc.)
     ]
 
-    def lint(self, code: str) -> dict[str, Any]:
+    def lint(self, code: str, contract_mode: str = "") -> dict[str, Any]:
         """
         Run all lint rules against the provided CashScript source.
+
+        Args:
+            code:          CashScript source to validate
+            contract_mode: Optional contract type hint from the intent model.
+                           Drives conditional rules (e.g. LNC-008).
+                           Values: 'multisig' | 'escrow' | 'vesting' | 'stateful' | 'token' | ''
 
         Returns:
             {
@@ -348,7 +442,12 @@ class DSLLinter:
         all_violations: list[dict] = []
         for rule_fn in self.RULES:
             try:
-                all_violations.extend(rule_fn(code))
+                import inspect
+                sig = inspect.signature(rule_fn)
+                if "contract_mode" in sig.parameters:
+                    all_violations.extend(rule_fn(code, contract_mode=contract_mode))
+                else:
+                    all_violations.extend(rule_fn(code))
             except Exception as exc:
                 logger.warning(f"[DSLLinter] Rule {rule_fn.__name__} raised: {exc}")
 
@@ -357,7 +456,7 @@ class DSLLinter:
             for v in all_violations:
                 logger.warning(f"[DSLLint] {v['rule_id']} L{v['line_hint']}: {v['message']}")
         else:
-            logger.info("[DSLLint] PASSED — no structural violations.")
+            logger.info(f"[DSLLint] PASSED (mode={contract_mode or 'auto'}) — no violations.")
 
         return {"passed": passed, "violations": all_violations}
 
