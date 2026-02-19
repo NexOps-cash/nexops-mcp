@@ -27,6 +27,66 @@ logger = logging.getLogger("nexops.pipeline")
 
 MAX_RETRIES = 3
 
+
+# ─── Unified DSL Rules (Steps 2 + 3) ─────────────────────────────────────────
+# Single source of truth injected into BOTH synthesis AND fix loop prompts.
+# Edit here; nowhere else.
+
+def build_unified_dsl_rules() -> str:
+    """
+    Canonical, version-pinned DSL rule block for CashScript ^0.13.0.
+
+    Injected verbatim into:
+      - Phase 2 synthesis system prompt
+      - Syntax-fix loop system prompt
+
+    NEVER duplicate or diverge these rules elsewhere.
+    """
+    return """=== CashScript ^0.13.0 DSL RULES (non-negotiable) ===
+
+VERSION: Target ONLY CashScript ^0.13.0. Do NOT use deprecated 0.12.x patterns.
+
+FILE STRUCTURE:
+- First line MUST be: pragma cashscript ^0.13.0;
+- Only contract { ... } at file scope. No bare statements.
+
+SELF-REFERENCE:
+- this.activeBytecode     ← CORRECT (^0.13.0)
+- this.lockingBytecode    ← DOES NOT EXIST — FORBIDDEN
+
+INPUT ACCESS:
+- tx.inputs[this.activeInputIndex].value  ← ALWAYS use activeInputIndex
+- tx.inputs[0]                            ← FORBIDDEN — hardcoded index
+- tx.inputs[i].time                       ← DOES NOT EXIST — use tx.time
+
+OUTPUT RULES:
+- require(tx.outputs.length == N) BEFORE accessing any tx.outputs[i]
+- require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value)  ← MANDATORY value anchor
+- NEVER subtract fees: e.g. .value - fee  ← FORBIDDEN
+- Use a named constructor param (int fee) if fee is needed
+
+VALIDATION:
+- Use require() for ALL validation — no return values, no if/else branching
+- this.activeInputIndex == 0 in a require() ← FORBIDDEN — not a security guard
+
+MULTISIG:
+- Accumulate: int valid = 0; valid += checkSig(s1, pk1) ? 1 : 0; require(valid >= N);
+- NEVER nest &&/|| for threshold logic
+- require(pk1 != pk2) for ALL key pairs (distinctness)
+
+TIMELOCK:
+- tx.time >= N is CLTV (block height or timestamp)
+- tx.age  >= N is CSV  (relative timelock)
+
+TYPES (^0.13.0):
+- LockingBytecodeP2PKH(bytes20 hash)  ← valid constructor
+- LockingBytecodeP2SH20(bytes20 hash) ← valid constructor
+- bytes32 vs bytes20: these are DISTINCT — never assign without cast
+
+FORBIDDEN KEYWORDS (Solidity / EVM — causes rejection):
+msg.sender, mapping, emit, modifier, payable, view, pure,
+constructor(), uint256, address, event, indexed"""
+
 # ─── Structured Knowledge Loader ─────────────────────────────────────
 
 # Tags that require covenant/output/token validation rules
@@ -268,36 +328,27 @@ def _build_phase2_prompt(
     # ── SYSTEM PROMPT (static, cacheable) ──────────────────────────────
     if needs_covenant:
         covenant_rule = (
-            "COVENANT: require(tx.outputs.length==N); "
+            "COVENANT MODE: require(tx.outputs.length==1); "
             "require(tx.outputs[0].lockingBytecode==this.activeBytecode); "
-            "validate value and tokenCategory/tokenAmount if tokens involved."
+            "require(tx.outputs[0].value==tx.inputs[this.activeInputIndex].value); "
+            "Also validate tokenCategory/tokenAmount if tokens involved."
         )
     else:
         covenant_rule = (
-            "SIGNATURE-ONLY: Use ONLY checkSig()/checkMultiSig() and require(). "
-            "DO NOT add lockingBytecode, tokenCategory, tokenAmount, or output count checks."
+            "SIGNATURE-ONLY MODE: Use ONLY checkSig()/checkMultiSig() and require(). "
+            "Still enforce: require(tx.outputs.length==1) and value anchor. "
+            "DO NOT add lockingBytecode continuity checks."
         )
+
+    unified_rules = build_unified_dsl_rules()
 
     system_prompt = f"""You are a Secure CashScript Code Generator. Output ONLY compilable CashScript ^0.13.0 code.
 
-DSL RULES (non-negotiable):
-- pragma cashscript ^0.13.0; is REQUIRED as first line
-- Use require() for ALL validation. No return values.
-- Self-reference: this.activeBytecode (NOT this.lockingBytecode — does not exist)
-- Timelock: tx.time >= N (NOT tx.inputs[i].time — does not exist)
-- Own input: tx.inputs[this.activeInputIndex].value (NEVER tx.inputs[0])
-- Multisig threshold: integer accumulation of checkSig() results, NOT nested &&/||
-- Distinctness: require(pk1 != pk2) for ALL pubkey pairs
-- Output count: require(tx.outputs.length == N) in every spending function
-- Value anchor: require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value) — ALWAYS
-- NO-HARDCODED-INDEX: NEVER write require(this.activeInputIndex == 0) — this is not a guard
-- {covenant_rule}
+{unified_rules}
 
-FORBIDDEN (causes rejection): msg.sender, mapping, emit, modifier, payable, view, pure,
-constructor(), uint256, address, this.lockingBytecode, tx.inputs[i].time,
-require(this.activeInputIndex == 0)
+CONTRACT MODE: {covenant_rule}
 
-OUTPUT: Return ONLY the .cash code. No markdown. No explanation. No reasoning traces."""
+OUTPUT: Return ONLY the .cash source. No markdown fences. No comments explaining rules. No reasoning traces."""
 
     # ── USER PROMPT (dynamic) ───────────────────────────────────────────
     # Compact intent JSON — no indentation

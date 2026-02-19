@@ -8,9 +8,11 @@ from src.models import (
     ViolationDetail,
 )
 from src.services.pipeline import Phase1, Phase2, Phase3
+from src.services.pipeline import build_unified_dsl_rules
 from src.services.language_guard import get_language_guard
 from src.services.compiler import get_compiler_service
 from src.services.sanity_checker import get_sanity_checker
+from src.services.dsl_lint import get_dsl_linter
 
 logger = logging.getLogger("nexops.pipeline_engine")
 
@@ -24,6 +26,7 @@ class GuardedPipelineEngine:
         self.language_guard = get_language_guard()
         self.compiler = get_compiler_service()
         self.sanity_checker = get_sanity_checker()
+        self.dsl_linter = get_dsl_linter()
 
     async def generate_guarded(self, intent: str, security_level: str = "high") -> Dict[str, Any]:
         """
@@ -40,20 +43,51 @@ class GuardedPipelineEngine:
         max_gen_retries = 2
         last_error = "None"
         previous_violations: Optional[List[ViolationDetail]] = None
+        lint_violation_context: str = ""
         for gen_attempt in range(max_gen_retries):
             logger.info(f"--- Generation Attempt {gen_attempt + 1} ---")
             
             # Step 2A: Draft
-            # Pass violations from previous Phase 3 failure for targeted retry feedback
             code = await Phase2.run(ir, violations=previous_violations, retry_count=gen_attempt)
             
             # Step 2B: Language Guard (Fast Static Filter)
             guard_failure = self.language_guard.validate(code)
             if guard_failure:
                 logger.warning(f"Language Guard failed: {guard_failure}. Regenerating...")
-                # Clear previous violations since this is a language-level failure
                 previous_violations = None
-                continue # Retry generation
+                lint_violation_context = ""
+                continue
+
+            # Step 2B.5: DSL Lint Gate — deterministic structural check BEFORE compile
+            # If this fails, we retry Phase 2 directly, skipping the compile loop entirely.
+            # This prevents the fix loop from corrupting structural invariants.
+            max_lint_retries = 2
+            for lint_attempt in range(max_lint_retries):
+                lint_result = self.dsl_linter.lint(code)
+                if lint_result["passed"]:
+                    lint_violation_context = ""
+                    break
+                # Summarize violations for targeted Phase 2 retry
+                lint_summary = self.dsl_linter.format_for_prompt(lint_result["violations"])
+                logger.warning(
+                    f"[DSLLint] {len(lint_result['violations'])} violations on attempt {lint_attempt+1}. "
+                    f"Injecting into Phase2 retry..."
+                )
+                if lint_attempt < max_lint_retries - 1:
+                    # Inject lint violations as violation_context for next Phase2 call
+                    from src.models import ViolationDetail
+                    lint_violations = [
+                        ViolationDetail(
+                            rule=v["rule_id"],
+                            reason=v["message"],
+                            exploit="",
+                            fix_hint=f"Line {v['line_hint']}",
+                        )
+                        for v in lint_result["violations"]
+                    ]
+                    code = await Phase2.run(ir, violations=lint_violations, retry_count=gen_attempt)
+                else:
+                    logger.error("[DSLLint] Lint loop exhausted — proceeding to compile with violations")
 
             # Step 2C: Compile Gate (Internal Fix Loop)
             max_fix_retries = 3
@@ -71,32 +105,29 @@ class GuardedPipelineEngine:
                 
                 last_error = compile_result["error"]
                 logger.warning(f"Compile failed: {last_error}. Attempting fix...")
-                
-                # Feedback loop to LLM for syntax fix
                 code = await self._request_syntax_fix(code, last_error, ir)
 
             if not compile_success:
                 logger.error(f"Compile loop exhausted after {max_fix_retries} attempts. Retrying full generation...")
-                # Clear previous violations since syntax errors need full regeneration
                 previous_violations = None
-                continue # Full Generation Retry
+                lint_violation_context = ""
+                continue
 
             # PHASE 3: Toll Gate (Security Invariants)
             toll_gate = Phase3.validate(code)
             if not toll_gate.passed:
                 logger.warning(f"Toll Gate failed with {len(toll_gate.violations)} violations. Retrying with violation feedback...")
-                # Store violations for next retry - Phase2 will use them for targeted fixes
                 previous_violations = toll_gate.violations
                 ir.metadata.retry_count = gen_attempt + 1
-                continue # Full Generation Retry with violation context
+                continue
 
             # PHASE 4: Intent Sanity Check
             sanity_result = self.sanity_checker.validate(code, intent_model)
             if not sanity_result["success"]:
                 logger.warning(f"Sanity Check failed: {sanity_result['violations']}. Retrying full generation...")
-                # Clear previous violations since sanity check failures need full regeneration
                 previous_violations = None
-                continue # Full Generation Retry
+                lint_violation_context = ""
+                continue
 
             # SUCCESS !
             return {
@@ -107,7 +138,7 @@ class GuardedPipelineEngine:
                     "intent_model": intent_model.dict(),
                     "toll_gate": toll_gate.dict(),
                     "sanity_check": sanity_result,
-                    "session_id": "guarded-session" # Placeholder
+                    "session_id": "guarded-session"
                 }
             }
 
@@ -144,16 +175,24 @@ class GuardedPipelineEngine:
         # ── LLM fallback for non-deterministic errors ────────────────────────────
         from src.services.llm.factory import LLMFactory
 
-        system = (
-            "You are a CashScript syntax fixer. "
-            "Fix ONLY the compiler error shown. "
-            "Do NOT change logic, intent, or structure. "
-            "Return ONLY the complete fixed .cash code. No markdown. No explanation."
-        )
+        unified_rules = build_unified_dsl_rules()
+        system = f"""You are performing CashScript syntax repair ONLY.
+
+You MUST preserve ALL structural invariants below.
+You MUST NOT weaken value anchoring.
+You MUST NOT introduce hardcoded indices.
+You MUST NOT remove output length guards.
+You MUST NOT change business logic, thresholds, or signatures.
+Fix ONLY token-level grammar errors shown in the compiler error.
+
+{unified_rules}
+
+Return ONLY the complete fixed .cash source. No markdown. No explanation."""
+
         user = f"COMPILER ERROR:\n{error}\n\nCODE:\n{code}\n\nFixed code:"
 
         llm = LLMFactory.get_provider("fix")
-        raw_response = await llm.complete(user, system=system)
+        raw_response = await llm.complete(user, system=system, max_tokens=400)
 
         from src.services.pipeline import _extract_cash_code
         return _extract_cash_code(raw_response)
