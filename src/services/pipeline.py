@@ -288,10 +288,14 @@ DSL RULES (non-negotiable):
 - Own input: tx.inputs[this.activeInputIndex].value (NEVER tx.inputs[0])
 - Multisig threshold: integer accumulation of checkSig() results, NOT nested &&/||
 - Distinctness: require(pk1 != pk2) for ALL pubkey pairs
+- Output count: require(tx.outputs.length == N) in every spending function
+- Value anchor: require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value) — ALWAYS
+- NO-HARDCODED-INDEX: NEVER write require(this.activeInputIndex == 0) — this is not a guard
 - {covenant_rule}
 
 FORBIDDEN (causes rejection): msg.sender, mapping, emit, modifier, payable, view, pure,
-constructor(), uint256, address, this.lockingBytecode, tx.inputs[i].time
+constructor(), uint256, address, this.lockingBytecode, tx.inputs[i].time,
+require(this.activeInputIndex == 0)
 
 OUTPUT: Return ONLY the .cash code. No markdown. No explanation. No reasoning traces."""
 

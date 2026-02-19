@@ -47,7 +47,8 @@ introspection_fields:
 
 canonical_covenant_pattern:
   description: "Standard self-preservation check for stateful/covenant contracts"
+  note: "NEVER subtract fees. Use exact value equality or a named 'fee' constructor param."
   shape: |
     require(tx.outputs.length == 1);
     require(tx.outputs[0].lockingBytecode == tx.inputs[this.activeInputIndex].lockingBytecode);
-    require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value - fee);
+    require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);

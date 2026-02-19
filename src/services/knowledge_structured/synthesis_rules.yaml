@@ -24,11 +24,16 @@ multisig:
       - "Distinctness checks: require(pk1 != pk2); require(pk1 != pk3); require(pk2 != pk3);"
 
   canonical_2_of_2:
-    description: "Standard 2-of-2 multisig pattern."
+    description: "Standard 2-of-2 multisig pattern with output anchoring."
     shape: |
       require(pk1 != pk2);
+      require(tx.outputs.length == 1);
+      require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
       require(checkSig(sig1, pk1));
       require(checkSig(sig2, pk2));
+    notes:
+      - "Output count MUST be validated to prevent extra outputs draining funds."
+      - "Output value MUST equal input value — no implicit fee arithmetic."
 
 timelock:
   rules:
@@ -73,3 +78,11 @@ general:
     rule: "Do not write tautological guards like require(x == x). All guards must be meaningful."
   - id: NO-EMPTY-FUNCTION
     rule: "Every function body must contain at least one require() statement."
+  - id: NO-HARDCODED-INDEX
+    rule: "NEVER write require(this.activeInputIndex == 0). This is NOT a valid security guard."
+    note: "this.activeInputIndex is for FIELD ACCESS only: tx.inputs[this.activeInputIndex].value"
+    correct: "tx.inputs[this.activeInputIndex].lockingBytecode == this.activeBytecode"
+    wrong:   "require(this.activeInputIndex == 0)  // FORBIDDEN"
+  - id: VALUE-ANCHORING
+    rule: "Every spending function MUST enforce exact output value: require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value)."
+    note: "This prevents partial fund drain. No fee arithmetic — use a named 'fee' constructor param if needed."
