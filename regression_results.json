@@ -1,0 +1,53 @@
+{
+  "1_multisig": {
+    "status": "SUCCESS",
+    "actual_model": "llama-3.3-70b-versatile",
+    "success_label": "Groq-Llama-3.3-Phase1-Primary",
+    "prompt_total_chars": 7338,
+    "prompt_sys_chars": 988,
+    "prompt_user_chars": 6350,
+    "gen_attempts": 2,
+    "fix_attempts_llm": 2,
+    "fix_attempts_det": 0,
+    "language_guard_triggers": 0,
+    "compile_exhausted": "no",
+    "toll_gate_violations": 4,
+    "structural_score": 0.79,
+    "output_chars": 331,
+    "elapsed_sec": 13.58
+  },
+  "2_escrow": {
+    "status": "FAILED: Guarded pipeline failed to converge after multiple attempts.",
+    "actual_model": "llama-3.3-70b-versatile",
+    "success_label": "Groq-Llama-3.3-Phase1-Primary",
+    "prompt_total_chars": 10508,
+    "prompt_sys_chars": 1008,
+    "prompt_user_chars": 9500,
+    "gen_attempts": 2,
+    "fix_attempts_llm": 6,
+    "fix_attempts_det": 0,
+    "language_guard_triggers": 0,
+    "compile_exhausted": "yes",
+    "toll_gate_violations": 4,
+    "structural_score": 0.79,
+    "output_chars": 0,
+    "elapsed_sec": 34.72
+  },
+  "3_vesting": {
+    "status": "SUCCESS",
+    "actual_model": "llama-3.3-70b-versatile",
+    "success_label": "Groq-Llama-3.3-Phase1-Primary",
+    "prompt_total_chars": 9690,
+    "prompt_sys_chars": 1008,
+    "prompt_user_chars": 8682,
+    "gen_attempts": 1,
+    "fix_attempts_llm": 1,
+    "fix_attempts_det": 0,
+    "language_guard_triggers": 0,
+    "compile_exhausted": "no",
+    "toll_gate_violations": 0,
+    "structural_score": 1.0,
+    "output_chars": 1986,
+    "elapsed_sec": 10.72
+  }
+}
