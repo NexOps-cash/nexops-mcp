@@ -154,12 +154,22 @@ def _check_value_anchoring(code: str) -> list[dict]:
         if not has_output_guard:
             continue
 
-        # Accept: tx.outputs[<any digit(s)>].value == tx.inputs[this.activeInputIndex].value
-        # Also accept: tx.outputs[<idx>].value == <anything involving activeInputIndex>
-        has_value_anchor = bool(re.search(
-            r"require\s*\(\s*tx\.outputs\[\d+\]\.value\s*==",
+        # Accept direct equality anchor:
+        # require(tx.outputs[N].value == tx.inputs[this.activeInputIndex].value)
+
+        direct_anchor = bool(re.search(
+            r"require\s*\(\s*tx\.outputs\[\d+\]\.value\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.value\s*\)",
             body,
         ))
+
+        # Accept sum-preservation pattern:
+        # require(tx.outputs[0].value + tx.outputs[1].value == tx.inputs[this.activeInputIndex].value)
+        sum_anchor = bool(re.search(
+            r"require\s*\(\s*tx\.outputs\[\d+\]\.value\s*\+\s*tx\.outputs\[\d+\]\.value\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.value\s*\)",
+            body,
+        ))
+
+        has_value_anchor = direct_anchor or sum_anchor
         if not has_value_anchor:
             violations.append({
                 "rule_id": "LNC-003",
@@ -270,6 +280,67 @@ def _check_deprecated_patterns(code: str) -> list[dict]:
     return violations
 
 
+def _check_timelock_standalone(code: str) -> list[dict]:
+    """
+    LNC-010: tx.time and tx.age must appear ONLY in standalone require()
+    statements of the form:
+        require(tx.time >= X);
+        require(tx.age >= X);
+    """
+
+    violations = []
+
+    for func_name, body, start_lineno in _function_bodies(code):
+        for m in re.finditer(r"require\s*\((.*?)\)", body):
+            inner = m.group(1)
+
+            # If timelock appears but is chained
+            if "tx.time" in inner or "tx.age" in inner:
+                # Must match EXACT standalone pattern
+                if not re.fullmatch(r"\s*tx\.(time|age)\s*>=\s*[\w\d_]+\s*", inner):
+                    lineno = start_lineno + body[: m.start()].count("\n")
+                    violations.append({
+                        "rule_id": "LNC-010",
+                        "message": (
+                            "tx.time / tx.age must be used only as standalone "
+                            "require(tx.time >= X); not chained or nested."
+                        ),
+                        "line_hint": lineno,
+                    })
+
+    return violations
+
+
+def _check_division_guard(code: str) -> list[dict]:
+    """
+    LNC-011: Any division must have a prior require(divisor > 0)
+    inside the same function body.
+    """
+
+    violations = []
+
+    for func_name, body, start_lineno in _function_bodies(code):
+        # Find all divisions: a / b
+        for m in re.finditer(r"/\s*(\w+)", body):
+            divisor = m.group(1)
+
+            # Check for guard
+            guard_pattern = rf"require\s*\(\s*{re.escape(divisor)}\s*>\s*0\s*\)"
+            has_guard = re.search(guard_pattern, body)
+
+            if not has_guard:
+                lineno = start_lineno + body[: m.start()].count("\n")
+                violations.append({
+                    "rule_id": "LNC-011",
+                    "message": (
+                        f"Division by '{divisor}' without require({divisor} > 0) guard."
+                    ),
+                    "line_hint": lineno,
+                })
+
+    return violations
+
+
 def _check_covenant_self_anchor(code: str, contract_mode: str = "") -> list[dict]:
     """
     LNC-008: Covenant functions that access tx.outputs or token fields MUST
@@ -284,7 +355,7 @@ def _check_covenant_self_anchor(code: str, contract_mode: str = "") -> list[dict
       unknown   → SKIP (be conservative, don't false-fire)
     """
     COVENANT_MODES = {"stateful", "escrow", "vesting", "token", "covenant"}
-    SKIP_MODES     = {"multisig", "p2pkh", "stateless", ""}
+    SKIP_MODES     = {"multisig", "multisig_simple_spend", "p2pkh", "stateless", ""}
 
     # Normalise: lowercase, handle None
     mode = (contract_mode or "").lower().strip()
@@ -413,6 +484,8 @@ class DSLLinter:
         _check_fee_arithmetic,           # LNC-005
         _check_wrong_self_reference,     # LNC-006
         _check_deprecated_patterns,      # LNC-007
+        _check_timelock_standalone,      # LNC-010
+        _check_division_guard,           # LNC-011
         _check_covenant_self_anchor,     # LNC-008  (mode-conditional)
         _check_forbidden_syntax,         # LNC-009  (ternary, loops, etc.)
     ]

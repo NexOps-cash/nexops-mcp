@@ -336,7 +336,9 @@ def _build_phase2_prompt(
     else:
         covenant_rule = (
             "SIGNATURE-ONLY MODE: Use ONLY checkSig()/checkMultiSig() and require(). "
-            "Still enforce: require(tx.outputs.length==1) and value anchor. "
+            "If contract performs a split, enforce exact tx.outputs.length == N and "
+            "sum-preservation value invariant. "
+            "If single-output spend, enforce strict single-output value anchor. "
             "DO NOT add lockingBytecode continuity checks."
         )
 
@@ -461,13 +463,13 @@ def _derive_mandatory_pattern(rule: str) -> str:
     patterns = {
         "implicit_output_ordering": "Validate destination values ONLY AFTER establishing output count and index consistency.",
         "missing_output_limit": "require(tx.outputs.length == 1); // Or exact expected count",
-        "unvalidated_position": "require(this.activeInputIndex == 0);",
+        "unvalidated_position": "Validate output index via explicit tx.outputs.length guard before accessing tx.outputs[N].",
         "fee_assumption_violation": "REMOVE all (inputValue - outputValue) patterns. Use fixed output values.",
         "evm_hallucination": "REMOVE msg.sender, mapping, emit, modifier, payable, etc.",
         "empty_function_body": "Implement function logic using require() checks.",
         "semantic_type_mismatch": "Ensure type consistency in comparisons.",
         "multisig_distinctness_flaw": "require(pk1 != pk2); require(pk1 != pk3); // Distinctness check for ALL signer pairs",
-        "missing_value_enforcement": "require(tx.outputs[0].value == amount);",
+        "missing_value_enforcement": "Enforce exact value preservation using either direct anchor (out[N] == input value) OR sum-preservation (out[0] + out[1] == input value).",
         "weak_output_count_limit": "require(tx.outputs.length == 1);",
         "missing_output_anchor": "Only required for escrow/stateful contracts. Skip for signature-only contracts. For covenant contracts: require(tx.outputs[0].lockingBytecode == this.activeBytecode);",
         "time_validation_error": "require(tx.time >= timeout);  // tx.time is block time. NEVER use tx.inputs[i].time — it does not exist.",
@@ -484,7 +486,7 @@ def _derive_fix_hint(rule: str) -> str:
     hints = {
         "implicit_output_ordering": "Validate lockingBytecode on every tx.outputs[N] before accessing other properties.",
         "missing_output_limit": "Add require(tx.outputs.length == N) in every function.",
-        "unvalidated_position": "Add require(this.activeInputIndex == 0) or validate via lockingBytecode.",
+        "unvalidated_position": "Add explicit require(tx.outputs.length == N) and validate output index before accessing tx.outputs[N].",
         "fee_assumption_violation": "Remove fee calculations. Use exact output amounts.",
         "evm_hallucination": "Remove all Solidity/EVM syntax.",
         "empty_function_body": "Add require() statements enforcing transaction constraints.",

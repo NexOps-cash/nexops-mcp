@@ -87,7 +87,14 @@ class GuardedPipelineEngine:
                     ]
                     code = await Phase2.run(ir, violations=lint_violations, retry_count=gen_attempt)
                 else:
-                    logger.error("[DSLLint] Lint loop exhausted — proceeding to compile with violations")
+                    logger.error("[DSLLint] Lint loop exhausted — forcing full regeneration.")
+                    previous_violations = None
+                    lint_violation_context = ""
+                    break  # Exit lint loop and trigger full generation retry
+
+            # If lint failed after retries, restart generation attempt
+            if lint_result and not lint_result["passed"]:
+                continue
 
             # Step 2C: Compile Gate (Internal Fix Loop)
             max_fix_retries = 3
@@ -171,6 +178,37 @@ class GuardedPipelineEngine:
             if fixed != code:
                 logger.info(f"[Fix] Deterministic: stripped unused variable '{var_name}' (no LLM call)")
                 return fixed.strip()
+
+        # ── Deterministic fix: Extraneous input '<EOF>' (usually missing closing brace) ──
+        if "Extraneous input '<EOF>'" in error:
+            if code.count("{") > code.count("}"):
+                logger.info("[Fix] Deterministic: adding missing closing brace")
+                return (code + "\n}").strip()
+
+        # ── Deterministic fix: Extraneous input 'tx.time' (misplaced timelock) ──
+        if "Extraneous input 'tx.time'" in error or "Extraneous input 'tx.age'" in error:
+            # Remove any malformed nested tx.time/age usage; keep only standalone require form
+            fixed = _re.sub(
+                r"require\s*\(\s*(.*?)tx\.(time|age)\s*>=\s*(.*?)&&.*?\);",
+                r"require(tx.\2 >= \3);",
+                code,
+            )
+            if fixed != code:
+                logger.info("[Fix] Deterministic: normalized malformed timelock usage")
+                return fixed.strip()
+
+        # ── Deterministic fix: bytes → bytes32 mismatch ──
+        if "cannot be assigned to bytes32" in error:
+            fixed = _re.sub(r"\bbytes\s+(\w+)", r"bytes32 \1", code)
+            if fixed != code:
+                logger.info("[Fix] Deterministic: upgraded bytes → bytes32")
+                return fixed.strip()
+
+        # ── Deterministic fix: stray ternary operator '?' ──
+        if "Token recognition error at '?'" in error:
+            fixed = code.replace("?", "")
+            logger.info("[Fix] Deterministic: stripped unsupported ternary '?' token")
+            return fixed.strip()
 
         # ── LLM fallback for non-deterministic errors ────────────────────────────
         from src.services.llm.factory import LLMFactory
