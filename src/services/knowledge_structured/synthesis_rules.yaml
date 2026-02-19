@@ -35,6 +35,34 @@ multisig:
       - "Output count MUST be validated to prevent extra outputs draining funds."
       - "Output value MUST equal input value — no implicit fee arithmetic."
 
+  canonical_split_2party:
+    description: "Canonical 2-party split. EXACTLY two outputs, deterministic ordering."
+    shape: |
+      require(pk1 != pk2);
+      require(tx.outputs.length == 2);
+
+      // Deterministic output ordering
+      require(tx.outputs[0].lockingBytecode == pk1);
+      require(tx.outputs[1].lockingBytecode == pk2);
+
+      // Explicit position validation before value use
+      require(tx.outputs[0].value >= 0);
+      require(tx.outputs[1].value >= 0);
+
+      // Conservation invariant
+      require(
+          tx.outputs[0].value + tx.outputs[1].value ==
+          tx.inputs[this.activeInputIndex].value
+      );
+
+      require(checkSig(sig1, pk1));
+      require(checkSig(sig2, pk2));
+    notes:
+      - "Output order is FIXED: index 0 → pk1, index 1 → pk2."
+      - "Do NOT infer output ordering dynamically."
+      - "Do NOT use division unless divisor validated > 0."
+      - "No loops. No iteration over outputs."
+
 timelock:
   rules:
     - id: TIMELOCK-GTE
@@ -61,7 +89,7 @@ escrow:
       - "require(pk1 != pk2) distinctness checks for all signer pairs"
   reclaim_branch:
     must:
-      - "require(tx.time >= timeoutTimestamp);  // Absolute timelock"
+      - "require(tx.time >= timeoutTimestamp);"
       - "require(checkSig(reclaimerSig, originalSender));  // Reclaimer auth"
     canonical_shape: |
       function reclaim(sig reclaimerSig, int timeoutTimestamp) {
@@ -86,3 +114,5 @@ general:
   - id: VALUE-ANCHORING
     rule: "Every spending function MUST enforce exact output value: require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value)."
     note: "This prevents partial fund drain. No fee arithmetic — use a named 'fee' constructor param if needed."
+  - id: OUTPUT-COUNT-STRICT
+    rule: "Contracts that generate multiple outputs MUST explicitly validate tx.outputs.length before accessing any output index."

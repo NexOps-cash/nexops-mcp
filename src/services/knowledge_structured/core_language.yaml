@@ -34,15 +34,27 @@ builtins:
     signature: "require(bool condition)"
     usage: "Abort transaction if condition is false. All validation uses require()."
   tx.time:
-    description: "Block time (CLTV). Use >= for 'at or after' checks. NOT tx.inputs[i].time."
+    description: "Block time (CLTV). MUST only appear inside a standalone require() comparison."
+    allowed_pattern: "require(tx.time >= <int_or_param>);"
+    forbidden:
+      - "Nested inside arithmetic expressions"
+      - "Inside boolean OR/AND chains"
+      - "Compared using <, <=, =="
+      - "tx.inputs[i].time (does not exist)"
   tx.age:
-    description: "Relative locktime (CSV). Use >= for 'at or after' checks."
+    description: "Relative locktime (CSV). MUST only appear inside a standalone require() comparison."
+    allowed_pattern: "require(tx.age >= <int_or_param>);"
+    forbidden:
+      - "Nested inside arithmetic expressions"
+      - "Inside boolean OR/AND chains"
+      - "Compared using <, <=, =="
 
 safe_introspection:
   - "tx.inputs[this.activeInputIndex].value -> int  // Own input value"
   - "this.activeInputIndex -> int                   // Own input index"
   - "tx.outputs.length -> int                       // Number of outputs"
   - "tx.outputs[n].value -> int                     // Output value"
+  - "tx.outputs[n].lockingBytecode -> bytes  // Used only for deterministic output ordering validation"
 
 self_reference:
   correct: "this.activeBytecode"
@@ -84,6 +96,9 @@ anti_solidity:
   forbidden_patterns:
     - "Hardcoded input indices: tx.inputs[0] — ALWAYS use tx.inputs[this.activeInputIndex]"
     - "tx.inputs[i].time — WRONG — use tx.time for block time"
+    - "require(tx.time >= X && ... )  // Timelock must be standalone require"
+    - "require(... && tx.time >= X)   // Timelock must be standalone require"
+    - "require(tx.age >= X && ... )   // Relative timelock must be standalone require"
     - "State mutation inside functions"
     - "Loops or recursion"
     - "Return statements from spending functions"
