@@ -70,8 +70,11 @@ VALIDATION:
 - this.activeInputIndex == 0 in a require() ← FORBIDDEN — not a security guard
 
 MULTISIG:
-- Accumulate: int valid = 0; valid += checkSig(s1, pk1) ? 1 : 0; require(valid >= N);
-- NEVER nest &&/|| for threshold logic
+- Use checkSig(sig, pubkey) inside require() directly — no accumulation variables
+- 2-of-2: require(checkSig(sig1, pk1)); require(checkSig(sig2, pk2));
+- 2-of-3 threshold: require(checkMultiSig([sig1, sig2], [pk1, pk2, pk3]));
+- NEVER use ternary operator: `checkSig(...) ? 1 : 0` ← FORBIDDEN — ? is invalid CashScript
+- NEVER use += for accumulation ← FORBIDDEN — CashScript has no mutable variables
 - require(pk1 != pk2) for ALL key pairs (distinctness)
 
 TIMELOCK:
@@ -93,7 +96,13 @@ TYPES (^0.13.0):
 
 FORBIDDEN KEYWORDS (Solidity / EVM — causes rejection):
 msg.sender, mapping, emit, modifier, payable, view, pure,
-constructor(), uint256, address, event, indexed"""
+constructor(), uint256, address, event, indexed
+
+FORBIDDEN SYNTAX (CashScript does NOT support these — causes compile failure):
+- Ternary operator:  x ? a : b          ← FORBIDDEN — use require() instead
+- Compound assign:   x += n, x -= n     ← FORBIDDEN — CashScript has no mutation
+- Increment/Decrement: x++, x--         ← FORBIDDEN
+- Control flow:      if/else, for, while, switch, return ← FORBIDDEN"""
 
 # ─── Structured Knowledge Loader ─────────────────────────────────────
 

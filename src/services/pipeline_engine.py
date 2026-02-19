@@ -61,7 +61,7 @@ class GuardedPipelineEngine:
 
             # Step 2B.5: DSL Lint Gate — deterministic structural check BEFORE compile
             # contract_mode drives conditional rules (e.g. LNC-008 skips for multisig)
-            max_lint_retries = 2
+            max_lint_retries = 3
             for lint_attempt in range(max_lint_retries):
                 lint_result = self.dsl_linter.lint(code, contract_mode=contract_mode)
                 if lint_result["passed"]:
@@ -110,9 +110,18 @@ class GuardedPipelineEngine:
                     ir.metadata.compile_fix_count = fix_attempt
                     break
                 
-                last_error = compile_result["error"]
-                logger.warning(f"Compile failed: {last_error}. Attempting fix...")
-                code = await self._request_syntax_fix(code, last_error, ir)
+                error_obj = compile_result.get("error") or {}
+                raw_error = error_obj.get("raw", "") if isinstance(error_obj, dict) else str(error_obj)
+
+                last_error = raw_error
+
+                logger.warning(f"Compile failed [{error_obj.get('type', 'UnknownError')}]: {raw_error[:120]}. Attempting fix...")
+
+                code = await self._request_syntax_fix(
+                    code=code,
+                    error_obj=error_obj,
+                    ir=ir
+                )
 
             if not compile_success:
                 logger.error(f"Compile loop exhausted after {max_fix_retries} attempts. Retrying full generation...")
@@ -159,16 +168,24 @@ class GuardedPipelineEngine:
             }
         }
 
-    async def _request_syntax_fix(self, code: str, error: str, ir: ContractIR) -> str:
+    async def _request_syntax_fix(
+        self,
+        code: str,
+        error_obj: Dict[str, Any],
+        ir: ContractIR
+    ) -> str:
         """Helper to fix syntax errors. Tries deterministic fixes first, then LLM."""
         import re as _re
 
-        # ── Optimization 5: Deterministic fix for 'Unused variable X' ──────────
-        # This avoids 2-3 wasted LLM calls per failure. Regex strips the declaration.
-        unused_match = _re.search(r"Unused variable (\w+)", error)
-        if unused_match:
-            var_name = unused_match.group(1)
-            # Remove the line declaring this variable (e.g. "int foo = ...")
+        # Extract fields from structured error dict
+        error_type  = error_obj.get("type", "UnknownError")
+        error_raw   = error_obj.get("raw", "")
+        error_token = error_obj.get("token", "")
+        error_hint  = error_obj.get("hint", "")
+
+        # ── Deterministic: UnusedVariableError ───────────────────────────────────
+        if error_type == "UnusedVariableError" and error_token:
+            var_name = error_token
             fixed = _re.sub(
                 rf"^\s*\w[\w\[\]]*\s+{_re.escape(var_name)}\s*=.*?;\s*$",
                 "",
@@ -179,15 +196,14 @@ class GuardedPipelineEngine:
                 logger.info(f"[Fix] Deterministic: stripped unused variable '{var_name}' (no LLM call)")
                 return fixed.strip()
 
-        # ── Deterministic fix: Extraneous input '<EOF>' (usually missing closing brace) ──
-        if "Extraneous input '<EOF>'" in error:
+        # ── Deterministic: ExtraneousInputError — missing closing brace ──────────
+        if error_type == "ExtraneousInputError" and error_token == "<EOF>":
             if code.count("{") > code.count("}"):
                 logger.info("[Fix] Deterministic: adding missing closing brace")
                 return (code + "\n}").strip()
 
-        # ── Deterministic fix: Extraneous input 'tx.time' (misplaced timelock) ──
-        if "Extraneous input 'tx.time'" in error or "Extraneous input 'tx.age'" in error:
-            # Remove any malformed nested tx.time/age usage; keep only standalone require form
+        # ── Deterministic: Extraneous tx.time / tx.age (malformed timelock) ──────
+        if error_type == "ExtraneousInputError" and error_token in ("tx.time", "tx.age"):
             fixed = _re.sub(
                 r"require\s*\(\s*(.*?)tx\.(time|age)\s*>=\s*(.*?)&&.*?\);",
                 r"require(tx.\2 >= \3);",
@@ -197,21 +213,22 @@ class GuardedPipelineEngine:
                 logger.info("[Fix] Deterministic: normalized malformed timelock usage")
                 return fixed.strip()
 
-        # ── Deterministic fix: bytes → bytes32 mismatch ──
-        if "cannot be assigned to bytes32" in error:
+        # ── Deterministic: TypeMismatchError — bytes → bytes32 ───────────────────
+        if error_type == "TypeMismatchError" and "bytes32" in error_raw:
             fixed = _re.sub(r"\bbytes\s+(\w+)", r"bytes32 \1", code)
             if fixed != code:
                 logger.info("[Fix] Deterministic: upgraded bytes → bytes32")
                 return fixed.strip()
 
-        # ── Deterministic fix: stray ternary operator '?' ──
-        if "Token recognition error at '?'" in error:
+        # ── Deterministic: ParseError — stray ternary '?' ────────────────────────
+        if error_type == "ParseError" and error_token == "?":
             fixed = code.replace("?", "")
             logger.info("[Fix] Deterministic: stripped unsupported ternary '?' token")
             return fixed.strip()
 
         # ── LLM fallback for non-deterministic errors ────────────────────────────
         from src.services.llm.factory import LLMFactory
+        import json
 
         unified_rules = build_unified_dsl_rules()
         system = f"""You are performing CashScript syntax repair ONLY.
@@ -227,7 +244,15 @@ Fix ONLY token-level grammar errors shown in the compiler error.
 
 Return ONLY the complete fixed .cash source. No markdown. No explanation."""
 
-        user = f"COMPILER ERROR:\n{error}\n\nCODE:\n{code}\n\nFixed code:"
+        error_payload = json.dumps(error_obj, indent=2)
+        user = f"""STRUCTURED COMPILER ERROR (JSON):
+{error_payload}
+
+CODE:
+{code}
+
+Fix ONLY the error described above.
+Return ONLY the complete fixed .cash source."""
 
         llm = LLMFactory.get_provider("fix")
         raw_response = await llm.complete(user, system=system, max_tokens=400)

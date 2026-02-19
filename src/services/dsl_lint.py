@@ -88,8 +88,10 @@ def _check_hardcoded_input_index(code: str) -> list[dict]:
     for func_name, body, start_lineno in _function_bodies(code):
         # Collect all explicit length guards: require(tx.outputs.length == K)
         guarded_lengths: set[int] = set()
-        for gm in re.finditer(r"require\s*\(\s*tx\.outputs\.length\s*==\s*(\d+)\s*\)", body):
-            guarded_lengths.add(int(gm.group(1)))
+        for gm in re.finditer(r"require\s*\(\s*tx\.outputs\.length\s*(==|>=)\s*(\d+)\s*\)", body):
+            op  = gm.group(1)
+            val = int(gm.group(2))
+            guarded_lengths.add(val)  # both == and >= guarantee at least val outputs
 
         for m in re.finditer(r"tx\.outputs\[\s*(\d+)\s*\]", body):
             idx = int(m.group(1))
@@ -136,15 +138,27 @@ def _check_unused_variables(code: str) -> list[dict]:
     return violations
 
 
-def _check_value_anchoring(code: str) -> list[dict]:
+def _check_value_anchoring(code: str, contract_mode: str = "") -> list[dict]:
     """
     LNC-003: Every function with an output length guard MUST anchor at least
     one output value to the corresponding input value.
+
+    MODE-CONDITIONAL — only enforced for covenant-grade contracts:
+      escrow / vesting / token / covenant / stateful → enforce
+      multisig / timelock / stateless / unknown      → SKIP
 
     Gap 1 fix: matches tx.outputs[ANY_INDEX].value, not just [0].
     Also accepts sum-preservation patterns where any output value equals
     tx.inputs[this.activeInputIndex].value.
     """
+    COVENANT_MODES = {"escrow", "vesting", "token", "covenant", "stateful"}
+
+    mode = (contract_mode or "").lower().strip()
+
+    # Skip anchoring for clearly stateless contracts
+    if mode in {"multisig", "timelock", "stateless", ""}:
+        return []
+
     violations = []
     for func_name, body, start_lineno in _function_bodies(code):
         # Only check functions that explicitly guard output count
@@ -366,8 +380,8 @@ def _check_covenant_self_anchor(code: str, contract_mode: str = "") -> list[dict
       multisig  → SKIP (stateless, no continuity requirement)
       unknown   → SKIP (be conservative, don't false-fire)
     """
-    COVENANT_MODES = {"escrow", "vesting", "token", "covenant"}
-    SKIP_MODES     = {"multisig", "multisig_simple_spend", "p2pkh", "stateless", "timelock", ""}
+    COVENANT_MODES = {"vesting", "token", "covenant"}
+    SKIP_MODES     = {"multisig", "multisig_simple_spend", "p2pkh", "stateless", "timelock", "escrow", ""}
 
     # Normalise: lowercase, handle None
     mode = (contract_mode or "").lower().strip()
@@ -378,10 +392,11 @@ def _check_covenant_self_anchor(code: str, contract_mode: str = "") -> list[dict
 
     # If mode is not explicitly covenant → infer from code content
     if mode not in COVENANT_MODES:
-        # Heuristic: if the code references token fields it must be covenant
-        has_token_refs = bool(re.search(r"\b(?:tokenCategory|tokenAmount)\b", code))
-        has_output_locking = bool(re.search(r"tx\.outputs\[\d+\]\.lockingBytecode", code))
-        if not (has_token_refs or has_output_locking):
+        # True covenant = self-continuation (this.activeBytecode) OR token mutation
+        has_token_refs    = bool(re.search(r"\b(?:tokenCategory|tokenAmount)\b", code))
+        has_self_reference = bool(re.search(r"this\.activeBytecode", code))
+
+        if not (has_token_refs or has_self_reference):
             # No covenant-grade features — skip LNC-008
             return []
 
@@ -428,10 +443,13 @@ def _check_forbidden_syntax(code: str) -> list[dict]:
     violations = []
 
     FORBIDDEN_PATTERNS = [
-        # Ternary operator: condition ? a : b
-        # NOTE: Only flag when ? is not inside a string literal (rough heuristic)
-        (r"[^'\"\w]\?[^\?\s]",
+        # Ternary operator — two patterns for belt-and-suspenders coverage:
+        # 1. Full form: word ? expr : expr
+        (r"\b\w+\s*\?\s*[^:]+:\s*[^;{}\n]+",
          "Ternary operator (?:) is NOT supported in CashScript. Use require() instead."),
+        # 2. Bare ? fallback — catch any standalone ? that isn't != or >=
+        (r"(?<![!=<>?])\?(?!\?)",
+         "Ternary operator '?' is NOT supported in CashScript. Use require() instead."),
         # Compound assignment operators
         (r"(?<![=!<>])\+=",
          "+= is NOT supported. CashScript has no mutable variables.  Use: int y = x + n;"),
@@ -464,12 +482,15 @@ def _check_forbidden_syntax(code: str) -> list[dict]:
     ]
 
     for lineno, line in _lines(code):
-        # Skip comment lines
+        # Skip full comment lines
         stripped = line.strip()
         if stripped.startswith("//"):
             continue
+        # Strip inline comments before pattern matching
+        # (prevents comment text from matching patterns AND ensures code portion is scanned correctly)
+        code_part = re.sub(r"//.*$", "", line)
         for pattern, msg in FORBIDDEN_PATTERNS:
-            if re.search(pattern, line):
+            if re.search(pattern, code_part):
                 violations.append({
                     "rule_id": "LNC-009",
                     "message": msg,

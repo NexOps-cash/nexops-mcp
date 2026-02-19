@@ -40,6 +40,8 @@ class LanguageGuard:
         r"pure\s+": "EVM Hallucination: pure modifier does not exist in CashScript.",
         r"revert\s*\(": "EVM Hallucination: revert() does not exist in CashScript. Use require() instead.",
         r"assembly\s*\{": "EVM Hallucination: inline assembly does not exist in CashScript.",
+        # Invalid self-reference — does not exist in CashScript ^0.13.x
+        r"this\.lockingBytecode": "Invalid in CashScript ^0.13.x. Use this.activeBytecode instead.",
     }
 
     # Patterns that are ALLOWED (secure patterns from KB)
@@ -52,7 +54,6 @@ class LanguageGuard:
         r"tx\.inputs\[this\.activeInputIndex\]\.lockingBytecode",  # Required for self-validation
         r"tx\.inputs\[this\.activeInputIndex\]\.tokenCategory",    # Required for token validation
         r"tx\.inputs\[this\.activeInputIndex\]\.tokenAmount",      # Required for token validation
-        r"this\.lockingBytecode",  # Required for covenant continuation
     ]
 
     @staticmethod

@@ -138,26 +138,46 @@ class UnvalidatedPositionDetector(AntiPatternDetector):
     def detect(self, ast: CashScriptAST) -> Optional[Violation]:
         """
         Semantic detection:
-        1. Check if contract validates this.activeInputIndex
-        2. If no validation found → VIOLATION
+        1. If contract uses tx.inputs[this.activeInputIndex] → position-safe, skip
+        2. If contract validates this.activeInputIndex explicitly → safe, skip
+        3. Otherwise → VIOLATION
         """
-        if not ast.validates_input_position():
-            return Violation(
-                rule=f"{self.id}.cash",
-                reason="No input position validation (this.activeInputIndex) found in contract",
-                exploit="Attacker can reorder transaction inputs to bypass validation logic. "
-                        "Without explicit position validation, attacker swaps input positions "
-                        "(e.g., oracle at index 0, main contract at index 1) to make contract "
-                        "read wrong data from wrong position. Multi-contract systems require "
-                        "each contract to know exactly which input index it occupies.",
-                location={
-                    "line": 0,
-                    "function": "all",
-                    "missing": "require(this.activeInputIndex == N)"
-                }
-            )
-        
-        return None
+        import re
+
+        # Contract is position-safe if it accesses inputs via this.activeInputIndex
+        # e.g. tx.inputs[this.activeInputIndex].value — no hardcoded position needed
+        uses_active_index = bool(re.search(
+            r"tx\.inputs\[this\.activeInputIndex\]", ast.code
+        ))
+        if uses_active_index:
+            return None
+
+        # Explicit validation (require(this.activeInputIndex == N)) also clears it
+        if ast.validates_input_position():
+            return None
+
+        # Only fire if the contract hardcodes tx.inputs[0] / tx.inputs[1] etc.
+        # without any position-awareness whatsoever
+        has_hardcoded_input = bool(re.search(r"tx\.inputs\[\s*\d+\s*\]", ast.code))
+        if not has_hardcoded_input:
+            # No hardcoded index at all — contract doesn't access inputs by index
+            return None
+
+        return Violation(
+            rule=f"{self.id}.cash",
+            reason="Hardcoded tx.inputs[N] used without this.activeInputIndex validation",
+            exploit="Attacker can reorder transaction inputs to bypass validation logic. "
+                    "Without explicit position validation, attacker swaps input positions "
+                    "(e.g., oracle at index 0, main contract at index 1) to make contract "
+                    "read wrong data from wrong position. Multi-contract systems require "
+                    "each contract to know exactly which input index it occupies.",
+            location={
+                "line": 0,
+                "function": "all",
+                "missing": "tx.inputs[this.activeInputIndex] or require(this.activeInputIndex == N)"
+            }
+        )
+
 
 
 class FeeAssumptionViolationDetector(AntiPatternDetector):
