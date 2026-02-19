@@ -32,6 +32,10 @@ class GroqProvider(LLMProvider):
                 create_kwargs["max_tokens"] = max_tokens
 
             response = await self.client.chat.completions.create(**create_kwargs)
-            return response.choices[0].message.content
+            actual_model = response.model
+            content = response.choices[0].message.content
+            import logging
+            logging.getLogger("nexops.llm.groq").info(f"[Groq] Response from {actual_model} ({len(content)} chars)")
+            return content
         except Exception as e:
             raise RuntimeError(f"Groq completion failed: {e}")

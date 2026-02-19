@@ -56,13 +56,15 @@ class ResilientProvider(LLMProvider):
                 temp = kwargs.pop("temperature", config.temperature)
                 # Task-level cap takes precedence over call-level cap
                 effective_max_tokens = config.max_tokens or max_tokens
-                return await config.provider.complete(
+                res = await config.provider.complete(
                     prompt,
                     system=system,
                     max_tokens=effective_max_tokens,
                     temperature=temp,
                     **kwargs,
                 )
+                self.logger.info(f"[LLM] Success: {config.label} responded.")
+                return res
             except Exception as e:
                 last_error = e
                 self.logger.warning(f"[LLM] {config.label} failed (Attempt {i+1}): {e}")

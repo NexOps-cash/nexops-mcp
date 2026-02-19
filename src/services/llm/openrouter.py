@@ -38,6 +38,10 @@ class OpenRouterProvider(LLMProvider):
                 create_kwargs["max_tokens"] = max_tokens
 
             response = await self.client.chat.completions.create(**create_kwargs)
-            return response.choices[0].message.content
+            actual_model = response.model
+            content = response.choices[0].message.content
+            import logging
+            logging.getLogger("nexops.llm.openrouter").info(f"[OpenRouter] Response from {actual_model} ({len(content)} chars)")
+            return content
         except Exception as e:
             raise RuntimeError(f"OpenRouter completion failed: {e}")

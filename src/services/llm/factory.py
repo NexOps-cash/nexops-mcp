@@ -61,15 +61,16 @@ class LLMFactory:
                 ))
 
         elif task_type == "phase2":
-            # Claude 3.5 Sonnet via OpenRouter — best instruction-following for CashScript
+            # Claude 4.6 Sonnet via OpenRouter — The latest SOTA (Released Feb 2026)
+            # Exceptional at CashScript structure and covenant logic
             if has_openrouter:
                 configs.append(LLMConfig(
-                    OpenRouterProvider(model="anthropic/claude-3.5-sonnet"),
-                    temperature=0.2,
-                    label="Claude-3.5-Sonnet-Primary",
+                    OpenRouterProvider(model="anthropic/claude-sonnet-4.6"),
+                    temperature=0.2, 
+                    label="Claude-4.6-Sonnet-Primary",
                     max_tokens=_MAX_TOKENS["phase2"],
                 ))
-            # Groq as fallback — free, fast, weaker on complex covenants
+            # Groq as fallback — Llama 3.3
             configs.append(LLMConfig(
                 GroqProvider(model="llama-3.3-70b-versatile"),
                 temperature=0.2,
@@ -78,12 +79,18 @@ class LLMFactory:
             ))
 
         elif task_type == "fix":
-            # Claude Haiku via OpenRouter — cheap, fast, deterministic for syntax fixes
+            # Claude 4.5 Haiku via OpenRouter — Extremely fast, smarter than 3.5 Sonnet
             if has_openrouter:
                 configs.append(LLMConfig(
-                    OpenRouterProvider(model="anthropic/claude-3-haiku"),
+                    OpenRouterProvider(model="anthropic/claude-haiku-4.5"),
                     temperature=0.0,
-                    label="Claude-3-Haiku-Fix-Primary",
+                    label="Claude-4.5-Haiku-Fix-Primary",
+                    max_tokens=_MAX_TOKENS["fix"],
+                ))
+                configs.append(LLMConfig(
+                    OpenRouterProvider(model="anthropic/claude-sonnet-4.6"),
+                    temperature=0.0,
+                    label="Claude-4.6-Sonnet-Fix-Fallback",
                     max_tokens=_MAX_TOKENS["fix"],
                 ))
             # Groq fallback for fix loop
