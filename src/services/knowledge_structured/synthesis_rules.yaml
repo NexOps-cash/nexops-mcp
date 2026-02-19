@@ -24,43 +24,41 @@ multisig:
       - "Distinctness checks: require(pk1 != pk2); require(pk1 != pk3); require(pk2 != pk3);"
 
   canonical_2_of_2:
-    description: "Standard 2-of-2 multisig pattern with output anchoring."
+    description: "Standard 2-of-2 multisig pattern with full output anchoring (value + lockingBytecode continuity)."
     shape: |
       require(pk1 != pk2);
       require(tx.outputs.length == 1);
+      require(tx.outputs[0].lockingBytecode == tx.inputs[this.activeInputIndex].lockingBytecode);
       require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
       require(checkSig(sig1, pk1));
       require(checkSig(sig2, pk2));
     notes:
       - "Output count MUST be validated to prevent extra outputs draining funds."
+      - "lockingBytecode continuity MUST be enforced to prevent output redirection attacks."
       - "Output value MUST equal input value — no implicit fee arithmetic."
 
   canonical_split_2party:
-    description: "Canonical 2-party split. EXACTLY two outputs, deterministic ordering."
+    description: "Canonical 2-party fund split. Pass expected recipient bytecodes as bytes20 constructor params. NO LockingBytecodeP2PKH() constructor calls."
+    constructor_params: "bytes20 recipient1, bytes20 recipient2"
     shape: |
-      require(pk1 != pk2);
+      require(checkSig(sig1, pk1));
+      require(checkSig(sig2, pk2));
       require(tx.outputs.length == 2);
 
-      // Deterministic output ordering
-      require(tx.outputs[0].lockingBytecode == pk1);
-      require(tx.outputs[1].lockingBytecode == pk2);
+      // Recipient validation via constructor-injected bytecodes (no constructor call needed)
+      require(tx.outputs[0].lockingBytecode == recipient1);
+      require(tx.outputs[1].lockingBytecode == recipient2);
 
-      // Explicit position validation before value use
-      require(tx.outputs[0].value >= 0);
-      require(tx.outputs[1].value >= 0);
-
-      // Conservation invariant
+      // MANDATORY: Sum-preservation invariant — total output must equal input
       require(
           tx.outputs[0].value + tx.outputs[1].value ==
           tx.inputs[this.activeInputIndex].value
       );
-
-      require(checkSig(sig1, pk1));
-      require(checkSig(sig2, pk2));
     notes:
-      - "Output order is FIXED: index 0 → pk1, index 1 → pk2."
-      - "Do NOT infer output ordering dynamically."
-      - "Do NOT use division unless divisor validated > 0."
+      - "NEVER call LockingBytecodeP2PKH(...) unless the bytes20 param is explicitly defined."
+      - "Pass recipient1 and recipient2 as bytes20 constructor params — validates locking bytecode directly."
+      - "Sum-preservation is NON-NEGOTIABLE — both values must sum to the input value."
+      - "Do NOT use division for 50/50 split — use explicit value params or subtraction."
       - "No loops. No iteration over outputs."
 
 timelock:

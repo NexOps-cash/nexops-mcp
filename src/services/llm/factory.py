@@ -52,13 +52,6 @@ class LLMFactory:
                 label="Groq-Llama-3.3-Phase1-Primary",
                 max_tokens=_MAX_TOKENS["phase1"],
             ))
-            if has_openrouter:
-                configs.append(LLMConfig(
-                    OpenRouterProvider(model="google/gemini-2.0-flash-exp"),
-                    temperature=0.1,
-                    label="Gemini-Flash-Exp-Fallback",
-                    max_tokens=_MAX_TOKENS["phase1"],
-                ))
 
         elif task_type == "phase2":
             # Claude 4.6 Sonnet via OpenRouter — The latest SOTA (Released Feb 2026)

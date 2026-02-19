@@ -1,0 +1,67 @@
+{
+  "A_split_multisig": {
+    "status": "FAILED: Guarded pipeline failed to converge after multiple attempts.",
+    "contract_mode": "multisig",
+    "actual_model": "llama-3.3-70b-versatile",
+    "prompt_total": 14351,
+    "prompt_sys": 2191,
+    "prompt_user": 12160,
+    "gen_attempts": 2,
+    "fix_attempts_llm": 6,
+    "compile_exhausted": "yes",
+    "lint_passed": false,
+    "lint_violations": [
+      "LNC-003 L4: Function 'split' guards output count but has no value anchor: require(tx.outputs[N].value == tx.inputs[this.activeInputIndex].value)",
+      "LNC-003 L4: Function 'split' guards output count but has no value anchor: require(tx.outputs[N].value == tx.inputs[this.activeInputIndex].value)",
+      "LNC-003 L4: Function 'split' guards output count but has no value anchor: require(tx.outputs[N].value == tx.inputs[this.activeInputIndex].value)",
+      "LNC-003 L4: Function 'spend' guards output count but has no value anchor: require(tx.outputs[N].value == tx.inputs[this.activeInputIndex].value)"
+    ],
+    "last_compile_error": "Found symbol LockingBytecodeP2PKH with type undefined where type function was expected at Line 9, Column 49",
+    "tg_violations": 0,
+    "struct_score": "N/A",
+    "output_chars": 0,
+    "elapsed_sec": 51.36
+  },
+  "B_timelock": {
+    "status": "SUCCESS",
+    "contract_mode": "timelock",
+    "actual_model": "llama-3.3-70b-versatile",
+    "prompt_total": 14116,
+    "prompt_sys": 2191,
+    "prompt_user": 11925,
+    "gen_attempts": 1,
+    "fix_attempts_llm": 1,
+    "compile_exhausted": "no",
+    "lint_passed": false,
+    "lint_violations": [
+      "LNC-008 L5: Covenant function 'withdraw' touches outputs/tokens but has no self-anchor: require(tx.outputs[N].lockingBytecode == this.activeBytecode)",
+      "LNC-008 L5: Covenant function 'withdraw' touches outputs/tokens but has no self-anchor: require(tx.outputs[N].lockingBytecode == this.activeBytecode)"
+    ],
+    "last_compile_error": "none",
+    "tg_violations": 0,
+    "struct_score": 1.0,
+    "output_chars": 472,
+    "elapsed_sec": 11.27
+  },
+  "C_token_burn": {
+    "status": "SUCCESS",
+    "contract_mode": "token",
+    "actual_model": "llama-3.3-70b-versatile",
+    "prompt_total": 13847,
+    "prompt_sys": 2191,
+    "prompt_user": 11656,
+    "gen_attempts": 1,
+    "fix_attempts_llm": 3,
+    "compile_exhausted": "no",
+    "lint_passed": false,
+    "lint_violations": [
+      "LNC-008 L5: Covenant function 'burn' touches outputs/tokens but has no self-anchor: require(tx.outputs[N].lockingBytecode == this.activeBytecode)",
+      "LNC-008 L5: Covenant function 'burn' touches outputs/tokens but has no self-anchor: require(tx.outputs[N].lockingBytecode == this.activeBytecode)"
+    ],
+    "last_compile_error": "Extraneous input 'bytes20' expecting {'~', '(', 'new', '[', 'tx.outputs', 'tx.inputs', '!', '-', BooleanLiteral, NumberLiteral, PrimitiveType, 'bytes', StringLiteral, DateLiteral, HexLiteral, UnsafeCast, NullaryOp, Identifier} at Line 14, Column 47",
+    "tg_violations": 0,
+    "struct_score": 1.0,
+    "output_chars": 622,
+    "elapsed_sec": 19.72
+  }
+}

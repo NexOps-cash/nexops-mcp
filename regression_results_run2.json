@@ -3,9 +3,9 @@
     "status": "FAILED: Guarded pipeline failed to converge after multiple attempts.",
     "actual_model": "anthropic/claude-sonnet-4.6",
     "success_label": "Claude-4.6-Sonnet-Primary",
-    "prompt_total_chars": 8630,
-    "prompt_sys_chars": 1288,
-    "prompt_user_chars": 7342,
+    "prompt_total_chars": 9458,
+    "prompt_sys_chars": 2135,
+    "prompt_user_chars": 7323,
     "gen_attempts": 2,
     "fix_attempts_llm": 2,
     "fix_attempts_det": 0,
@@ -14,14 +14,14 @@
     "toll_gate_violations": 1,
     "structural_score": 0.95,
     "output_chars": 0,
-    "elapsed_sec": 13.92
+    "elapsed_sec": 12.08
   },
   "2_escrow": {
     "status": "FAILED: Guarded pipeline failed to converge after multiple attempts.",
     "actual_model": "anthropic/claude-sonnet-4.6",
     "success_label": "Claude-4.6-Sonnet-Primary",
-    "prompt_total_chars": 11864,
-    "prompt_sys_chars": 1308,
+    "prompt_total_chars": 12747,
+    "prompt_sys_chars": 2191,
     "prompt_user_chars": 10556,
     "gen_attempts": 2,
     "fix_attempts_llm": 6,
@@ -31,23 +31,23 @@
     "toll_gate_violations": 0,
     "structural_score": "N/A",
     "output_chars": 0,
-    "elapsed_sec": 42.31
+    "elapsed_sec": 65.06
   },
   "3_vesting": {
-    "status": "FAILED: Guarded pipeline failed to converge after multiple attempts.",
+    "status": "SUCCESS",
     "actual_model": "anthropic/claude-sonnet-4.6",
     "success_label": "Claude-4.6-Sonnet-Primary",
-    "prompt_total_chars": 11062,
-    "prompt_sys_chars": 1308,
+    "prompt_total_chars": 11945,
+    "prompt_sys_chars": 2191,
     "prompt_user_chars": 9754,
     "gen_attempts": 2,
     "fix_attempts_llm": 4,
     "fix_attempts_det": 0,
     "language_guard_triggers": 0,
     "compile_exhausted": "yes",
-    "toll_gate_violations": 1,
-    "structural_score": 0.95,
-    "output_chars": 0,
-    "elapsed_sec": 35.58
+    "toll_gate_violations": 0,
+    "structural_score": 1.0,
+    "output_chars": 1488,
+    "elapsed_sec": 52.39
   }
 }

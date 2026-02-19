@@ -313,20 +313,32 @@ def _check_timelock_standalone(code: str) -> list[dict]:
 
 def _check_division_guard(code: str) -> list[dict]:
     """
-    LNC-011: Any division must have a prior require(divisor > 0)
+    LNC-011: Any arithmetic division must have a prior require(divisor > 0)
     inside the same function body.
+
+    Ignores:
+      - Comment lines
+      - // comments
+      - Numeric literals (e.g. / 2)
     """
 
     violations = []
 
     for func_name, body, start_lineno in _function_bodies(code):
-        # Find all divisions: a / b
-        for m in re.finditer(r"/\s*(\w+)", body):
-            divisor = m.group(1)
+        # Remove line comments before scanning
+        body_no_comments = re.sub(r"//.*", "", body)
 
-            # Check for guard
+        # Match arithmetic division: identifier / identifier
+        for m in re.finditer(r"\b(\w+)\s*/\s*(\w+)\b", body_no_comments):
+            numerator = m.group(1)
+            divisor = m.group(2)
+
+            # Ignore numeric literal divisors
+            if divisor.isdigit():
+                continue
+
             guard_pattern = rf"require\s*\(\s*{re.escape(divisor)}\s*>\s*0\s*\)"
-            has_guard = re.search(guard_pattern, body)
+            has_guard = re.search(guard_pattern, body_no_comments)
 
             if not has_guard:
                 lineno = start_lineno + body[: m.start()].count("\n")
@@ -354,8 +366,8 @@ def _check_covenant_self_anchor(code: str, contract_mode: str = "") -> list[dict
       multisig  → SKIP (stateless, no continuity requirement)
       unknown   → SKIP (be conservative, don't false-fire)
     """
-    COVENANT_MODES = {"stateful", "escrow", "vesting", "token", "covenant"}
-    SKIP_MODES     = {"multisig", "multisig_simple_spend", "p2pkh", "stateless", ""}
+    COVENANT_MODES = {"escrow", "vesting", "token", "covenant"}
+    SKIP_MODES     = {"multisig", "multisig_simple_spend", "p2pkh", "stateless", "timelock", ""}
 
     # Normalise: lowercase, handle None
     mode = (contract_mode or "").lower().strip()

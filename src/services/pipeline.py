@@ -78,6 +78,14 @@ TIMELOCK:
 - tx.time >= N is CLTV (block height or timestamp)
 - tx.age  >= N is CSV  (relative timelock)
 
+SPLIT (multi-output):
+- MANDATORY: validate tx.outputs.length == N FIRST
+- MANDATORY: sum-preservation invariant MUST be present:
+    require(tx.outputs[0].value + tx.outputs[1].value == tx.inputs[this.activeInputIndex].value);
+- DO NOT use division to calculate shares — risk of division-by-zero
+- Assign lockingBytecode per output using the recipient pubkey/hash
+- DO NOT anchor value to single input value unless single-output
+
 TYPES (^0.13.0):
 - LockingBytecodeP2PKH(bytes20 hash)  ← valid constructor
 - LockingBytecodeP2SH20(bytes20 hash) ← valid constructor
