@@ -369,64 +369,89 @@ def _check_division_guard(code: str) -> list[dict]:
 
 def _check_covenant_self_anchor(code: str, contract_mode: str = "") -> list[dict]:
     """
-    LNC-008: Covenant functions that access tx.outputs or token fields MUST
-    include a self-anchor: require(tx.outputs[N].lockingBytecode == this.activeBytecode).
+    LNC-008: Covenant Self-Anchor Guard.
 
-    MODE-CONDITIONAL — only enforced for stateful/covenant contracts:
-      stateful  → enforce
-      escrow    → enforce
-      vesting   → enforce
-      token     → enforce
-      multisig  → SKIP (stateless, no continuity requirement)
-      unknown   → SKIP (be conservative, don't false-fire)
+    Enforces require(tx.outputs[N].lockingBytecode == this.activeBytecode) for
+    state-continuing contracts.
+
+    MODE MATRIX:
+    - distribution, split, burn  → FORBID self-anchor (payout/exit intent)
+    - vesting, stateful, vault   → REQUIRE self-anchor (continuation intent)
+    - covenant                   → REQUIRE self-anchor
+    - token                      → REQUIRE self-anchor UNLESS mode is specifically 'burn'
+    - multisig, escrow, timelock → SKIP (stateless or single-spend)
     """
-    COVENANT_MODES = {"vesting", "token", "covenant"}
-    SKIP_MODES     = {"multisig", "multisig_simple_spend", "p2pkh", "stateless", "timelock", "escrow", ""}
-
-    # Normalise: lowercase, handle None
     mode = (contract_mode or "").lower().strip()
 
-    # If mode is explicitly stateless → skip
+    # 1. FORBID SELF-ANCHOR MODES (Exit Patterns)
+    # If the intent is explicitly to exit/payout, self-anchoring is a bug (trap).
+    if mode in {"distribution", "payout", "split", "burn"}:
+        if re.search(r"this\.activeBytecode", code):
+            return [{
+                "rule_id": "LNC-008",
+                "message": (
+                    f"Contract mode '{mode}' MUST NOT use this.activeBytecode. "
+                    "This mode implies funds exit the contract. "
+                    "Self-anchoring would permanently trap funds."
+                ),
+                "line_hint": 0,
+            }]
+        return []
+
+    # 2. SKIP MODES (Stateless / Single-Spend)
+    # These modes don't care about self-anchoring (or use unrelated logic).
+    SKIP_MODES = {"multisig", "multisig_simple_spend", "p2pkh", "stateless", "timelock", "escrow", ""}
     if mode in SKIP_MODES:
         return []
 
-    # If mode is not explicitly covenant → infer from code content
-    if mode not in COVENANT_MODES:
-        # True covenant = self-continuation (this.activeBytecode) OR token mutation
-        has_token_refs    = bool(re.search(r"\b(?:tokenCategory|tokenAmount)\b", code))
-        has_self_reference = bool(re.search(r"this\.activeBytecode", code))
+    # 3. REQUIRE SELF-ANCHOR MODES (Continuation Patterns)
+    # vesting, stateful, covenant, vault, token (mint/transfer-mutable)
+    REQUIRE_MODES = {"vesting", "stateful", "covenant", "vault", "token", "minting"}
 
-        if not (has_token_refs or has_self_reference):
-            # No covenant-grade features — skip LNC-008
-            return []
+    # If unknown mode, infer from code content (conservative fallback)
+    if mode not in REQUIRE_MODES:
+        has_token_refs    = bool(re.search(r"\b(?:tokenCategory|tokenAmount)\b", code))
+        has_self_ref      = bool(re.search(r"this\.activeBytecode", code))
+        if not (has_token_refs or has_self_ref):
+            return [] # No covenant features detected
 
     violations = []
     for func_name, body, start_lineno in _function_bodies(code):
-        # Only check functions that touch outputs (covenant candidates)
+        # 4. EXCEPTION: BURN FUNCTIONS in Token Contracts
+        # If mode is 'token' but function is 'burn', it should NOT self-anchor.
+        is_burn_func = bool(re.search(r"\bburn\w*\b", func_name, re.IGNORECASE))
+        if mode == "token" and is_burn_func:
+            continue
+
+        # Only check functions that actually touch outputs/tokens
         touches_outputs = bool(re.search(r"tx\.outputs\b", body))
         touches_tokens  = bool(re.search(r"\b(?:tokenCategory|tokenAmount)\b", body))
         if not (touches_outputs or touches_tokens):
             continue
 
         # Must have a lockingBytecode self-anchor
+        # Matches: tx.outputs[...].lockingBytecode == this.activeBytecode
         has_self_anchor = bool(re.search(
-            r"tx\.outputs\[\d+\]\.lockingBytecode\s*==\s*this\.activeBytecode",
+            r"tx\.outputs\[.*?\]\.lockingBytecode\s*==\s*this\.activeBytecode",
             body,
         ))
-        # Also accept tx.inputs[...].lockingBytecode == this.activeBytecode (input self-anchor)
+        # Also accept input self-anchor (rare but valid)
         has_input_self_anchor = bool(re.search(
             r"tx\.inputs\[.*?\]\.lockingBytecode\s*==\s*this\.activeBytecode",
             body,
         ))
+
         if not (has_self_anchor or has_input_self_anchor):
             violations.append({
                 "rule_id": "LNC-008",
                 "message": (
-                    f"Covenant function '{func_name}' touches outputs/tokens but has no "
-                    "self-anchor: require(tx.outputs[N].lockingBytecode == this.activeBytecode)"
+                    f"Covenant function '{func_name}' (mode={mode}) has no self-anchor: "
+                    "require(tx.outputs[N].lockingBytecode == this.activeBytecode). "
+                    "Stateful/token contracts must perpetuate themselves."
                 ),
                 "line_hint": start_lineno,
             })
+
     return violations
 
 
@@ -499,6 +524,147 @@ def _check_forbidden_syntax(code: str) -> list[dict]:
     return violations
 
 
+def _check_frozen_state(code: str, contract_mode: str = "") -> list[dict]:
+    """
+    LNC-012: Frozen State Guard (WARNING only).
+
+    Stateful/vesting contracts that self-anchor via this.activeBytecode but do NOT
+    construct new locking bytecode with updated constructor args are 'frozen' state
+    machines — they preserve state but never mutate it.
+
+    This is recorded as a warning, not an error, because:
+    - Some contracts intentionally 'freeze' (e.g. final vesting cliff)
+    - True state mutation requires off-chain bytecode construction helpers
+
+    Fires when:
+    - contract_mode in {"stateful", "vesting"}
+    - code contains this.activeBytecode (self-continuation)
+    - code does NOT contain any new locking bytecode construction pattern
+      (no LockingBytecodeP2SH, hash160, or bytes-level concat visible)
+    """
+    mode = (contract_mode or "").lower().strip()
+    if mode not in {"stateful", "vesting"}:
+        return []
+
+    # Must be a self-continuing contract
+    has_self_anchor = bool(re.search(r"this\.activeBytecode", code))
+    if not has_self_anchor:
+        return []  # Not a self-continuing contract — LNC-008 handles that
+
+    # Check for any evidence of new bytecode construction (state mutation)
+    has_new_bytecode = bool(re.search(
+        r"LockingBytecodeP2SH|hash160\s*\(|bytes\s*concat\s*\(|new\s+bytes",
+        code,
+    ))
+    if has_new_bytecode:
+        return []  # Contract does attempt state mutation — no warning needed
+
+    # Frozen state detected — warn
+    return [{
+        "rule_id":   "LNC-012",
+        "message":   (
+            "Stateful contract perpetuates itself via this.activeBytecode but does not "
+            "mutate constructor state (no new locking bytecode construction detected). "
+            "This is a structural covenant, not a true state machine. "
+            "If mutation is intended, construct a new locking bytecode with updated args."
+        ),
+        "line_hint": 0,
+        "severity":  "warning",  # Not a hard error — does not block lint
+    }]
+
+
+def _check_mint_authority(code: str, contract_mode: str = "") -> list[dict]:
+    """
+    LNC-013: Mint Authority Guard.
+
+    If contract_mode == 'token' and the code appears to mint tokens (tokenAmount increases
+    without explicit input tokenAmount constraint), require that a mintAuthority pubkey
+    constructor param is present and a checkSig(mintSig, mintAuthority) appears.
+
+    Conservative: only fires when 'minting' or 'mint' appears in comments/identifiers
+    AND no mintAuthority param + sig is detected.
+    """
+    mode = (contract_mode or "").lower().strip()
+    if mode not in {"token", "minting"}:
+        return []
+
+    # Only check if the contract has minting intent
+    has_mint_intent = bool(re.search(r"\bmint\w*\b", code, re.IGNORECASE))
+    if not has_mint_intent:
+        return []
+
+    violations = []
+    for func_name, body, start_lineno in _function_bodies(code):
+        # Check if this function looks like a mint operation
+        is_mint_func = bool(re.search(r"\bmint\w*\b", func_name, re.IGNORECASE))
+        if not is_mint_func:
+            continue
+
+        # Must have a mintAuthority param and matching checkSig
+        has_mint_authority_param = bool(re.search(
+            r"\bmintAuthority\b", code  # check full contract, not just body
+        ))
+        has_mint_sig_check = bool(re.search(
+            r"checkSig\s*\([^,]+,\s*mintAuthority\s*\)", body
+        ))
+
+        if not (has_mint_authority_param and has_mint_sig_check):
+            violations.append({
+                "rule_id": "LNC-013",
+                "message": (
+                    f"Mint function '{func_name}' does not require mintAuthority authorization. "
+                    "Add: (1) 'pubkey mintAuthority' as a constructor param, "
+                    "(2) require(checkSig(mintSig, mintAuthority)) in the mint function."
+                ),
+                "line_hint": start_lineno,
+            })
+
+    return violations
+
+
+def _check_token_pair_completeness(code: str) -> list[dict]:
+    """
+    LNC-014: Missing Token Pair Guard.
+
+    tokenCategory and tokenAmount are a pair — both MUST be validated together.
+    If a contract reads one but not the other in a require(), it risks:
+    - Silent burn (tokenAmount unconstrained → tokens disappear)
+    - Category confusion (tokenCategory unconstrained → wrong token accepted)
+    """
+    violations = []
+
+    for func_name, body, start_lineno in _function_bodies(code):
+        references_category = bool(re.search(r"\.tokenCategory\b", body))
+        references_amount   = bool(re.search(r"\.tokenAmount\b", body))
+
+        if not (references_category or references_amount):
+            continue  # function doesn't touch tokens at all
+
+        # Both must appear if either does
+        if references_category and not references_amount:
+            violations.append({
+                "rule_id": "LNC-014",
+                "message": (
+                    f"Function '{func_name}' validates tokenCategory but not tokenAmount. "
+                    "Add: require(tx.outputs[0].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount); "
+                    "to prevent silent token burns."
+                ),
+                "line_hint": start_lineno,
+            })
+        elif references_amount and not references_category:
+            violations.append({
+                "rule_id": "LNC-014",
+                "message": (
+                    f"Function '{func_name}' validates tokenAmount but not tokenCategory. "
+                    "Add: require(tx.outputs[0].tokenCategory == tx.inputs[this.activeInputIndex].tokenCategory); "
+                    "to prevent category confusion attacks."
+                ),
+                "line_hint": start_lineno,
+            })
+
+    return violations
+
+
 # ── Main DSLLinter class ──────────────────────────────────────────────────────
 
 class DSLLinter:
@@ -519,7 +685,10 @@ class DSLLinter:
         _check_deprecated_patterns,      # LNC-007
         _check_timelock_standalone,      # LNC-010
         _check_division_guard,           # LNC-011
+        _check_frozen_state,             # LNC-012  (warning, stateful/vesting only)
         _check_covenant_self_anchor,     # LNC-008  (mode-conditional)
+        _check_mint_authority,           # LNC-013  (token/minting mode only)
+        _check_token_pair_completeness,  # LNC-014  (any code touching tokens)
         _check_forbidden_syntax,         # LNC-009  (ternary, loops, etc.)
     ]
 
@@ -530,8 +699,9 @@ class DSLLinter:
         Args:
             code:          CashScript source to validate
             contract_mode: Optional contract type hint from the intent model.
-                           Drives conditional rules (e.g. LNC-008).
-                           Values: 'multisig' | 'escrow' | 'vesting' | 'stateful' | 'token' | ''
+                           Drives conditional rules (e.g. LNC-008, LNC-012, LNC-013).
+                           Values: 'multisig' | 'escrow' | 'vesting' | 'stateful' |
+                                   'token' | 'minting' | 'distribution' | 'covenant' | ''
 
         Returns:
             {

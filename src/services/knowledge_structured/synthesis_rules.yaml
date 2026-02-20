@@ -11,17 +11,16 @@ multisig:
       rule: "Implement threshold using integer accumulation of checkSig() results, not nested AND/OR chains."
 
   canonical_2_of_3:
-    description: "Standard 2-of-3 multisig pattern. Use integer accumulation, not nested booleans."
+    description: "Standard 2-of-3 multisig. Use checkMultiSig — no ternary, no accumulation variables."
     shape: |
-      int valid =
-          (checkSig(sig1, pk1) ? 1 : 0) +
-          (checkSig(sig2, pk2) ? 1 : 0) +
-          (checkSig(sig3, pk3) ? 1 : 0);
-      require(valid >= 2);
+      require(pk1 != pk2);
+      require(pk1 != pk3);
+      require(pk2 != pk3);
+      require(checkMultiSig([sig1, sig2], [pk1, pk2, pk3]));
     notes:
-      - "Do NOT require a specific signer — any 2 of 3 must be valid."
-      - "Do NOT use nested AND/OR chains like checkSig(a,A) && (checkSig(b,B) || checkSig(c,C))."
-      - "Distinctness checks: require(pk1 != pk2); require(pk1 != pk3); require(pk2 != pk3);"
+      - "checkMultiSig([sigs], [pubkeys]) requires any 2 valid sigs from the 3 pubkeys."
+      - "NEVER write: checkSig(...) ? 1 : 0  — ternary is FORBIDDEN in CashScript."
+      - "NEVER accumulate with +=  — compound assignment is FORBIDDEN in CashScript."
 
   canonical_2_of_2:
     description: "Standard 2-of-2 multisig pattern with full output anchoring (value + lockingBytecode continuity)."
@@ -114,3 +113,44 @@ general:
     note: "This prevents partial fund drain. No fee arithmetic — use a named 'fee' constructor param if needed."
   - id: OUTPUT-COUNT-STRICT
     rule: "Contracts that generate multiple outputs MUST explicitly validate tx.outputs.length before accessing any output index."
+
+distribution:
+  description: "Single-spend payout contracts. Funds exit the contract permanently. NO self-continuation."
+  rules:
+    - id: DISTRIBUTION-NO-SELF-ANCHOR
+      rule: "Distribution contracts MUST NOT use this.activeBytecode. Funds are sent externally."
+    - id: DISTRIBUTION-RECIPIENT
+      rule: "Recipient MUST be a constructor param (bytes recipientLockingBytecode). Never hardcode."
+    - id: DISTRIBUTION-VALUE
+      rule: "MUST enforce require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value)."
+    - id: DISTRIBUTION-OUTPUT-GUARD
+      rule: "MUST enforce require(tx.outputs.length == 1) before accessing tx.outputs[0]."
+    - id: DISTRIBUTION-AUTH
+      rule: "MUST require owner signature: require(checkSig(ownerSig, owner))."
+
+  canonical_payout:
+    description: "Canonical single-spend payout. Owner authorizes, funds go to external recipient permanently."
+    constructor_params: "pubkey owner, bytes recipientLockingBytecode"
+    shape: |
+      require(checkSig(ownerSig, owner));
+      require(tx.outputs.length == 1);
+      require(tx.outputs[0].lockingBytecode == recipientLockingBytecode);
+      require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+    notes:
+      - "Use bytes (not bytes20) for recipientLockingBytecode — supports P2PKH, P2SH20, P2SH32."
+      - "DO NOT add this.activeBytecode — distribution contracts do NOT continue themselves."
+      - "DO NOT subtract fees — pass full value to recipient."
+
+  token_transfer:
+    description: "Token payout / transfer. Preserves tokenCategory and tokenAmount to new recipient."
+    constructor_params: "pubkey owner, bytes recipientLockingBytecode"
+    shape: |
+      require(checkSig(ownerSig, owner));
+      require(tx.outputs.length == 1);
+      require(tx.outputs[0].tokenCategory == tx.inputs[this.activeInputIndex].tokenCategory);
+      require(tx.outputs[0].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount);
+      require(tx.outputs[0].lockingBytecode == recipientLockingBytecode);
+      require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+    notes:
+      - "tokenCategory and tokenAmount MUST both be preserved unless explicitly minting/burning."
+      - "DO NOT use this.activeBytecode — this is a distribution, not a covenant."

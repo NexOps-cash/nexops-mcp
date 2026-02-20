@@ -89,6 +89,15 @@ SPLIT (multi-output):
 - Assign lockingBytecode per output using the recipient pubkey/hash
 - DO NOT anchor value to single input value unless single-output
 
+DISTRIBUTION (single-spend payout — funds leave the contract, NO self-continuation):
+- MUST NOT use this.activeBytecode — distribution pays out externally, never back to itself
+- MUST enforce require(tx.outputs.length == 1);
+- MUST enforce require(tx.outputs[0].lockingBytecode == recipientLockingBytecode);
+- MUST enforce require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+- MUST require owner signature: require(checkSig(ownerSig, owner));
+- Recipient param: use bytes (not bytes20) — supports all script types
+- Pattern: escrow release, bounty payout, HTLC claim, transfer-to
+
 VESTING (stateful, self-continuing):
 - MANDATORY: require(tx.outputs.length == 1);
 - MANDATORY: self-anchor locking bytecode so the contract perpetuates itself:
@@ -99,6 +108,16 @@ VESTING (stateful, self-continuing):
     require(tx.time >= cliffTimestamp);
 - Constructor params: beneficiary (pubkey), cliffTimestamp (int)
 - All three require()s MUST appear together in the unlock function
+
+TOKEN RULES (^0.13.0 CashTokens):
+- tokenCategory MUST be preserved: require(tx.outputs[0].tokenCategory == tx.inputs[this.activeInputIndex].tokenCategory);
+- tokenAmount MUST be preserved unless explicitly burning or minting:
+    require(tx.outputs[0].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount);
+- MINT authority: only allow if dedicated mint sig present AND minter pubkey is constructor param
+    require(checkSig(mintSig, mintAuthority));
+- BURN: tx.outputs with no token flags = implicit burn — must be intentional
+- Multi-output token split: sum of output tokenAmounts MUST equal input tokenAmount
+    require(tx.outputs[0].tokenAmount + tx.outputs[1].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount);
 
 TYPES (^0.13.0):
 - LockingBytecodeP2PKH(bytes20 hash)  ← valid constructor
@@ -319,8 +338,18 @@ def _build_phase1_prompt(intent: str, security_level: str) -> str:
     return f"""You are the "NexOps Intent Parser". Your goal is to convert raw user requests into a structured machine-readable model.
 
 Rules:
-1. Identify the high-level `contract_type` (e.g., escrow, multisig, vesting, swap).
-2. Extract specific `features` from this set: [multisig, timelock, stateful, spending, tokens, minting, burn].
+1. Identify the high-level `contract_type` from this list ONLY:
+   - "multisig"      → multiple parties must sign (no fund movement required)
+   - "distribution"  → funds are released/paid to an external recipient permanently
+                       triggers: "release", "payout", "send to", "pay to", "transfer to", "bounty", "claim"
+   - "escrow"        → multi-party release with timeout reclaim branch
+   - "vesting"       → time-locked self-continuing covenant (funds stay in contract until cliff)
+   - "swap"          → atomic exchange, hashlock or HTLC
+   - "token"         → CashTokens fungible/NFT logic
+   - "covenant"      → stateful self-continuing contract
+   - "stateful"      → generic state-preserving contract
+   - "timelock"      → single-beneficiary time-gated release
+2. Extract specific `features` from this set: [multisig, timelock, stateful, spending, tokens, minting, burn, distribution].
 3. Identify `signers` (names or roles mentioned).
 4. Extract `threshold` if multisig is implied.
 5. Extract `timeout_days` if a temporal constraint is mentioned.
