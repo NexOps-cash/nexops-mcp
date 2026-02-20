@@ -89,6 +89,17 @@ SPLIT (multi-output):
 - Assign lockingBytecode per output using the recipient pubkey/hash
 - DO NOT anchor value to single input value unless single-output
 
+VESTING (stateful, self-continuing):
+- MANDATORY: require(tx.outputs.length == 1);
+- MANDATORY: self-anchor locking bytecode so the contract perpetuates itself:
+    require(tx.outputs[0].lockingBytecode == this.activeBytecode);
+- MANDATORY: preserve full value (no fee subtraction):
+    require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+- MANDATORY: standalone timelock check (never combine with &&):
+    require(tx.time >= cliffTimestamp);
+- Constructor params: beneficiary (pubkey), cliffTimestamp (int)
+- All three require()s MUST appear together in the unlock function
+
 TYPES (^0.13.0):
 - LockingBytecodeP2PKH(bytes20 hash)  ← valid constructor
 - LockingBytecodeP2SH20(bytes20 hash) ← valid constructor
