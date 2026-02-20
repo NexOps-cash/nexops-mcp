@@ -44,12 +44,17 @@ class GuardedPipelineEngine:
         last_error = "None"
         previous_violations: Optional[List[ViolationDetail]] = None
         lint_violation_context: str = ""
-        contract_mode = (intent_model.contract_type or "").lower()
+        
         for gen_attempt in range(max_gen_retries):
-            logger.info(f"--- Generation Attempt {gen_attempt + 1} (mode={contract_mode}) ---")
-            
             # Step 2A: Draft
             code = await Phase2.run(ir, violations=previous_violations, retry_count=gen_attempt)
+
+            contract_mode = (
+                getattr(ir.metadata, "effective_mode", None)
+                or (intent_model.contract_type or "")
+            ).lower()
+            
+            logger.info(f"--- Generation Attempt {gen_attempt + 1} (mode={contract_mode}) ---")
             
             # Step 2B: Language Guard (Fast Static Filter)
             guard_failure = self.language_guard.validate(code)

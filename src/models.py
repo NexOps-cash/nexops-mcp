@@ -59,6 +59,7 @@ class ContractMetadata(BaseModel):
     intent_model: Optional[IntentModel] = None
     security_level: str = "high"
     generation_phase: int = 0
+    effective_mode: str = ""
     retry_count: int = 0
     compile_fix_count: int = 0
     kb_categories_used: List[str] = Field(default_factory=list)

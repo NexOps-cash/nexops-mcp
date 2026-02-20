@@ -55,31 +55,41 @@ class TestLNC008(unittest.TestCase):
         self.assertEqual(len(violations), 1)
         self.assertIn("has no self-anchor", violations[0]["message"])
 
-    def test_token_requires_self_anchor_default(self):
+    def test_token_does_not_require_self_anchor(self):
         code = """
         contract Token() {
             function transfer(sig s) {
                 require(tx.outputs[0].tokenCategory == tx.inputs[0].tokenCategory);
+                // Missing self-anchor is OK now!
+            }
+        }
+        """
+        # "token" mode NO LONGER implies continuation default
+        violations = _check_covenant_self_anchor(code, "token")
+        self.assertEqual(len(violations), 0)
+
+    def test_covenant_requires_self_anchor(self):
+        code = """
+        contract Covenant() {
+            function mutate(sig s) {
+                require(tx.outputs[0].value == 1000);
                 // Missing self-anchor!
             }
         }
         """
-        # "token" mode implies continuation unless it's a burn function
-        violations = _check_covenant_self_anchor(code, "token")
+        violations = _check_covenant_self_anchor(code, "covenant")
         self.assertEqual(len(violations), 1)
 
-    def test_token_burn_function_exception(self):
+    def test_vault_requires_self_anchor(self):
         code = """
-        contract Token() {
-            function burn(sig s) {
-                // accessing outputs but NOT self-anchoring
-                require(tx.outputs.length == 0); 
+        contract Vault() {
+            function deposit(sig s) {
+                 require(tx.outputs[0].value > 1000);
             }
         }
         """
-        # Mode is "token", but function name "burn" → should SKIP self-anchor check
-        violations = _check_covenant_self_anchor(code, "token")
-        self.assertEqual(len(violations), 0)
+        violations = _check_covenant_self_anchor(code, "vault")
+        self.assertEqual(len(violations), 1)
 
     def test_multisig_skips_check(self):
         code = """

@@ -137,7 +137,8 @@ FORBIDDEN SYNTAX (CashScript does NOT support these — causes compile failure):
 # ─── Structured Knowledge Loader ─────────────────────────────────────
 
 # Tags that require covenant/output/token validation rules
-_COVENANT_TAGS = {"covenant", "stateful", "tokens", "minting", "burn", "escrow", "spending"}
+# Tags that require covenant/output/token validation rules
+_COVENANT_TAGS = {"covenant", "stateful", "vesting", "vault"}
 
 # YAML file cache: filename -> parsed dict
 _yaml_cache: dict = {}
@@ -221,6 +222,11 @@ class Phase1:
             ir.metadata.intent_model.features = tags
 
         logger.info(f"Phase 1 complete: type={ir.metadata.intent_model.contract_type if ir.metadata.intent_model else 'unknown'}, tags={tags}")
+        
+        # Diagnostic log for Phase 1 output
+        if ir.metadata.intent_model:
+             logger.info(f"[DEBUG] Phase1 output: type={ir.metadata.intent_model.contract_type}, features={ir.metadata.intent_model.features}")
+        
         return ir
 
 
@@ -256,6 +262,20 @@ class Phase2:
         # Determine if covenant rules were injected (for conditional prompt instruction)
         needs_covenant = bool(set(tags) & _COVENANT_TAGS)
 
+        # Determine effective mode for Logic Injection
+        # "distribution" is broad. Refine it based on tags.
+        base_mode = intent_model.contract_type if intent_model else "unknown"
+        effective_mode = base_mode
+        
+        if base_mode == "distribution":
+            if "split" in tags:
+                effective_mode = "split"
+            elif "tokens" in tags:
+                effective_mode = "token"
+
+        ir.metadata.effective_mode = effective_mode
+        logger.info(f"[Phase2] Effective Mode: {effective_mode} (base={base_mode}, tags={tags})")
+
         # Build layered system + user prompt
         system_prompt, user_prompt = _build_phase2_prompt(
             intent_model=intent_model,
@@ -263,6 +283,7 @@ class Phase2:
             violation_context=violation_context,
             rule_context=rule_context,
             needs_covenant=needs_covenant,
+            effective_mode=effective_mode,
         )
 
         total_chars = len(system_prompt) + len(user_prompt)
@@ -349,7 +370,8 @@ Rules:
    - "covenant"      → stateful self-continuing contract
    - "stateful"      → generic state-preserving contract
    - "timelock"      → single-beneficiary time-gated release
-2. Extract specific `features` from this set: [multisig, timelock, stateful, spending, tokens, minting, burn, distribution].
+   - If funds are divided among multiple recipients then include "split" in features.
+2. Extract specific `features` from this set: [multisig, timelock, stateful, spending, tokens, minting, burn, distribution, split].
 3. Identify `signers` (names or roles mentioned).
 4. Extract `threshold` if multisig is implied.
 5. Extract `timeout_days` if a temporal constraint is mentioned.
@@ -376,6 +398,7 @@ def _build_phase2_prompt(
     violation_context: str,
     rule_context: str = "",
     needs_covenant: bool = False,
+    effective_mode: str = "",
 ) -> tuple:
     """Build layered Phase 2 prompt. Returns (system_prompt, user_prompt) tuple.
     
@@ -390,11 +413,24 @@ def _build_phase2_prompt(
             "require(tx.outputs[0].value==tx.inputs[this.activeInputIndex].value); "
             "Also validate tokenCategory/tokenAmount if tokens involved."
         )
+
+    elif effective_mode == "split":
+        covenant_rule = (
+            "SPLIT MODE: "
+            "require(tx.outputs.length == 2); "
+            "require(tx.outputs[0].value + tx.outputs[1].value == tx.inputs[this.activeInputIndex].value); "
+            "require(tx.outputs[0].tokenAmount + tx.outputs[1].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount); "
+        )
+    elif effective_mode == "token":
+        covenant_rule = (
+            "TOKEN MODE: "
+            "require(tx.outputs.length == 1); "
+            "require(tx.outputs[0].tokenCategory == tx.inputs[this.activeInputIndex].tokenCategory); "
+            "require(tx.outputs[0].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount); "
+        )
     else:
         covenant_rule = (
             "SIGNATURE-ONLY MODE: Use ONLY checkSig()/checkMultiSig() and require(). "
-            "If contract performs a split, enforce exact tx.outputs.length == N and "
-            "sum-preservation value invariant. "
             "If single-output spend, enforce strict single-output value anchor. "
             "DO NOT add lockingBytecode continuity checks."
         )

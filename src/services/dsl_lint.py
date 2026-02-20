@@ -400,13 +400,13 @@ def _check_covenant_self_anchor(code: str, contract_mode: str = "") -> list[dict
 
     # 2. SKIP MODES (Stateless / Single-Spend)
     # These modes don't care about self-anchoring (or use unrelated logic).
-    SKIP_MODES = {"multisig", "multisig_simple_spend", "p2pkh", "stateless", "timelock", "escrow", ""}
+    SKIP_MODES = {"multisig", "multisig_simple_spend", "p2pkh", "stateless", "timelock", "escrow", "token", "minting", ""}
     if mode in SKIP_MODES:
         return []
 
     # 3. REQUIRE SELF-ANCHOR MODES (Continuation Patterns)
-    # vesting, stateful, covenant, vault, token (mint/transfer-mutable)
-    REQUIRE_MODES = {"vesting", "stateful", "covenant", "vault", "token", "minting"}
+    # vesting, stateful, covenant, vault
+    REQUIRE_MODES = {"vesting", "stateful", "covenant", "vault"}
 
     # If unknown mode, infer from code content (conservative fallback)
     if mode not in REQUIRE_MODES:
