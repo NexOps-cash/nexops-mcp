@@ -232,6 +232,15 @@ class CashScriptAST:
         """True if contract seems designed for escrow/multisig roles"""
         return self.is_multisig_like or "escrow" in self.code.lower()
 
+    @property
+    def is_covenant_like(self) -> bool:
+        """True if contract uses specific covenant/token keywords"""
+        covenant_keywords = {
+            'tx.outputs', 'tx.inputs', 'this.activeBytecode', 
+            'this.activeInputIndex', 'tokenCategory', 'tokenAmount'
+        }
+        return any(k in self.code for k in covenant_keywords)
+
     def get_spending_functions(self) -> List[str]:
         """Identify functions that likely spend or release funds"""
         spending_keywords = {'release', 'spend', 'reclaim', 'withdraw', 'payout'}

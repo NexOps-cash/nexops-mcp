@@ -102,9 +102,12 @@ class MissingOutputLimitDetector(AntiPatternDetector):
     def detect(self, ast: CashScriptAST) -> Optional[Violation]:
         """
         Semantic detection:
-        1. Check if any function validates tx.outputs.length
-        2. If no validation found → VIOLATION
+        1. Skip for simple stateless contracts (P2PKH, simple multisig)
         """
+        if not ast.is_stateful and not ast.is_covenant_like:
+            return None
+
+        # 2. Check if any function validates tx.outputs.length
         if not ast.validates_output_count():
             return Violation(
                 rule=f"{self.id}.cash",
@@ -461,6 +464,10 @@ class SpendingPathSecurityDetector(AntiPatternDetector):
     id = "missing_value_enforcement"
     
     def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        # Skip for non-covenant/stateless contracts
+        if not ast.is_stateful and not ast.is_covenant_like:
+            return None
+
         spending_fns = ast.get_spending_functions()
         for fn in spending_fns:
             fn_validations = [v for v in ast.validations if v.location.function == fn]
@@ -512,7 +519,8 @@ class EscrowRoleEnforcementDetector(AntiPatternDetector):
     id = "missing_output_anchor"
     
     def detect(self, ast: CashScriptAST) -> Optional[Violation]:
-        if ast.is_escrow_like and not ast.is_stateful:
+        # Only enforce for escrow contracts that are complex/covenant-like
+        if ast.is_escrow_like and not ast.is_stateful and ast.is_covenant_like:
             # Check for at least one hard spending function (all must be secure)
             for fn in ast.get_spending_functions():
                 fn_validations = [v for v in ast.validations if v.location.function == fn]

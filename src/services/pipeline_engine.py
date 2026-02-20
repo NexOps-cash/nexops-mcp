@@ -28,16 +28,34 @@ class GuardedPipelineEngine:
         self.sanity_checker = get_sanity_checker()
         self.dsl_linter = get_dsl_linter()
 
-    async def generate_guarded(self, intent: str, security_level: str = "high") -> Dict[str, Any]:
+    async def generate_guarded(
+        self, 
+        intent: str, 
+        security_level: str = "high",
+        on_update: Optional[Any] = None
+    ) -> Dict[str, Any]:
         """
         Execute the full 4-stage guarded pipeline.
         """
+        async def _notify(stage: str, message: str, attempt: int = 1, status: str = "processing"):
+            if on_update:
+                await on_update({
+                    "type": "update",
+                    "stage": stage,
+                    "status": status,
+                    "message": message,
+                    "attempt": attempt
+                })
+
         # PHASE 1: Structured Intent Parsing
+        await _notify("phase1_parsing", "Analyzing user intent and extracting contract features...")
         ir = await Phase1.run(intent, security_level)
         intent_model = ir.metadata.intent_model
         
         if not intent_model:
             return {"type": "error", "error": {"code": "intent_parse_failed", "message": "Failed to parse intent model."}}
+
+        await _notify("phase1_complete", f"Intent parsed: {intent_model.contract_type} with features {intent_model.features}")
 
         # PHASE 2: Constrained Generation Loop
         max_gen_retries = 2
@@ -47,6 +65,7 @@ class GuardedPipelineEngine:
         
         for gen_attempt in range(max_gen_retries):
             # Step 2A: Draft
+            await _notify("phase2_drafting", "Generating code draft...", gen_attempt + 1)
             code = await Phase2.run(ir, violations=previous_violations, retry_count=gen_attempt)
 
             contract_mode = (
@@ -60,6 +79,7 @@ class GuardedPipelineEngine:
             guard_failure = self.language_guard.validate(code)
             if guard_failure:
                 logger.warning(f"Language Guard failed: {guard_failure}. Regenerating...")
+                await _notify("phase2_guard_fail", f"Draft failed basic language safety: {guard_failure}", gen_attempt + 1, "warning")
                 previous_violations = None
                 lint_violation_context = ""
                 continue
@@ -68,6 +88,7 @@ class GuardedPipelineEngine:
             # contract_mode drives conditional rules (e.g. LNC-008 skips for multisig)
             max_lint_retries = 3
             for lint_attempt in range(max_lint_retries):
+                await _notify("phase2_linting", f"Running DSL linter (attempt {lint_attempt + 1})...", gen_attempt + 1)
                 lint_result = self.dsl_linter.lint(code, contract_mode=contract_mode)
                 if lint_result["passed"]:
                     lint_violation_context = ""
@@ -79,6 +100,7 @@ class GuardedPipelineEngine:
                     f"Injecting into Phase2 retry..."
                 )
                 if lint_attempt < max_lint_retries - 1:
+                    await _notify("phase2_lint_fail", f"DSL Lint failed {len(lint_result['violations'])} rules. Attempting self-correction...", gen_attempt + 1, "warning")
                     # Inject lint violations as violation_context for next Phase2 call
                     from src.models import ViolationDetail
                     lint_violations = [
@@ -93,6 +115,7 @@ class GuardedPipelineEngine:
                     code = await Phase2.run(ir, violations=lint_violations, retry_count=gen_attempt)
                 else:
                     logger.error("[DSLLint] Lint loop exhausted — forcing full regeneration.")
+                    await _notify("phase2_lint_exhausted", "DSL Linting failed to converge. Forcing full regeneration...", gen_attempt + 1, "error")
                     previous_violations = None
                     lint_violation_context = ""
                     break  # Exit lint loop and trigger full generation retry
@@ -107,7 +130,7 @@ class GuardedPipelineEngine:
             last_error = ""
             
             for fix_attempt in range(max_fix_retries):
-                logger.info(f"Compile Attempt {fix_attempt + 1}...")
+                await _notify("phase2_compiling", f"Compiling CashScript (fix attempt {fix_attempt + 1})...", gen_attempt + 1)
                 compile_result = self.compiler.compile(code)
                 
                 if compile_result["success"]:
@@ -121,6 +144,7 @@ class GuardedPipelineEngine:
                 last_error = raw_error
 
                 logger.warning(f"Compile failed [{error_obj.get('type', 'UnknownError')}]: {raw_error[:120]}. Attempting fix...")
+                await _notify("phase2_compile_fix", f"Syntax error: {raw_error[:60]}... Attempting repair.", gen_attempt + 1, "warning")
 
                 code = await self._request_syntax_fix(
                     code=code,
@@ -130,27 +154,33 @@ class GuardedPipelineEngine:
 
             if not compile_success:
                 logger.error(f"Compile loop exhausted after {max_fix_retries} attempts. Retrying full generation...")
+                await _notify("phase2_compile_error", "Failed to resolve syntax errors. Retrying full synthesis...", gen_attempt + 1, "error")
                 previous_violations = None
                 lint_violation_context = ""
                 continue
 
             # PHASE 3: Toll Gate (Security Invariants)
+            await _notify("phase3_validation", "Running Phase 3 Security Guard (Toll Gate)...", gen_attempt + 1)
             toll_gate = Phase3.validate(code)
             if not toll_gate.passed:
                 logger.warning(f"Toll Gate failed with {len(toll_gate.violations)} violations. Retrying with violation feedback...")
+                await _notify("phase3_fail", f"Security violations found: {len(toll_gate.violations)}. Retrying generation with feedback...", gen_attempt + 1, "warning")
                 previous_violations = toll_gate.violations
                 ir.metadata.retry_count = gen_attempt + 1
                 continue
 
             # PHASE 4: Intent Sanity Check
+            await _notify("phase4_sanity", "Verifying contract against original intent...", gen_attempt + 1)
             sanity_result = self.sanity_checker.validate(code, intent_model)
             if not sanity_result["success"]:
                 logger.warning(f"Sanity Check failed: {sanity_result['violations']}. Retrying full generation...")
+                await _notify("phase4_fail", "Contract logic does not match intent. Regenerating...", gen_attempt + 1, "warning")
                 previous_violations = None
                 lint_violation_context = ""
                 continue
 
             # SUCCESS !
+            await _notify("complete", "Synthesis complete. Verified and secured.", gen_attempt + 1, "success")
             return {
                 "type": "success",
                 "data": {

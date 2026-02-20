@@ -6,7 +6,7 @@ Does NOT handle: modify, audit (not yet implemented)
 """
 
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from src.models import MCPRequest, ContractIR, TollGateResult
 from src.services.pipeline import Phase1, Phase2, Phase3, MAX_RETRIES
@@ -21,7 +21,7 @@ class GenerationController:
     def __init__(self) -> None:
         self.session_mgr = get_session_manager()
 
-    async def generate(self, req: MCPRequest) -> Dict[str, Any]:
+    async def generate(self, req: MCPRequest, on_update: Optional[Any] = None) -> Dict[str, Any]:
         """
         Guarded Synthesis Pipeline Orchestration.
         Delegates to GuardedPipelineEngine for the 4-stage loop.
@@ -40,7 +40,7 @@ class GenerationController:
         engine = get_guarded_pipeline_engine()
 
         # Run the Guarded Loop
-        result = await engine.generate_guarded(intent, security_level)
+        result = await engine.generate_guarded(intent, security_level, on_update=on_update)
 
         if result["type"] == "error":
             return {
@@ -88,10 +88,10 @@ def _get_controller() -> GenerationController:
     return _controller_instance
 
 
-async def generate_skeleton(req: MCPRequest) -> Dict[str, Any]:
+async def generate_skeleton(req: MCPRequest, on_update: Optional[Any] = None) -> Dict[str, Any]:
     """Entry point called by router. Delegates to GenerationController."""
     controller = _get_controller()
-    return await controller.generate(req)
+    return await controller.generate(req, on_update=on_update)
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────
