@@ -1,7 +1,14 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from starlette.websockets import WebSocketState
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import Dict, Any, Optional
 from .router import route_request
+from src.services.audit_agent import get_audit_agent
+from src.services.repair_agent import get_repair_agent
+from src.models import RepairRequest
 import uvicorn
 import os
 import logging
@@ -22,9 +29,41 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    logger.error(f"Validation error: {exc.errors()}")
+    logger.error(f"Body: {await request.body()}")
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors(), "body": str(await request.body())},
+    )
+
 @app.get("/")
 async def health_check():
     return {"status": "ok", "service": "NexOps MCP", "version": "0.1.0"}
+
+# ─── Phase AR (Audit & Repair) REST APIs ──────────────────────────────
+
+class AuditRequest(BaseModel):
+    code: str
+    effective_mode: str = ""
+    context: Optional[Dict[str, Any]] = None
+
+@app.post("/api/audit")
+async def audit_endpoint(req: AuditRequest):
+    logger.info("Received /api/audit request")
+    agent = get_audit_agent()
+    report = agent.audit(code=req.code, effective_mode=req.effective_mode)
+    return report.model_dump()
+
+@app.post("/api/repair")
+async def repair_endpoint(req: RepairRequest):
+    logger.info(f"Received /api/repair request for rule: {req.issue.rule_id}")
+    agent = get_repair_agent()
+    response = await agent.repair(req)
+    return response.model_dump()
+
+# ─── Generation WebSocket API ─────────────────────────────────────────
 
 @app.websocket("/ws/generate")
 async def mcp_ws(ws: WebSocket):

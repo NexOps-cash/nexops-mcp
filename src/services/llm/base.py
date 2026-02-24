@@ -42,6 +42,14 @@ class ResilientProvider(LLMProvider):
         import logging
         self.logger = logging.getLogger("nexops.resilient_llm")
 
+    @property
+    def primary(self) -> LLMConfig:
+        return self.configs[0]
+
+    @property
+    def fallbacks(self) -> List[LLMConfig]:
+        return self.configs[1:]
+
     async def complete(
         self,
         prompt: str,

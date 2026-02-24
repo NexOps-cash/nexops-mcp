@@ -25,6 +25,7 @@ _MAX_TOKENS = {
     "phase2": 1000,   # Full contract synthesis — Sonnet quality in ~800 tokens
     "phase2_retry": 600,  # Haiku retry — compact fix
     "fix": 400,       # Syntax fix — minimal change
+    "repair": 1500,   # Security fix — complex surgical edit
     "general": 1000,
 }
 
@@ -90,9 +91,33 @@ class LLMFactory:
             configs.append(LLMConfig(
                 GroqProvider(model="llama-3.3-70b-versatile"),
                 temperature=0.0,
-                label="Groq-Llama-3.3-Fix-Fallback",
                 max_tokens=_MAX_TOKENS["fix"],
             ))
+
+        elif task_type == "repair":
+            # Tiered Security Repair Models
+            if has_openrouter:
+                # Primary: Haiku 4.5 (Disciplined, fast)
+                configs.append(LLMConfig(
+                    OpenRouterProvider(model="anthropic/claude-haiku-4.5"),
+                    temperature=0.1,
+                    label="Claude-4.5-Haiku-Repair-Primary",
+                    max_tokens=_MAX_TOKENS["repair"],
+                ))
+                # Escalation: Sonnet 4.6 (Intelligence for complex invariants)
+                configs.append(LLMConfig(
+                    OpenRouterProvider(model="anthropic/claude-sonnet-4.6"),
+                    temperature=0.1,
+                    label="Claude-4.6-Sonnet-Repair-Escalation",
+                    max_tokens=_MAX_TOKENS["repair"],
+                ))
+            else:
+                configs.append(LLMConfig(
+                    GroqProvider(model="llama-3.3-70b-versatile"),
+                    temperature=0.1,
+                    label="Groq-Repair-Fallback",
+                    max_tokens=_MAX_TOKENS["repair"],
+                ))
 
         else:
             # Default general chain

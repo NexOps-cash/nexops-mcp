@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import Any, Optional, Dict, List
 from datetime import datetime
+from enum import Enum
 
 
 # ─── MCP Protocol Models ─────────────────────────────────────────────
@@ -110,3 +111,47 @@ class SessionState(BaseModel):
     history: List[TurnRecord] = Field(default_factory=list)
     current_contract: Optional[ContractIR] = None
     current_code: str = ""
+
+# ─── Phase AR (Audit & Repair) Models ────────────────────────────────
+
+class Severity(str, Enum):
+    CRITICAL = "CRITICAL"
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    LOW = "LOW"
+    INFO = "INFO"
+
+class AuditIssue(BaseModel):
+    title: str
+    severity: Severity
+    line: int
+    description: str
+    recommendation: str
+    rule_id: str
+    can_fix: bool = True
+
+class AuditMetadata(BaseModel):
+    compile_success: bool
+    dsl_passed: bool
+    structural_score: float
+    contract_hash: str
+
+class AuditReport(BaseModel):
+    score: int  # 0-100
+    risk_level: str  # CRITICAL, HIGH, MEDIUM, LOW, SAFE
+    issues: List[AuditIssue] = Field(default_factory=list)
+    total_high: int = 0
+    total_medium: int = 0
+    total_low: int = 0
+    metadata: AuditMetadata
+
+class RepairRequest(BaseModel):
+    original_code: str
+    issue: AuditIssue
+    context: Dict[str, Any] = Field(default_factory=dict)
+
+class RepairResponse(BaseModel):
+    corrected_code: str
+    new_report: AuditReport
+    success: bool
+
