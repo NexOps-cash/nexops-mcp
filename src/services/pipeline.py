@@ -134,6 +134,46 @@ FORBIDDEN SYNTAX (CashScript does NOT support these — causes compile failure):
 - Increment/Decrement: x++, x--         ← FORBIDDEN
 - Control flow:      if/else, for, while, switch, return ← FORBIDDEN"""
 
+# ─── Pattern-Specific Rail Blocks ───────────────────────────────────
+# Dense, canonical constraints for unstable patterns.
+
+_SPLIT_RAIL = """
+[RAIL: SPLIT MODE]
+- require(tx.outputs.length == 2); // Or exact expected count
+- require(tx.outputs[0].value + tx.outputs[1].value == tx.inputs[this.activeInputIndex].value);
+- FORBIDDEN: direct_anchor_only_single_output
+"""
+
+_NFT_RAIL = """
+[RAIL: NFT MODE]
+- require(tx.inputs[this.activeInputIndex].tokenCategory == expectedCategory);
+- require(tx.outputs[0].tokenCategory == expectedCategory);
+- require(tx.outputs[0].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount); // MUST be 0 for NFTs
+- If burning: the tokenCategory MUST NOT appear in any tx.outputs.
+"""
+
+_ESCROW_RAIL = """
+[RAIL: ESCROW MODE]
+- Release branch: require(checkSig(sigA, A)); require(checkSig(sigB, B));
+- Refund branch: require(tx.time >= timeout); require(checkSig(sigA, A));
+"""
+
+_SWAP_RAIL = """
+[RAIL: SWAP (HTLC) MODE]
+- require(hash160(preimage) == expectedHash);
+- require(tx.outputs.length == 1);
+- require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+- Timeout branch: require(tx.time >= timeout); require(checkSig(refundSig, refundPubkey));
+"""
+
+def build_pattern_rails(tags: List[str]) -> str:
+    rails = []
+    if "split" in tags: rails.append(_SPLIT_RAIL)
+    if "tokens" in tags or "nft" in tags: rails.append(_NFT_RAIL)
+    if "escrow" in tags: rails.append(_ESCROW_RAIL)
+    if "swap" in tags or "htlc" in tags: rails.append(_SWAP_RAIL)
+    return "\n".join(rails)
+
 # ─── Structured Knowledge Loader ─────────────────────────────────────
 
 # Tags that require covenant/output/token validation rules
@@ -436,10 +476,13 @@ def _build_phase2_prompt(
         )
 
     unified_rules = build_unified_dsl_rules()
+    pattern_rails = build_pattern_rails(intent_model.features if intent_model else [])
 
     system_prompt = f"""You are a Secure CashScript Code Generator. Output ONLY compilable CashScript ^0.13.0 code.
 
 {unified_rules}
+
+{pattern_rails}
 
 CONTRACT MODE: {covenant_rule}
 

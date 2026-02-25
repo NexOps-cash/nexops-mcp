@@ -26,6 +26,7 @@ _MAX_TOKENS = {
     "phase2_retry": 600,  # Haiku retry — compact fix
     "fix": 400,       # Syntax fix — minimal change
     "repair": 1500,   # Security fix — complex surgical edit
+    "edit": 2000,     # User-directed code edit — needs room for full contract rewrite
     "general": 1000,
 }
 
@@ -117,6 +118,29 @@ class LLMFactory:
                     temperature=0.1,
                     label="Groq-Repair-Fallback",
                     max_tokens=_MAX_TOKENS["repair"],
+                ))
+
+        elif task_type == "edit":
+            # User-directed code editing — Sonnet 4.6 primary, Haiku 4.5 fallback
+            if has_openrouter:
+                configs.append(LLMConfig(
+                    OpenRouterProvider(model="anthropic/claude-sonnet-4.6"),
+                    temperature=0.2,
+                    label="Claude-4.6-Sonnet-Edit-Primary",
+                    max_tokens=_MAX_TOKENS["edit"],
+                ))
+                configs.append(LLMConfig(
+                    OpenRouterProvider(model="anthropic/claude-haiku-4.5"),
+                    temperature=0.2,
+                    label="Claude-4.5-Haiku-Edit-Fallback",
+                    max_tokens=_MAX_TOKENS["edit"],
+                ))
+            else:
+                configs.append(LLMConfig(
+                    GroqProvider(model="llama-3.3-70b-versatile"),
+                    temperature=0.2,
+                    label="Groq-Edit-Fallback",
+                    max_tokens=_MAX_TOKENS["edit"],
                 ))
 
         else:

@@ -8,7 +8,8 @@ from typing import Dict, Any, Optional
 from .router import route_request
 from src.services.audit_agent import get_audit_agent
 from src.services.repair_agent import get_repair_agent
-from src.models import RepairRequest
+from src.services.edit_agent import get_edit_agent
+from src.models import RepairRequest, EditRequest
 import uvicorn
 import os
 import logging
@@ -61,6 +62,13 @@ async def repair_endpoint(req: RepairRequest):
     logger.info(f"Received /api/repair request for rule: {req.issue.rule_id}")
     agent = get_repair_agent()
     response = await agent.repair(req)
+    return response.model_dump()
+
+@app.post("/api/edit")
+async def edit_endpoint(req: EditRequest):
+    logger.info(f"Received /api/edit request: {req.instruction[:80]}")
+    agent = get_edit_agent()
+    response = await agent.edit(req)
     return response.model_dump()
 
 # ─── Generation WebSocket API ─────────────────────────────────────────

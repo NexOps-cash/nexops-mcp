@@ -155,3 +155,12 @@ class RepairResponse(BaseModel):
     new_report: AuditReport
     success: bool
 
+class EditRequest(BaseModel):
+    original_code: str
+    instruction: str
+    effective_mode: str = ""
+
+class EditResponse(BaseModel):
+    edited_code: str
+    success: bool
+    new_report: AuditReport
