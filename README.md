@@ -29,6 +29,9 @@ The Model Context Protocol (MCP) server for NexOps. This server acts as the inte
 ### Running the Server
 ```bash
 uvicorn src.server:app --reload --port 3000
+
+$env:PORT=3005; python -m src.server
+
 ```
 
 ### Testing
