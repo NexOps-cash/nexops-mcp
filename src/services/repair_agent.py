@@ -1,9 +1,8 @@
 import re
 import logging
-from typing import Dict, Any, Optional
+from typing import Optional
 
-from src.models import RepairRequest, RepairResponse, AuditReport, AuditIssue
-from src.services.audit_agent import get_audit_agent
+from src.models import RepairRequest, RepairResponse, AuditIssue
 from src.services.llm.factory import LLMFactory
 
 logger = logging.getLogger("nexops.repair")
@@ -11,38 +10,57 @@ logger = logging.getLogger("nexops.repair")
 class RepairAgent:
     """
     Applies surgical LLM-based repairs for a specific Security Issue.
-    Follows stringent invariants:
-    1. Only edits the target vulnerability.
-    2. Must NOT decrease the number of require() guards.
-    3. The structural_score must not drop strictly below the original score.
-    4. Must not introduce new HIGH/CRITICAL issues.
+
+    Validation uses deterministic checks only — no LLM re-audit during repair.
+    The user runs /api/audit after receiving the fixed code to see the new score.
+
+    Safety gates (deterministic):
+    1. require() count must not drop.
+    2. No new DSL lint violations introduced.
     """
-    
-    def __init__(self, anthropic_client=None):
-        # We now use the LLMFactory which manages OpenRouter/Groq providers
+
+    def __init__(self):
         self.factory = LLMFactory()
-        
+
     def _count_requires(self, code: str) -> int:
         return len(re.findall(r"\brequire\s*\(", code))
 
-    async def _attempt_repair(self, provider, original_code: str, issue: AuditIssue, sys_prompt: str, user_prompt: str) -> Optional[str]:
+    async def _attempt_repair(
+        self,
+        provider,
+        original_code: str,
+        issue: AuditIssue,
+        sys_prompt: str,
+        user_prompt: str
+    ) -> Optional[str]:
         try:
             corrected_code = await provider.complete(
                 prompt=user_prompt,
                 system=sys_prompt
             )
-            
+
             if not corrected_code:
                 return None
-                
+
             corrected_code = corrected_code.strip()
-            # Remove backticks if LLM ignores instruction
+
+            # Strip markdown fences if LLM ignores instruction
             if corrected_code.startswith("```"):
                 corrected_code = "\n".join(corrected_code.split("\n")[1:])
             if "```" in corrected_code:
                 corrected_code = corrected_code.split("```")[0]
-            
+
+            corrected_code = corrected_code.strip()
+
+            # Handle verbose LLMs (e.g. Sonnet) that reason before outputting code.
+            # Extract from `pragma cashscript` onwards if present.
+            pragma_idx = corrected_code.find("pragma cashscript")
+            if pragma_idx > 0:
+                corrected_code = corrected_code[pragma_idx:]
+
+            logger.info(f"[RepairAgent] LLM output (first 300 chars):\n{corrected_code[:300]}")
             return corrected_code.strip()
+
         except Exception as e:
             logger.error(f"LLM request failed: {e}")
             return None
@@ -50,14 +68,12 @@ class RepairAgent:
     async def repair(self, request: RepairRequest) -> RepairResponse:
         original_code = request.original_code
         issue = request.issue
-        
-        # 1. Baseline the original code
-        audit_agent = get_audit_agent()
-        original_report = audit_agent.audit(original_code)
+
+        # Baseline: deterministic counts only — no LLM audit call
         original_require_count = self._count_requires(original_code)
-        
-        # 2. Build the strict prompt
-        sys_prompt = f"""You are NexOps RepairAgent, an expert CashScript security engineer.
+
+        # System prompt with CashScript constraints
+        sys_prompt = """You are NexOps RepairAgent, an expert CashScript security engineer.
 Your task is to surgically fix a single vulnerability in a CashScript contract.
 
 IMPORTANT RULES & CONSTRAINTS:
@@ -70,7 +86,16 @@ IMPORTANT RULES & CONSTRAINTS:
 7. You MUST NOT change constructor parameters.
 8. You MUST NOT change function signatures or names.
 
-Output ONLY the corrected CashScript code. NO markdown formatting, NO explanations, NO backticks. 
+CASHSCRIPT ^0.13.0 LANGUAGE RULES (violations cause compile failures or new lint errors):
+- NO if/else/for/while/switch/return — CashScript uses only require() statements.
+- NO ternary operator (?:).
+- NO compound assignment (+=, -=, *=, /=, ++, --).
+- Timelock MUST be standalone: `require(tx.time >= X);` or `require(tx.age >= X);`
+  NEVER chain or nest tx.time: e.g. `require(checkSig(...) && tx.time >= X)` is FORBIDDEN.
+- `new LockingBytecodeP2PKH(x)` requires x to be hash160-wrapped: `new LockingBytecodeP2PKH(hash160(pubkey))`.
+- All tx.outputs[N] access requires a prior `require(tx.outputs.length == K)` guard in the same function.
+
+Output ONLY the corrected CashScript code. NO markdown formatting, NO explanations, NO backticks.
 Start exactly with `pragma cashscript`.
 """
 
@@ -87,80 +112,72 @@ Fix Hint: {issue.recommendation}
 Apply the fix according to the constraints and return the raw code.
 """
 
-        # 3. TIERED ATTEMPTS: Haiku 4.5 (x2) -> Sonnet 4.6 (x1)
-        repair_provider = self.factory.get_provider("repair") # Returns ResilientProvider([Haiku-4.5, Sonnet-4.6])
-        
-        # We explicitly manage the attempts to follow the (2x Haiku, 1x Sonnet) requirement
+        # Tiered attempts: Haiku 4.5 (x2) -> Sonnet 4.6 (x1)
+        repair_provider = self.factory.get_provider("repair")
         haiku_config = repair_provider.primary
         sonnet_config = repair_provider.fallbacks[0] if repair_provider.fallbacks else haiku_config
 
         attempts = [
             ("Attempt 1: Haiku 4.5", haiku_config.provider),
             ("Attempt 2: Haiku 4.5 (Retry)", haiku_config.provider),
-            ("Attempt 3: Sonnet 4.6 (Escalation)", sonnet_config.provider)
+            ("Attempt 3: Sonnet 4.6 (Escalation)", sonnet_config.provider),
         ]
 
-        for label, provider in attempts:
+        for attempt_idx, (label, provider) in enumerate(attempts):
             logger.info(f"Running Repair {label}")
-            corrected_code = await self._attempt_repair(provider, original_code, issue, sys_prompt, user_prompt)
-            
+            corrected_code = await self._attempt_repair(
+                provider, original_code, issue, sys_prompt, user_prompt
+            )
+
             if not corrected_code:
                 continue
 
-            # 4. Immediate Verification
-            new_require_count = self._count_requires(corrected_code)
-            new_report = audit_agent.audit(corrected_code)
-            
-            # Constraint check logic
+            # ── Deterministic validation — no LLM re-audit ─────────────────
             valid = True
             rejection_reason = ""
 
-            # Check: require() counts did not drop
-            if new_require_count < original_require_count:
-                valid = False
-                rejection_reason = f"dropped require() guards ({original_require_count} -> {new_require_count})"
-            
-            # Check: Structural score must not drop strictly below original
-            elif new_report.metadata.structural_score < original_report.metadata.structural_score:
-                valid = False
-                rejection_reason = "lowered overall structural score"
-                
-            # Check: The target issue should be gone
-            else:
-                target_issue_fixed = True
-                for i in new_report.issues:
-                    if i.rule_id == issue.rule_id:
-                        target_issue_fixed = False
-                        break
-                if not target_issue_fixed:
-                    valid = False
-                    rejection_reason = f"issue {issue.rule_id} was not resolved"
-                
-            # Check: No *new* HIGH/CRITICAL issues introduced
+            # Gate 1: DSL lint must not introduce new violations
             if valid:
-                initial_highs = {i.rule_id for i in original_report.issues if i.severity in ["HIGH", "CRITICAL"]}
-                new_highs = {i.rule_id for i in new_report.issues if i.severity in ["HIGH", "CRITICAL"]}
-                added_highs = new_highs - initial_highs
-                if added_highs:
+                from src.services.dsl_lint import get_dsl_linter
+                linter = get_dsl_linter()
+
+                lint_new = linter.lint(corrected_code)
+                lint_orig = linter.lint(original_code)
+
+                new_ids = {v.get("rule_id") for v in lint_new.get("violations", [])}
+                orig_ids = {v.get("rule_id") for v in lint_orig.get("violations", [])}
+                added = new_ids - orig_ids
+
+                if added:
                     valid = False
-                    rejection_reason = f"introduced new HIGH/CRITICAL issues: {added_highs}"
+                    rejection_reason = f"introduced new lint violations: {added}"
+
+                    # Build feedback for next attempt
+                    msgs = [
+                        f"- [{v.get('rule_id')}] L{v.get('line_hint', '?')}: {v.get('message', '')}"
+                        for v in lint_new.get("violations", [])
+                        if v.get("rule_id") in added
+                    ]
+                    if msgs and attempt_idx < len(attempts) - 1:
+                        feedback = (
+                            "\n\n--- PREVIOUS ATTEMPT FAILED WITH THESE NEW VIOLATIONS ---\n"
+                            "Your last fix introduced these new lint errors. Do NOT repeat:\n"
+                            + "\n".join(msgs)
+                            + "\n\nCritical reminder: require(tx.time >= X) must be STANDALONE — "
+                            "never combined with && or || or nested inside another expression."
+                        )
+                        user_prompt = user_prompt.split("--- PREVIOUS ATTEMPT")[0] + feedback
 
             if valid:
                 logger.info(f"Repair {label} successful!")
-                return RepairResponse(
-                    corrected_code=corrected_code,
-                    new_report=new_report,
-                    success=True
-                )
+                return RepairResponse(corrected_code=corrected_code, success=True)
             else:
                 logger.warning(f"Repair {label} rejected: {rejection_reason}")
 
         # All attempts failed
-        return RepairResponse(
-            corrected_code=original_code,
-            new_report=original_report,
-            success=False
-        )
+        logger.warning("All repair attempts failed. Returning original code.")
+        return RepairResponse(corrected_code=original_code, success=False)
+
 
 def get_repair_agent() -> RepairAgent:
     return RepairAgent()

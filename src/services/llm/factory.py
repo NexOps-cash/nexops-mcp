@@ -27,6 +27,7 @@ _MAX_TOKENS = {
     "fix": 400,       # Syntax fix — minimal change
     "repair": 1500,   # Security fix — complex surgical edit
     "edit": 2000,     # User-directed code edit — needs room for full contract rewrite
+    "audit": 1500,    # Semantic logic review — returns JSON (needs room for detailed descriptions)
     "general": 1000,
 }
 
@@ -141,6 +142,30 @@ class LLMFactory:
                     temperature=0.2,
                     label="Groq-Edit-Fallback",
                     max_tokens=_MAX_TOKENS["edit"],
+                ))
+
+        elif task_type == "audit":
+            # Semantic Audit - Haiku 4.5 is fast/cheap enough to read Logic, Sonnet as escalation
+            # JSON enforcement is done via system prompt (no response_format kwarg needed)
+            if has_openrouter:
+                configs.append(LLMConfig(
+                    OpenRouterProvider(model="anthropic/claude-haiku-4.5"),
+                    temperature=0.1,
+                    label="Claude-4.5-Haiku-Audit",
+                    max_tokens=_MAX_TOKENS["audit"],
+                ))
+                configs.append(LLMConfig(
+                    OpenRouterProvider(model="anthropic/claude-sonnet-4.6"),
+                    temperature=0.1,
+                    label="Claude-4.6-Sonnet-Audit-Fallback",
+                    max_tokens=_MAX_TOKENS["audit"],
+                ))
+            else:
+                configs.append(LLMConfig(
+                    GroqProvider(model="llama-3.3-70b-versatile"),
+                    temperature=0.1,
+                    label="Groq-Audit-Fallback",
+                    max_tokens=_MAX_TOKENS["audit"],
                 ))
 
         else:

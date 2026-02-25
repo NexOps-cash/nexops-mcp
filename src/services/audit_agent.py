@@ -27,7 +27,7 @@ class AuditAgent:
     """
     
     @staticmethod
-    def audit(code: str, effective_mode: str = "") -> AuditReport:
+    async def audit(code: str, intent: str = "", effective_mode: str = "") -> AuditReport:
         issues: List[AuditIssue] = []
         
         # ── 1. Compile Check (Syntactic validity) ──
@@ -59,15 +59,26 @@ class AuditAgent:
         
         for violation in lint_result.get("violations", []):
             rule_id = violation.get("rule_id", "unknown_lint")
+            # Respect the severity hint from the linter:
+            # 'info' → LOW (non-blocking, informational)
+            # absent → HIGH (DSL violations are usually fatal for compiler/logic)
+            lint_sev_str = (violation.get("severity") or "HIGH").upper()
+            if lint_sev_str == "INFO":
+                lint_sev_str = "LOW"  # Severity enum has no INFO; map to LOW
+            try:
+                lint_severity = Severity(lint_sev_str)
+            except ValueError:
+                lint_severity = Severity.HIGH
+            is_info = violation.get("severity", "").lower() == "info"
             issues.append(
                 AuditIssue(
                     title=f"DSL Structure Warning ({rule_id})",
-                    severity=Severity.HIGH,  # DSL violations are usually fatal for compiler/logic
+                    severity=lint_severity,
                     line=violation.get("line_hint", 0),
                     description=violation.get("message", "Lint rule violated."),
                     recommendation="Adhere to NexOps CashScript DSL conventions.",
                     rule_id=rule_id,
-                    can_fix=True
+                    can_fix=not is_info  # Info notes don't need AI repair
                 )
             )
 
@@ -98,12 +109,99 @@ class AuditAgent:
                 )
             )
             
-        # ── 4. Aggregate, Deduplicate, Score, and Format ──
+        # ── 4. Phase 4: Semantic Logic Review (LLM) ──
+        # Evaluates the actual meaning of the contract vs the intent.
+        semantic_score = None
+        
+        try:
+            from src.services.llm.factory import LLMFactory
+            import json
+            
+            audit_provider = LLMFactory.get_provider("audit")
+            
+            system_prompt = """You are a CashScript Security Auditor.
+Your job is to analyze the logic of the contract and find semantic/game-theoretic bugs (e.g., deadlocks, unspendable branches, missing timeouts, broken invariants).
+Do NOT complain about syntax, formatting, or missing PRAGMA statements.
+Focus ONLY on the logic flow and constraints.
+
+Return ONLY a JSON object exactly matching this schema:
+{
+  "semantic_score": <int 0-100, 100 means perfect logic match>,
+  "semantic_issues": [
+    {
+      "title": "<Short title of logical flaw>",
+      "description": "<Detailed explanation of why it is broken>",
+      "severity": "<CRITICAL or HIGH or MEDIUM>"
+    }
+  ]
+}"""
+
+            if intent:
+                user_prompt = f"""DECLARED INTENT:
+{intent}
+
+CONTRACT TO AUDIT:
+{code}
+
+Tasks:
+1. Summarize internally what this contract actually does.
+2. Does it perfectly match the declared intent?
+3. Point out logical mismatches, deadlocks, or security flaws where the code fails the intent.
+Output JSON."""
+            else:
+                user_prompt = f"""CONTRACT TO AUDIT:
+{code}
+
+Tasks:
+1. Analyze this CashScript contract. Identify its likely intended pattern (e.g., Escrow, Swap, Multisig, Vault).
+2. Identify any internal logical contradictions, deadlocks, or conditions where funds might become permanently stuck or stolen based on standard conventions for that pattern.
+Output JSON."""
+
+            raw_response = await audit_provider.complete(user_prompt, system=system_prompt)
+            
+            # Use raw_decode to find and parse the first valid JSON object.
+            # This correctly handles nested {} braces inside string fields,
+            # which the greedy regex approach cannot.
+            decoder = json.JSONDecoder()
+            start = raw_response.find('{')
+            if start == -1:
+                raise ValueError("No JSON object found in LLM audit response.")
+            semantic_data, _ = decoder.raw_decode(raw_response, start)
+                
+            semantic_data = semantic_data
+            semantic_score = semantic_data.get("semantic_score", None)
+            
+            for s_issue in semantic_data.get("semantic_issues", []):
+                sev_str = s_issue.get("severity", "HIGH").upper()
+                try:
+                    severity = Severity(sev_str)
+                except ValueError:
+                    severity = Severity.HIGH
+                    
+                issues.append(
+                    AuditIssue(
+                        title=f"Semantic Flaw: {s_issue.get('title', 'Logic Error')}",
+                        severity=severity,
+                        line=0, # Semantic issues apply to the whole contract
+                        description=s_issue.get("description", "A logical flaw was detected."),
+                        recommendation="Review the contract's business logic against the intended pattern.",
+                        rule_id="semantic_logic_flaw",
+                        can_fix=True
+                    )
+                )
+                
+            logger.info(f"[Semantic Audit] Completed. Score: {semantic_score}")
+            
+        except Exception as e:
+            logger.error(f"[Semantic Audit] Failed to execute LLM logic review: {e}")
+
+        # ── 5. Aggregate, Deduplicate, Score, and Format ──
         report = calculate_audit_report(
             issues=issues,
             compile_success=compile_success,
             dsl_passed=dsl_passed,
             structural_score=structural_score,
+            semantic_score=semantic_score,
             original_code=code
         )
         

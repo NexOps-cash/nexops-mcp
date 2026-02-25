@@ -1,5 +1,5 @@
 import hashlib
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from src.models import (
     AuditIssue, 
     AuditReport, 
@@ -21,6 +21,7 @@ def calculate_audit_report(
     compile_success: bool,
     dsl_passed: bool,
     structural_score: float,
+    semantic_score: Optional[int],
     original_code: str
 ) -> AuditReport:
     """
@@ -55,16 +56,25 @@ def calculate_audit_report(
     
     # Calculate score
     total_penalty = sum(PENALTIES.get(i.severity, 0) for i in deduped_issues)
-    score = max(0, 100 - total_penalty)
+    deterministic_score = max(0, 100 - total_penalty)
+    
+    # Blend Semantic Score if available
+    if semantic_score is not None:
+        # Heavily weight the LLM's logical assessment, but ensure syntax penalties still hurt
+        final_score = int((semantic_score * 0.6) + (deterministic_score * 0.4))
+    else:
+        final_score = deterministic_score
+        
+    final_score = max(0, min(100, final_score))
     
     # Determine risk level
     if total_high >= 2:
         risk_level = "CRITICAL"
-    elif total_high == 1 or score < 60:
+    elif total_high == 1 or final_score < 60:
         risk_level = "HIGH"
-    elif score < 80:
+    elif final_score < 80:
         risk_level = "MEDIUM"
-    elif score < 100:
+    elif final_score < 100:
         risk_level = "LOW"
     else:
         risk_level = "SAFE"
@@ -73,11 +83,12 @@ def calculate_audit_report(
         compile_success=compile_success,
         dsl_passed=dsl_passed,
         structural_score=structural_score,
+        semantic_score=semantic_score,
         contract_hash=contract_hash
     )
     
     return AuditReport(
-        score=score,
+        score=final_score,
         risk_level=risk_level,
         issues=deduped_issues,
         total_high=total_high,

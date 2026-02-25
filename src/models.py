@@ -134,11 +134,21 @@ class AuditMetadata(BaseModel):
     compile_success: bool
     dsl_passed: bool
     structural_score: float
+    semantic_score: Optional[int] = None
     contract_hash: str
 
+class SemanticAuditResult(BaseModel):
+    category: str
+    explanation: str
+    confidence: float
+
 class AuditReport(BaseModel):
-    score: int  # 0-100
+    deterministic_score: int
+    semantic_score: int
+    total_score: int
     risk_level: str  # CRITICAL, HIGH, MEDIUM, LOW, SAFE
+    semantic_category: str
+    deployment_allowed: bool
     issues: List[AuditIssue] = Field(default_factory=list)
     total_high: int = 0
     total_medium: int = 0
@@ -152,7 +162,7 @@ class RepairRequest(BaseModel):
 
 class RepairResponse(BaseModel):
     corrected_code: str
-    new_report: AuditReport
+    new_report: Optional[AuditReport] = None  # Not populated during repair; user audits after
     success: bool
 
 class EditRequest(BaseModel):

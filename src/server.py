@@ -48,13 +48,14 @@ async def health_check():
 class AuditRequest(BaseModel):
     code: str
     effective_mode: str = ""
+    intent: str = ""  # Optional: declared intent for semantic logic audit
     context: Optional[Dict[str, Any]] = None
 
 @app.post("/api/audit")
 async def audit_endpoint(req: AuditRequest):
     logger.info("Received /api/audit request")
     agent = get_audit_agent()
-    report = agent.audit(code=req.code, effective_mode=req.effective_mode)
+    report = await agent.audit(code=req.code, intent=req.intent, effective_mode=req.effective_mode)
     return report.model_dump()
 
 @app.post("/api/repair")

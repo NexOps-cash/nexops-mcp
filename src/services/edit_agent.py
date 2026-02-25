@@ -70,7 +70,7 @@ Apply the edit according to the constraints and return the complete raw code."""
             logger.error(f"EditAgent LLM call failed: {e}")
             # Return original code with a failure audit
             audit_agent = get_audit_agent()
-            original_report = audit_agent.audit(original_code, effective_mode)
+            original_report = await audit_agent.audit(code=original_code, effective_mode=effective_mode)
             return EditResponse(
                 edited_code=original_code,
                 success=False,
@@ -80,7 +80,7 @@ Apply the edit according to the constraints and return the complete raw code."""
         if not edited_code:
             logger.warning("EditAgent received empty response from LLM")
             audit_agent = get_audit_agent()
-            original_report = audit_agent.audit(original_code, effective_mode)
+            original_report = await audit_agent.audit(code=original_code, effective_mode=effective_mode)
             return EditResponse(
                 edited_code=original_code,
                 success=False,
@@ -98,7 +98,7 @@ Apply the edit according to the constraints and return the complete raw code."""
         # ── 4. Run AuditAgent on the result ──
         logger.info("EditAgent running post-edit audit...")
         audit_agent = get_audit_agent()
-        new_report = audit_agent.audit(edited_code, effective_mode)
+        new_report = await audit_agent.audit(code=edited_code, effective_mode=effective_mode)
 
         logger.info(f"EditAgent complete. Audit score: {new_report.score}, Risk: {new_report.risk_level}")
         return EditResponse(

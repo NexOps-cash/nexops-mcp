@@ -665,6 +665,55 @@ def _check_token_pair_completeness(code: str) -> list[dict]:
     return violations
 
 
+
+def _check_locking_bytecode_constructor(code: str) -> list[dict]:
+    """
+    LNC-015 — LockingBytecode Constructor Safety
+
+    CashScript ^0.13.0 supports `new LockingBytecodeP2PKH(...)` and
+    `new LockingBytecodeP2SH(...)` as dedicated locking bytecode constructors.
+    The `new` keyword IS valid for these specific constructors.
+
+    This rule enforces:
+    1. The argument to LockingBytecodeP2PKH/P2SH must be hash160(<expr>) or a 20-byte literal.
+       A raw pubkey or bytes param passed directly causes a type mismatch at runtime.
+    2. Emits an INFO note for correct usage so the auditor knows this pattern was detected.
+    """
+
+    violations = []
+
+    # Match both `new LockingBytecode...` and bare `LockingBytecode...` calls
+    constructor_pattern = re.compile(
+        r'(?:new\s+)?LockingBytecode(P2PKH|P2SH)\s*\(([^)]+)\)',
+        re.DOTALL
+    )
+
+    for m in constructor_pattern.finditer(code):
+        kind = m.group(1)
+        arg = m.group(2).strip()
+        lineno = code[:m.start()].count("\n") + 1
+
+        # Safe and correct: hash160(...) wrapping — say nothing, just pass
+        if re.search(r'^hash160\s*\(', arg):
+            continue
+
+        # Safe: literal bytes20 (0x + 40 hex chars)
+        if re.fullmatch(r'0x[0-9a-fA-F]{40}', arg):
+            continue
+
+        # Unsafe: raw pubkey, bytes variable, or other non-hashed arg
+        violations.append({
+            "rule_id": "LNC-015",
+            "message": (
+                f"Unsafe LockingBytecode{kind}({arg}) — argument must be hash160(<expr>). "
+                f"LockingBytecode{kind} expects bytes20 (a hash), NOT a raw pubkey or bytes param. "
+                f"Fix: LockingBytecode{kind}(hash160({arg}))"
+            ),
+            "line_hint": lineno,
+        })
+
+    return violations
+
 # ── Main DSLLinter class ──────────────────────────────────────────────────────
 
 class DSLLinter:
@@ -689,6 +738,7 @@ class DSLLinter:
         _check_covenant_self_anchor,     # LNC-008  (mode-conditional)
         _check_mint_authority,           # LNC-013  (token/minting mode only)
         _check_token_pair_completeness,  # LNC-014  (any code touching tokens)
+        _check_locking_bytecode_constructor,  # LNC-015  (P2PKH/P2SH constructor safety)
         _check_forbidden_syntax,         # LNC-009  (ternary, loops, etc.)
     ]
 
