@@ -23,9 +23,11 @@ COMPILE_ERROR_MAP = {
 # ── Semantic Audit ──────────────────────────────────────────────────────────
 
 SEMANTIC_SYSTEM_PROMPT = """\
-You are a CashScript Security Auditor. Your task is to classify the \
-SEMANTIC logic risk of the contract into EXACTLY ONE of the following categories:
+You are a CashScript Security Auditor. You must perform TWO assessments:
 
+─────────────────────────────────────────────
+PART 1 — Structural Risk Category (choose EXACTLY ONE):
+─────────────────────────────────────────────
   none                – No semantic issues. Logic is sound and complete.
   minor_design_risk   – Suboptimal design but not exploitable under normal conditions.
   moderate_logic_risk – Logical flaw that could be exploited under adversarial conditions.
@@ -40,14 +42,35 @@ Rules for "funds_unspendable" (use ONLY when ALL apply):
   DO NOT use "funds_unspendable" for: power imbalance, arbiter fairness debates,
   timeout disagreements, or game-theory critique.
 
+─────────────────────────────────────────────
+PART 2 — Business Logic Quality Score (integer 0-10):
+─────────────────────────────────────────────
+Assess the SUBJECTIVE quality of the business logic. This is your FREE-FORM judgment.
+Consider:
+  • Race conditions or timing-based attack windows (e.g., front-running, UTXO races)
+  • Multi-party fairness: does any single party hold disproportionate power to grief others?
+  • Edge-case handling: what happens when values are 0, min, or max?
+  • Economic incentive alignment: are all parties incentivised to behave honestly?
+  • Completeness: are there common scenarios the contract fails to handle?
+
+Scoring guide:
+  10 = Excellent business logic, no conceivable subjective concern
+   8 = Minor subjective gaps but unlikely to matter in practice
+   5 = Noticeable business logic weakness that a sophisticated user should know about
+   3 = Significant subjective concern (e.g., clear race window or power imbalance)
+   0 = Business logic is fundamentally unsound
+
+Note: Even well-written contracts rarely deserve 10/10. Be honest and strict.
+
 Do NOT re-examine syntax, formatting, or PRAGMA.
-Focus ONLY on semantic logic and fund flow.
 
 You MUST return ONLY a strict JSON object — no prose, no markdown, no explanation outside JSON:
 {
   "category": "<one of the 5 categories above>",
-  "explanation": "<brief explanation of the classification>",
-  "confidence": <float 0.0-1.0>
+  "explanation": "<brief explanation of the category classification>",
+  "confidence": <float 0.0-1.0>,
+  "business_logic_score": <integer 0-10>,
+  "business_logic_notes": "<brief explanation of the business logic score>"
 }"""
 
 
@@ -156,6 +179,7 @@ class AuditAgent:
         # ── 4. Semantic Classification (LLM) ─────────────────────────────
         # Skip entirely if compile failed — no point classifying broken code.
         semantic_category = "none"
+        business_logic_score = 5   # conservative default if LLM skipped/fails
 
         if compile_success:
             try:
@@ -187,14 +211,24 @@ class AuditAgent:
                 confidence = semantic_data.get("confidence", 0.0)
                 explanation = semantic_data.get("explanation", "")
 
+                # Free-form business logic score (0-10)
+                raw_biz = semantic_data.get("business_logic_score", 5)
+                try:
+                    business_logic_score = max(0, min(10, int(raw_biz)))
+                except (TypeError, ValueError):
+                    business_logic_score = 5
+                biz_notes = semantic_data.get("business_logic_notes", "")
+
                 logger.info(
                     f"[Semantic Audit] category={semantic_category!r} "
-                    f"confidence={confidence:.2f} | {explanation[:120]}"
+                    f"confidence={confidence:.2f} biz_score={business_logic_score}/10 | "
+                    f"{explanation[:80]} | {biz_notes[:80]}"
                 )
 
             except Exception as e:
                 logger.error(f"[Semantic Audit] LLM classification failed: {e} — defaulting to 'none'.")
                 semantic_category = "none"
+                business_logic_score = 5   # conservative default on failure
         else:
             logger.info("[Semantic Audit] Skipped — compile failed.")
 
@@ -205,6 +239,7 @@ class AuditAgent:
             dsl_passed=dsl_passed,
             structural_score=structural_score,
             semantic_category=semantic_category,
+            business_logic_score=business_logic_score,
             original_code=code,
         )
 

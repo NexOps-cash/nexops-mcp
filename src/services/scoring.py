@@ -8,7 +8,6 @@ from src.models import (
 )
 
 # ── Deterministic Bucket (0-70) ─────────────────────────────────────────────
-# Penalty deductions applied to the deterministic 70-point bucket.
 DET_PENALTIES: dict = {
     Severity.CRITICAL: 20,
     Severity.HIGH: 10,
@@ -16,23 +15,28 @@ DET_PENALTIES: dict = {
     Severity.LOW: 2,
     Severity.INFO: 0,
 }
-
-# Maximum score for the deterministic bucket.
 DET_MAX = 70
 
-# ── Semantic Bucket (0-30) ──────────────────────────────────────────────────
-# Maps the 5 allowed LLM classification categories to a point value.
+# ── Semantic Bucket (0-30) — split into two sub-components ─────────────────
+#
+#   Structured category  (0-20 pts): machine-determined from 5 enum values.
+#   Business logic score (0-10 pts): free-form AI assessment (race conditions,
+#       multi-party fairness gaps, edge-case handling, etc.).
+#
+#   semantic_score = min(30, category_pts + business_logic_score)
+#   Exception: "funds_unspendable" forces semantic_score = 0 unconditionally.
+#
 SEMANTIC_CATEGORY_MAP: dict = {
-    "none": 30,
-    "minor_design_risk": 25,
-    "moderate_logic_risk": 20,
-    "major_protocol_flaw": 10,
-    "funds_unspendable": 0,
+    "none":                20,
+    "minor_design_risk":   15,
+    "moderate_logic_risk": 10,
+    "major_protocol_flaw":  5,
+    "funds_unspendable":    0,
 }
 
 ALLOWED_CATEGORIES = set(SEMANTIC_CATEGORY_MAP.keys())
 
-# ── Minimum display floor ───────────────────────────────────────────────────
+# ── Display floor ────────────────────────────────────────────────────────────
 DISPLAY_FLOOR = 20
 
 
@@ -42,21 +46,24 @@ def calculate_audit_report(
     dsl_passed: bool,
     structural_score: float,
     semantic_category: str,
+    business_logic_score: int,        # 0-10, free-form AI assessment
     original_code: str,
 ) -> AuditReport:
     """
-    Hybrid Scoring v2: 70/30 structured bucket system.
+    Hybrid Scoring v2 (revised semantic split):
 
     Deterministic (0-70):
-        • Driven ONLY by: compile errors, DSL lint, anti-patterns, structural invariants.
-        • Deductions per severity: CRITICAL→-20, HIGH→-10, MEDIUM→-5, LOW→-2, INFO→0.
-        • If compile fails → det_score = 0 immediately.
+        Deductions per severity: CRITICAL→-20, HIGH→-10, MEDIUM→-5, LOW→-2, INFO→0.
+        If compile fails → det_score = 0.
 
     Semantic (0-30):
-        • Driven ONLY by the LLM classification category.
-        • Allowed categories: none, minor_design_risk, moderate_logic_risk,
-          major_protocol_flaw, funds_unspendable.
-        • Unknown or missing categories → treated as "none" (30 pts).
+        Structured category (0-20):
+            none→20, minor_design_risk→15, moderate_logic_risk→10,
+            major_protocol_flaw→5, funds_unspendable→0.
+        Free-form AI business logic (0-10):
+            Race conditions, multi-party fairness, edge cases, etc.
+        Combined: min(30, category_pts + business_logic_score)
+        If category == "funds_unspendable" → semantic_score = 0 (unconditional).
 
     Final:
         total_score   = det_score + semantic_score
@@ -66,10 +73,9 @@ def calculate_audit_report(
         det_score >= 50 AND semantic_score > 0 AND display_score >= 75
     """
 
-    # ── Generate contract fingerprint ─────────────────────────────────────
     contract_hash = hashlib.sha256(original_code.encode("utf-8")).hexdigest()
 
-    # ── Deduplicate issues by rule_id (keep highest-severity instance) ────
+    # ── Deduplicate by rule_id (keep highest-penalty instance) ───────────
     unique_issues_map: dict = {}
     for issue in issues:
         if issue.rule_id not in unique_issues_map:
@@ -82,42 +88,45 @@ def calculate_audit_report(
 
     deduped_issues = list(unique_issues_map.values())
 
-    # ── Count by severity band ─────────────────────────────────────────────
+    # ── Severity counts ──────────────────────────────────────────────────
     total_high = sum(
         1 for i in deduped_issues if i.severity in (Severity.HIGH, Severity.CRITICAL)
     )
     total_medium = sum(1 for i in deduped_issues if i.severity == Severity.MEDIUM)
     total_low = sum(1 for i in deduped_issues if i.severity == Severity.LOW)
 
-    # ── Deterministic score ────────────────────────────────────────────────
+    # ── Deterministic score ──────────────────────────────────────────────
     if not compile_success:
-        # Hard failure: deterministic bucket collapses to 0.
         det_score = 0
     else:
         total_deductions = sum(DET_PENALTIES.get(i.severity, 0) for i in deduped_issues)
         det_score = max(0, DET_MAX - total_deductions)
 
-    # ── Semantic score ─────────────────────────────────────────────────────
-    # Normalise the category; fall back to "none" for unknown values.
+    # ── Semantic score ───────────────────────────────────────────────────
     normalised_category = semantic_category.strip().lower() if semantic_category else "none"
     if normalised_category not in ALLOWED_CATEGORIES:
         normalised_category = "none"
 
-    semantic_score = SEMANTIC_CATEGORY_MAP[normalised_category]
+    if normalised_category == "funds_unspendable":
+        # Hard override — permanent deadlock forces semantic to zero.
+        semantic_score = 0
+    else:
+        category_pts = SEMANTIC_CATEGORY_MAP[normalised_category]
+        biz_pts = max(0, min(10, int(business_logic_score)))  # clamp to [0, 10]
+        semantic_score = min(30, category_pts + biz_pts)
 
-    # ── Final / display score ──────────────────────────────────────────────
+    # ── Final / display score ────────────────────────────────────────────
     total_score = det_score + semantic_score
     display_score = max(DISPLAY_FLOOR, total_score)
 
-    # ── Deployment gate ────────────────────────────────────────────────────
-    # semantic_score == 0 means "funds_unspendable" → always blocks deployment.
+    # ── Deployment gate ──────────────────────────────────────────────────
     deployment_allowed = bool(
         det_score >= 50
         and semantic_score > 0
         and display_score >= 75
     )
 
-    # ── Risk level (based on display_score) ───────────────────────────────
+    # ── Risk level (from display_score) ─────────────────────────────────
     if display_score >= 90:
         risk_level = "SAFE"
     elif display_score >= 75:
@@ -129,19 +138,18 @@ def calculate_audit_report(
     else:
         risk_level = "CRITICAL"
 
-    # ── Build metadata ─────────────────────────────────────────────────────
     metadata = AuditMetadata(
         compile_success=compile_success,
         dsl_passed=dsl_passed,
         structural_score=structural_score,
-        semantic_score=semantic_score,   # stores the 0/10/20/25/30 int value
+        semantic_score=semantic_score,
         contract_hash=contract_hash,
     )
 
     return AuditReport(
         deterministic_score=det_score,
         semantic_score=semantic_score,
-        total_score=display_score,          # display_score is what the UI shows
+        total_score=display_score,
         risk_level=risk_level,
         semantic_category=normalised_category,
         deployment_allowed=deployment_allowed,
