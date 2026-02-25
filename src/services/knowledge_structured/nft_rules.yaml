@@ -1,0 +1,14 @@
+family: nft
+description: "Mandatory rules for CashTokens NFT identity and preservation."
+must:
+  - id: NFT-INPUT-AUTH
+    rule: "require(tx.inputs[this.activeInputIndex].tokenCategory == expectedCategory);"
+  - id: NFT-OUTPUT-IDENTITY
+    rule: "require(tx.outputs[0].tokenCategory == expectedCategory);"
+  - id: NFT-AMOUNT-PRESERVATION
+    rule: "require(tx.outputs[0].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount); // Must be 0 for NFTs"
+burn_mode:
+  rule: "If burning an NFT, the specific tokenCategory MUST NOT appear in any tx.outputs."
+optional:
+  - id: NFT-SINGLETON-CHECK
+    rule: "require(tx.inputs[this.activeInputIndex].tokenAmount == 1);"

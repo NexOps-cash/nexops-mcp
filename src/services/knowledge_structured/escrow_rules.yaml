@@ -1,0 +1,13 @@
+family: escrow
+description: "Canonical branching structure for multi-party escrow contracts."
+structure:
+  - branch_release: "Logic for successful multi-party authorization."
+  - branch_refund: "Logic for timeout-based reclamation by original sender."
+release_must:
+  - id: ESCROW-RELEASE-AUTH
+    rule: "require(checkSig(sigA, A)); require(checkSig(sigB, B));"
+refund_must:
+  - id: ESCROW-REFUND-TIMEOUT
+    rule: "require(tx.time >= timeout);"
+  - id: ESCROW-REFUND-AUTH
+    rule: "require(checkSig(sigA, A));"

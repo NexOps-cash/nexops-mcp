@@ -1,0 +1,14 @@
+family: swap
+description: "Minimal HTLC (Hashed Time-Lock Contract) pattern for atomic swaps."
+must:
+  - id: SWAP-HASHLOCK
+    rule: "require(hash160(preimage) == expectedHash);"
+  - id: SWAP-OUTPUT-GUARD
+    rule: "require(tx.outputs.length == 1);"
+  - id: SWAP-VALUE-ANCHOR
+    rule: "require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);"
+timeout_branch:
+  - id: SWAP-TIMEOUT-RECLAIM
+    rule: "require(tx.time >= timeout);"
+  - id: SWAP-TIMEOUT-AUTH
+    rule: "require(checkSig(refundSig, refundPubkey));"

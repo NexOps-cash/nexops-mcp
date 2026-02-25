@@ -1,0 +1,10 @@
+family: split
+description: "Mandatory structural rules for multi-output fund distribution."
+must:
+  - id: SPLIT-LENGTH-GUARD
+    rule: "require(tx.outputs.length == 2); // Or exact expected count"
+  - id: SPLIT-SUM-INVARIANT
+    rule: "require(tx.outputs[0].value + tx.outputs[1].value == tx.inputs[this.activeInputIndex].value);"
+forbidden:
+  - id: NO-DIRECT-ANCHOR
+    rule: "Do NOT use direct value anchoring (tx.outputs[0].value == tx.inputs[this.activeInputIndex].value) if splitting into multiple outputs."
