@@ -1,0 +1,32 @@
+//----------------------------------------------------
+// NexOps Secure Contract
+// Pattern: Equal Value Split (2 Outputs)
+//----------------------------------------------------
+
+pragma cashscript ^0.13.0;
+
+contract EqualSplit(
+    pubkey owner,
+    bytes recipient1,
+    bytes recipient2
+) {
+
+    function split(sig ownerSig) {
+
+        require(checkSig(ownerSig, owner));
+        require(tx.outputs.length == 2);
+
+        int inputVal = tx.inputs[this.activeInputIndex].value;
+
+        require(inputVal % 2 == 0);
+
+        require(tx.outputs[0].lockingBytecode == recipient1);
+        require(tx.outputs[1].lockingBytecode == recipient2);
+
+        require(tx.outputs[0].value == inputVal / 2);
+        require(tx.outputs[1].value == inputVal / 2);
+
+        require(tx.outputs[0].value +
+                tx.outputs[1].value == inputVal);
+    }
+}

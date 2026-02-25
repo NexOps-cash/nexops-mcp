@@ -1,0 +1,40 @@
+//----------------------------------------------------
+// NexOps Secure Contract
+// Pattern: Atomic Swap (HTLC)
+//----------------------------------------------------
+
+pragma cashscript ^0.13.0;
+
+contract AtomicSwap(
+    pubkey recipient,
+    pubkey sender,
+    bytes20 expectedHash,
+    int timeout,
+    bytes recipientLock,
+    bytes senderLock
+) {
+
+    function claim(sig recipientSig, bytes preimage) {
+
+        require(checkSig(recipientSig, recipient));
+        require(hash160(preimage) == expectedHash);
+        require(tx.outputs.length == 1);
+
+        require(tx.outputs[0].lockingBytecode == recipientLock);
+
+        require(tx.outputs[0].value ==
+                tx.inputs[this.activeInputIndex].value);
+    }
+
+    function refund(sig senderSig) {
+
+        require(tx.time >= timeout);
+        require(checkSig(senderSig, sender));
+        require(tx.outputs.length == 1);
+
+        require(tx.outputs[0].lockingBytecode == senderLock);
+
+        require(tx.outputs[0].value ==
+                tx.inputs[this.activeInputIndex].value);
+    }
+}

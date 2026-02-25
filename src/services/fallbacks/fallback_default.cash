@@ -1,0 +1,20 @@
+//----------------------------------------------------
+// NexOps Secure Contract
+// Pattern: Single-Owner Spend
+//----------------------------------------------------
+
+pragma cashscript ^0.13.0;
+
+contract SingleOwner(pubkey owner, bytes payoutLock) {
+
+    function spend(sig ownerSig) {
+
+        require(checkSig(ownerSig, owner));
+        require(tx.outputs.length == 1);
+
+        require(tx.outputs[0].lockingBytecode == payoutLock);
+
+        require(tx.outputs[0].value ==
+                tx.inputs[this.activeInputIndex].value);
+    }
+}

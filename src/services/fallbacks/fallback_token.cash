@@ -1,0 +1,26 @@
+//----------------------------------------------------
+// NexOps Secure Contract
+// Pattern: Fungible Token Transfer Covenant
+//----------------------------------------------------
+
+pragma cashscript ^0.13.0;
+
+contract TokenTransfer(pubkey owner) {
+
+    function transfer(sig ownerSig, bytes recipientLock) {
+
+        require(checkSig(ownerSig, owner));
+        require(tx.outputs.length == 1);
+
+        require(tx.outputs[0].lockingBytecode == recipientLock);
+
+        require(tx.outputs[0].tokenCategory ==
+                tx.inputs[this.activeInputIndex].tokenCategory);
+
+        require(tx.outputs[0].tokenAmount ==
+                tx.inputs[this.activeInputIndex].tokenAmount);
+
+        require(tx.outputs[0].value ==
+                tx.inputs[this.activeInputIndex].value);
+    }
+}

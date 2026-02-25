@@ -1,0 +1,47 @@
+//----------------------------------------------------
+// NexOps Secure Contract
+// Pattern: 2-of-3 Escrow with Timeout Refund
+//----------------------------------------------------
+
+pragma cashscript ^0.13.0;
+
+contract Escrow(
+    pubkey buyer,
+    pubkey seller,
+    pubkey arbitrator,
+    int timeout,
+    bytes buyerLock,
+    bytes sellerLock
+) {
+
+    function release(sig sig1, sig sig2) {
+
+        require(buyer != seller);
+        require(buyer != arbitrator);
+        require(seller != arbitrator);
+
+        require(tx.outputs.length == 1);
+
+        require(checkMultiSig(
+            [sig1, sig2],
+            [buyer, seller, arbitrator]
+        ));
+
+        require(tx.outputs[0].lockingBytecode == sellerLock);
+
+        require(tx.outputs[0].value ==
+                tx.inputs[this.activeInputIndex].value);
+    }
+
+    function refund(sig buyerSig) {
+
+        require(tx.time >= timeout);
+        require(checkSig(buyerSig, buyer));
+        require(tx.outputs.length == 1);
+
+        require(tx.outputs[0].lockingBytecode == buyerLock);
+
+        require(tx.outputs[0].value ==
+                tx.inputs[this.activeInputIndex].value);
+    }
+}

@@ -1,0 +1,30 @@
+//----------------------------------------------------
+// NexOps Secure Contract
+// Pattern: Self-Continuing Vault Covenant
+//----------------------------------------------------
+
+pragma cashscript ^0.13.0;
+
+contract Vault(pubkey owner, bytes withdrawalLock) {
+
+    function withdraw(sig ownerSig, int withdrawAmount) {
+
+        require(checkSig(ownerSig, owner));
+        require(withdrawAmount > 0);
+        require(tx.outputs.length == 2);
+
+        int inputVal = tx.inputs[this.activeInputIndex].value;
+        require(withdrawAmount <= inputVal);
+
+        int remainder = inputVal - withdrawAmount;
+
+        require(tx.outputs[0].lockingBytecode == this.activeBytecode);
+        require(tx.outputs[0].value == remainder);
+
+        require(tx.outputs[1].lockingBytecode == withdrawalLock);
+        require(tx.outputs[1].value == withdrawAmount);
+
+        require(tx.outputs[0].value +
+                tx.outputs[1].value == inputVal);
+    }
+}

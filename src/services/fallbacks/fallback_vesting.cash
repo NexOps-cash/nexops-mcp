@@ -1,0 +1,25 @@
+//----------------------------------------------------
+// NexOps Secure Contract
+// Pattern: Cliff Vesting Covenant
+//----------------------------------------------------
+
+pragma cashscript ^0.13.0;
+
+contract Vesting(
+    pubkey beneficiary,
+    int cliffTime,
+    bytes payoutLock
+) {
+
+    function withdraw(sig beneficiarySig) {
+
+        require(checkSig(beneficiarySig, beneficiary));
+        require(tx.time >= cliffTime);
+        require(tx.outputs.length == 1);
+
+        require(tx.outputs[0].lockingBytecode == payoutLock);
+
+        require(tx.outputs[0].value ==
+                tx.inputs[this.activeInputIndex].value);
+    }
+}

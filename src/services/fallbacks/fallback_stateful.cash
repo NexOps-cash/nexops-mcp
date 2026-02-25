@@ -1,0 +1,21 @@
+//----------------------------------------------------
+// NexOps Secure Contract
+// Pattern: Stateful Self-Continuing Covenant
+//----------------------------------------------------
+
+pragma cashscript ^0.13.0;
+
+contract Stateful(pubkey admin) {
+
+    function update(sig adminSig) {
+
+        require(checkSig(adminSig, admin));
+        require(tx.outputs.length == 1);
+
+        require(tx.outputs[0].lockingBytecode ==
+                this.activeBytecode);
+
+        require(tx.outputs[0].value ==
+                tx.inputs[this.activeInputIndex].value);
+    }
+}
