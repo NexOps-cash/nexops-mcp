@@ -9,7 +9,7 @@ from .router import route_request
 from src.services.audit_agent import get_audit_agent
 from src.services.repair_agent import get_repair_agent
 from src.services.edit_agent import get_edit_agent
-from src.models import RepairRequest, EditRequest
+from src.models import RepairRequest, EditRequest, AuditRequest
 import uvicorn
 import os
 import logging
@@ -45,24 +45,28 @@ async def health_check():
 
 # ─── Phase AR (Audit & Repair) REST APIs ──────────────────────────────
 
-class AuditRequest(BaseModel):
-    code: str
-    effective_mode: str = ""
-    intent: str = ""  # Optional: declared intent for semantic logic audit
-    context: Optional[Dict[str, Any]] = None
-
 @app.post("/api/audit")
 async def audit_endpoint(req: AuditRequest):
     logger.info("Received /api/audit request")
     agent = get_audit_agent()
-    report = await agent.audit(code=req.code, intent=req.intent, effective_mode=req.effective_mode)
+    api_key = req.context.get("api_key") if req.context else None
+    provider = req.context.get("provider") if req.context else None
+    report = await agent.audit(
+        code=req.code, 
+        intent=req.intent, 
+        effective_mode=req.effective_mode,
+        api_key=api_key,
+        provider=provider
+    )
     return report.model_dump()
 
 @app.post("/api/repair")
 async def repair_endpoint(req: RepairRequest):
     logger.info(f"Received /api/repair request for rule: {req.issue.rule_id}")
     agent = get_repair_agent()
-    response = await agent.repair(req)
+    api_key = req.context.get("api_key") if req.context else None
+    provider = req.context.get("provider") if req.context else None
+    response = await agent.repair(req, api_key=api_key, provider=provider)
     return response.model_dump()
 
 @app.post("/api/edit")
@@ -96,6 +100,12 @@ async def mcp_ws(ws: WebSocket):
                 request_id = str(uuid.uuid4())[:8]
                 logger.info(f"Received intent: {msg.get('prompt')} (ID: {request_id})")
                 
+                # BYOK Extraction from intent message
+                context = msg.get("context", {})
+                api_key = context.get("api_key")
+                provider = context.get("provider")
+                security_level = context.get("security_level", "high")
+
                 # Transform to internal MCPRequest format
                 internal_msg = {
                     "request_id": request_id,
@@ -104,7 +114,11 @@ async def mcp_ws(ws: WebSocket):
                         "user_request": msg.get("prompt"),
                         "history": msg.get("history", [])
                     },
-                    "context": {"security_level": "high"}
+                    "context": {
+                        "security_level": security_level,
+                        "api_key": api_key,
+                        "provider": provider
+                    }
                 }
                 
                 response = await route_request(internal_msg, on_update=send_update)

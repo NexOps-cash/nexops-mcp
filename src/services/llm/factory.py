@@ -5,6 +5,7 @@ from .openai import OpenAIProvider
 from dotenv import load_dotenv
 import logging
 import os
+from typing import Optional
 
 # Load environment variables explicitly
 load_dotenv()
@@ -34,11 +35,46 @@ _MAX_TOKENS = {
 
 class LLMFactory:
     @classmethod
-    def get_provider(cls, task_type: str = "general") -> LLMProvider:
+    def get_provider(cls, task_type: str = "general", api_key: Optional[str] = None, provider_type: Optional[str] = None) -> LLMProvider:
         """
         Returns a ResilientProvider configured with specialists and fallbacks.
         max_tokens is set per task type to control cost.
         """
+        # BYOK (Bring Your Own Key) Logic
+        if api_key:
+            ptype = (provider_type or "openrouter").lower()
+            provider = None
+            model = None
+            
+            # Select model based on task_type and provider
+            if "openrouter" in ptype:
+                if task_type == "phase2" or task_type == "repair" or task_type == "edit":
+                    model = "anthropic/claude-sonnet-4.6"
+                elif task_type == "fix" or task_type == "audit":
+                    model = "anthropic/claude-haiku-4.5"
+                else:
+                    model = "openai/gpt-oss-120b" # Default
+                provider = OpenRouterProvider(model=model, api_key=api_key)
+                
+            elif "groq" in ptype:
+                model = "llama-3.3-70b-versatile"
+                provider = GroqProvider(model=model, api_key=api_key)
+                
+            elif "openai" in ptype:
+                model = "gpt-4o"
+                provider = OpenAIProvider(model=model, api_key=api_key)
+            else:
+                # Default to OpenRouter
+                provider = OpenRouterProvider(api_key=api_key)
+
+            config = LLMConfig(
+                provider,
+                temperature=0.2,
+                label=f"BYOK-{ptype}-{task_type}",
+                max_tokens=_MAX_TOKENS.get(task_type, 1000)
+            )
+            return ResilientProvider(config)
+
         # Fail-fast check
         if not os.getenv("OPENROUTER_API_KEY") and not os.getenv("GROQ_API_KEY"):
             raise RuntimeError("No LLM API keys found (OPENROUTER_API_KEY or GROQ_API_KEY).")

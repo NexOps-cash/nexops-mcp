@@ -32,6 +32,10 @@ class GenerationController:
 
         session_id = req.payload.get("session_id")
         security_level = req.context.get("security_level", "high") if req.context else "high"
+        
+        # BYOK Extraction
+        api_key = req.context.get("api_key") if req.context else None
+        provider = req.context.get("provider") if req.context else None
 
         session = self.session_mgr.get_or_create(session_id)
         
@@ -40,7 +44,13 @@ class GenerationController:
         engine = get_guarded_pipeline_engine()
 
         # Run the Guarded Loop
-        result = await engine.generate_guarded(intent, security_level, on_update=on_update)
+        result = await engine.generate_guarded(
+            intent, 
+            security_level, 
+            on_update=on_update,
+            api_key=api_key,
+            provider=provider
+        )
 
         if result["type"] == "error":
             return {

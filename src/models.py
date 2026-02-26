@@ -155,10 +155,16 @@ class AuditReport(BaseModel):
     total_low: int = 0
     metadata: AuditMetadata
 
+class AuditRequest(BaseModel):
+    code: str
+    effective_mode: str = ""
+    intent: str = ""  # Optional: declared intent for semantic logic audit
+    context: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
 class RepairRequest(BaseModel):
     original_code: str
     issue: AuditIssue
-    context: Dict[str, Any] = Field(default_factory=dict)
+    context: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 class RepairResponse(BaseModel):
     corrected_code: str
@@ -169,6 +175,7 @@ class EditRequest(BaseModel):
     original_code: str
     instruction: str
     effective_mode: str = ""
+    context: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 class EditResponse(BaseModel):
     edited_code: str

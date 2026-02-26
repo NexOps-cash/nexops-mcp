@@ -123,103 +123,110 @@ class CashScriptAST:
     
     def _parse(self):
         """Parse code into AST elements"""
+        # Pre-process code to handle multi-line statements
+        # 1. Remove comments
+        clean_code = re.sub(r'//.*', '', self.code)
+        clean_code = re.sub(r'/\*.*?\*/', '', clean_code, flags=re.DOTALL)
+        
+        # 2. Extract content and structure
         current_function = None
         
-        for line_num, line in enumerate(self.lines, start=1):
-            stripped = line.strip()
-            if not stripped or stripped.startswith('//'): continue
-            
-            # Detect constructor parameters
-            if re.match(r'contract\s+\w+\s*\(', stripped):
-                params_block = re.search(r'\((.*?)\)', stripped)
-                if params_block:
-                    param_strs = params_block.group(1).split(',')
-                    for p in param_strs:
-                        parts = p.strip().split()
-                        if len(parts) >= 2:
-                            self.constructor_params.append({'type': parts[0], 'name': parts[1]})
+        # Split into statements based on semicolons and braces
+        # This is a heuristic parser for structural analysis
+        
+        # Find constructor parameters
+        contract_match = re.search(r'contract\s+\w+\s*\((.*?)\)', clean_code, re.DOTALL)
+        if contract_match:
+            param_block = contract_match.group(1)
+            for p in param_block.split(','):
+                parts = p.strip().split()
+                if len(parts) >= 2:
+                    self.constructor_params.append({'type': parts[0], 'name': parts[1]})
 
-            # Detect function definitions
-            if 'function ' in stripped:
-                func_match = re.search(r'function\s+(\w+)', stripped)
-                if func_match:
-                    current_function = func_match.group(1)
-                    self.functions.append(current_function)
+        # Detect stateful patterns
+        if 'hash256(' in clean_code and 'state' in clean_code.lower():
+            self.is_stateful = True
+
+        # Find function blocks
+        function_blocks = re.finditer(r'function\s+(\w+)\s*\([^)]*\)\s*\{(.*?)\}', clean_code, re.DOTALL)
+        for func_match in function_blocks:
+            func_name = func_match.group(1)
+            func_body = func_match.group(2)
+            self.functions.append(func_name)
             
-            # Detect stateful patterns (hash256 of state)
-            if 'hash256(' in stripped and 'state' in stripped.lower():
-                self.is_stateful = True
-            
-            # Detect output references
-            output_refs = re.findall(r'tx\.outputs\[(\d+)\]\.(\w+)', stripped)
-            for index_str, property_name in output_refs:
-                self.output_references.append(OutputReference(
-                    index=int(index_str),
-                    location=Location(line=line_num, column=0, function=current_function),
-                    property_accessed=property_name
-                ))
-            
-            # Detect checkSig calls
-            sig_matches = re.findall(r'checkSig\s*\(\s*(\w+)\s*,\s*(\w+)\s*\)', stripped)
-            for sig, pk in sig_matches:
-                self.check_sig_calls.append(CheckSigCall(
-                    sig=sig, pubkey=pk,
-                    location=Location(line=line_num, column=0, function=current_function)
-                ))
-            
-            # Detect division/modulo operations
-            div_matches = re.findall(r'(\w+)\s*([/%])\s*(\w+)', stripped)
-            for left, op, right in div_matches:
-                self.arithmetic_ops.append(ArithmeticOp(
-                    op=op,
-                    location=Location(line=line_num, column=0, function=current_function),
-                    divisor_expression=right
-                ))
-            
-            # Detect validation checks
-            if 'require(' in stripped:
-                validation = ValidationCheck(
-                    location=Location(line=line_num, column=0, function=current_function),
-                    condition=stripped,
-                    comparisons=[]
-                )
+            # Process function body statements
+            statements = func_body.split(';')
+            for stmt in statements:
+                stmt = stmt.strip()
+                if not stmt: continue
                 
-                # Parse comparisons (more robustly)
-                comp_matches = re.findall(r'([^=!><&|()]+)\s*([=!><]+)\s*([^&|)\s,;]+)', stripped)
-                for left, op, right in comp_matches:
-                    validation.comparisons.append(Comparison(
-                        left=left.strip(), op=op.strip(), right=right.strip(),
-                        location=validation.location
+                # Mock line number as 0 for multi-line statements in this simple parser
+                loc = Location(line=0, column=0, function=func_name)
+
+                # Detect output references
+                output_refs = re.findall(r'tx\.outputs\[(\d+)\]\.(\w+)', stmt)
+                for index_str, property_name in output_refs:
+                    self.output_references.append(OutputReference(
+                        index=int(index_str),
+                        location=loc,
+                        property_accessed=property_name
                     ))
 
-                # Check what this validation validates
-                if 'lockingBytecode' in stripped and '==' in stripped:
-                    validation.validates_locking_bytecode = True
-                
-                if 'tx.outputs.length' in stripped:
-                    validation.validates_output_count = True
-                
-                if 'this.activeInputIndex' in stripped and '==' in stripped:
-                    validation.validates_position = True
-                
-                # Value and Token checks
-                val_match = re.search(r'tx\.outputs\[(\d+)\]\.value', stripped)
-                if val_match:
-                    validation.validates_value = int(val_match.group(1))
+                # Detect checkSig calls
+                sig_matches = re.findall(r'checkSig\s*\(\s*(\w+)\s*,\s*(\w+)\s*\)', stmt)
+                for sig, pk in sig_matches:
+                    self.check_sig_calls.append(CheckSigCall(sig=sig, pubkey=pk, location=loc))
 
-                token_cat_match = re.search(r'tx\.outputs\[(\d+)\]\.tokenCategory', stripped)
-                if token_cat_match:
-                    validation.validates_token_category = int(token_cat_match.group(1))
-                
-                token_amt_match = re.search(r'tx\.outputs\[(\d+)\]\.tokenAmount', stripped)
-                if token_amt_match:
-                    validation.validates_token_amount = int(token_amt_match.group(1))
-                
-                # Time checks
-                if any(x in stripped for x in ['tx.time', 'tx.age', 'tx.blockHeight']):
-                    validation.is_time_check = True
-                
-                self.validations.append(validation)
+                # Detect division/modulo
+                div_matches = re.findall(r'(\w+)\s*([/%])\s*(\w+)', stmt)
+                for left, op, right in div_matches:
+                    self.arithmetic_ops.append(ArithmeticOp(op=op, location=loc, divisor_expression=right))
+
+                # Detect require()
+                if 'require(' in stmt:
+                    # Extract the condition inside require(...)
+                    # Handle nested parentheses simple case
+                    req_match = re.search(r'require\s*\((.*)\)', stmt, re.DOTALL)
+                    if req_match:
+                        condition = req_match.group(1).strip()
+                        validation = ValidationCheck(
+                            location=loc,
+                            condition=condition,
+                            comparisons=[]
+                        )
+                        
+                        # Parse comparisons
+                        comp_matches = re.findall(r'([^=!><&|()]+)\s*([=!><]+)\s*([^&|)\s,;]+)', condition)
+                        for left, op, right in comp_matches:
+                            validation.comparisons.append(Comparison(
+                                left=left.strip(), op=op.strip(), right=right.strip(),
+                                location=loc
+                            ))
+
+                        # Semantic labeling
+                        if 'lockingBytecode' in condition and '==' in condition:
+                            validation.validates_locking_bytecode = True
+                        if 'tx.outputs.length' in condition:
+                            validation.validates_output_count = True
+                        if 'this.activeInputIndex' in condition and '==' in condition:
+                            validation.validates_position = True
+                        
+                        val_match = re.search(r'tx\.outputs\[(\d+)\]\.value', condition)
+                        if val_match:
+                            validation.validates_value = int(val_match.group(1))
+
+                        token_cat_match = re.search(r'tx\.outputs\[(\d+)\]\.tokenCategory', condition)
+                        if token_cat_match:
+                            validation.validates_token_category = int(token_cat_match.group(1))
+                        
+                        token_amt_match = re.search(r'tx\.outputs\[(\d+)\]\.tokenAmount', condition)
+                        if token_amt_match:
+                            validation.validates_token_amount = int(token_amt_match.group(1))
+
+                        if any(x in condition for x in ['tx.time', 'tx.age', 'tx.blockHeight']):
+                            validation.is_time_check = True
+
+                        self.validations.append(validation)
     
     @property
     def is_multisig_like(self) -> bool:

@@ -33,7 +33,9 @@ class GuardedPipelineEngine:
         self, 
         intent: str, 
         security_level: str = "high",
-        on_update: Optional[Any] = None
+        on_update: Optional[Any] = None,
+        api_key: Optional[str] = None,
+        provider: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Execute the full 4-stage guarded pipeline.
@@ -50,7 +52,7 @@ class GuardedPipelineEngine:
 
         # PHASE 1: Structured Intent Parsing
         await _notify("phase1_parsing", "Analyzing user intent and extracting contract features...")
-        ir = await Phase1.run(intent, security_level)
+        ir = await Phase1.run(intent, security_level, api_key=api_key, provider=provider)
         intent_model = ir.metadata.intent_model
         
         if not intent_model:
@@ -67,7 +69,7 @@ class GuardedPipelineEngine:
         for gen_attempt in range(max_gen_retries):
             # Step 2A: Draft
             await _notify("phase2_drafting", "Generating code draft...", gen_attempt + 1)
-            code = await Phase2.run(ir, violations=previous_violations, retry_count=gen_attempt)
+            code = await Phase2.run(ir, violations=previous_violations, retry_count=gen_attempt, api_key=api_key, provider=provider)
 
             contract_mode = (
                 getattr(ir.metadata, "effective_mode", None)
@@ -113,7 +115,7 @@ class GuardedPipelineEngine:
                         )
                         for v in lint_result["violations"]
                     ]
-                    code = await Phase2.run(ir, violations=lint_violations, retry_count=gen_attempt)
+                    code = await Phase2.run(ir, violations=lint_violations, retry_count=gen_attempt, api_key=api_key, provider=provider)
                 else:
                     logger.error("[DSLLint] Lint loop exhausted — forcing full regeneration.")
                     await _notify("phase2_lint_exhausted", "DSL Linting failed to converge. Forcing full regeneration...", gen_attempt + 1, "error")
@@ -150,7 +152,9 @@ class GuardedPipelineEngine:
                 code = await self._request_syntax_fix(
                     code=code,
                     error_obj=error_obj,
-                    ir=ir
+                    ir=ir,
+                    api_key=api_key,
+                    provider=provider
                 )
 
             if not compile_success:
@@ -259,7 +263,9 @@ class GuardedPipelineEngine:
         self,
         code: str,
         error_obj: Dict[str, Any],
-        ir: ContractIR
+        ir: ContractIR,
+        api_key: Optional[str] = None,
+        provider: Optional[str] = None
     ) -> str:
         """Helper to fix syntax errors. Tries deterministic fixes first, then LLM."""
         import re as _re
@@ -341,8 +347,8 @@ CODE:
 Fix ONLY the error described above.
 Return ONLY the complete fixed .cash source."""
 
-        llm = LLMFactory.get_provider("fix")
-        raw_response = await llm.complete(user, system=system, max_tokens=400)
+        llm = LLMFactory.get_provider("fix", api_key=api_key, provider_type=provider)
+        raw_response = await llm.complete(user, system=system)
 
         from src.services.pipeline import _extract_cash_code
         return _extract_cash_code(raw_response)

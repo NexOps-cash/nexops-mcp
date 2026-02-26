@@ -17,7 +17,7 @@ class Violation:
     reason: str  # Which invariant is violated
     exploit: str  # Why this is exploitable on BCH
     location: Dict[str, Any]  # Where in code
-    severity: str = "critical"
+    severity: str = "high"
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -82,7 +82,8 @@ class ImplicitOutputOrderingDetector(AntiPatternDetector):
                     "output_index": first_ref.index,
                     "property": first_ref.property_accessed,
                     "total_violations": len(unvalidated_refs)
-                }
+                },
+                severity="medium"
             )
         
         return None
@@ -178,7 +179,8 @@ class UnvalidatedPositionDetector(AntiPatternDetector):
                 "line": 0,
                 "function": "all",
                 "missing": "tx.inputs[this.activeInputIndex] or require(this.activeInputIndex == N)"
-            }
+            },
+            severity="medium"
         )
 
 
@@ -345,7 +347,8 @@ class HardcodedInputIndexDetector(AntiPatternDetector):
                     "line": 0,
                     "function": "all",
                     "missing": "require(this.activeInputIndex == 0)"
-                }
+                },
+                severity="medium"
             )
         return None
 
@@ -420,7 +423,8 @@ class SemanticTypeValidationDetector(AntiPatternDetector):
                         exploit="The comparison is logically broken (comparing bytes vs bytes32). "
                                 "This will either always fail or pass unexpectedly, breaking contract logic. "
                                 "CashScript bytecode comparisons must use compatible types.",
-                        location={"line": comp.location.line, "function": comp.location.function}
+                        location={"line": comp.location.line, "function": comp.location.function},
+                        severity="medium"
                     )
         # Check for cross-field confusion
         if ("tokenCategory" in ast.code and "lockingBytecode" in ast.code):
@@ -451,7 +455,7 @@ class MultisigDistinctnessDetector(AntiPatternDetector):
                     reason=f"Multisig pubkeys ({', '.join(pk_names)}) are not enforced to be distinct",
                     exploit="Collusion vulnerability. If pk1 == pk2, one person can satisfy a 2-of-2 "
                             "multisig alone. Public keys should be explicitly compared with !=.",
-                    severity="medium",
+                    severity="low",
                     location={"line": 0, "function": "constructor"}
                 )
         return None

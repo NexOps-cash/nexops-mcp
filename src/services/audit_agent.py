@@ -1,5 +1,5 @@
 import logging
-from typing import List
+from typing import List, Optional
 
 from src.models import AuditIssue, AuditReport, Severity
 from src.services.compiler import get_compiler_service
@@ -95,7 +95,13 @@ class AuditAgent:
     """
 
     @staticmethod
-    async def audit(code: str, intent: str = "", effective_mode: str = "") -> AuditReport:
+    async def audit(
+        code: str, 
+        intent: str = "", 
+        effective_mode: str = "", 
+        api_key: Optional[str] = None, 
+        provider: Optional[str] = None
+    ) -> AuditReport:
         issues: List[AuditIssue] = []
 
         # ── 1. Compile Check ──────────────────────────────────────────────
@@ -186,7 +192,7 @@ class AuditAgent:
                 from src.services.llm.factory import LLMFactory
                 import json
 
-                audit_provider = LLMFactory.get_provider("audit")
+                audit_provider = LLMFactory.get_provider("audit", api_key=api_key, provider_type=provider)
                 user_prompt = _build_semantic_user_prompt(code, intent)
 
                 raw_response = await audit_provider.complete(

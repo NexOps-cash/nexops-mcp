@@ -65,9 +65,13 @@ class RepairAgent:
             logger.error(f"LLM request failed: {e}")
             return None
 
-    async def repair(self, request: RepairRequest) -> RepairResponse:
+    async def repair(self, request: RepairRequest, api_key: Optional[str] = None, provider: Optional[str] = None) -> RepairResponse:
         original_code = request.original_code
         issue = request.issue
+
+        # System-level keys override request.context if provided directly
+        api_key = api_key or (request.context.get("api_key") if request.context else None)
+        provider = provider or (request.context.get("provider") if request.context else None)
 
         # Baseline: deterministic counts only — no LLM audit call
         original_require_count = self._count_requires(original_code)
@@ -113,7 +117,7 @@ Apply the fix according to the constraints and return the raw code.
 """
 
         # Tiered attempts: Haiku 4.5 (x2) -> Sonnet 4.6 (x1)
-        repair_provider = self.factory.get_provider("repair")
+        repair_provider = self.factory.get_provider("repair", api_key=api_key, provider_type=provider)
         haiku_config = repair_provider.primary
         sonnet_config = repair_provider.fallbacks[0] if repair_provider.fallbacks else haiku_config
 

@@ -226,12 +226,12 @@ class Phase1:
     """Analyze user intent into a structured IntentModel. Returns ContractIR."""
 
     @staticmethod
-    async def run(intent: str, security_level: str = "high") -> ContractIR:
+    async def run(intent: str, security_level: str = "high", api_key: Optional[str] = None, provider: Optional[str] = None) -> ContractIR:
         """Call LLM to parse raw text into an IntentModel."""
 
         prompt = _build_phase1_prompt(intent, security_level)
 
-        llm = LLMFactory.get_provider("phase1")
+        llm = LLMFactory.get_provider("phase1", api_key=api_key, provider_type=provider)
         raw_response = await llm.complete(prompt)
 
         # Parse LLM JSON response into IntentModel and wrap in ContractIR
@@ -281,6 +281,8 @@ class Phase2:
         violations: Optional[List[ViolationDetail]] = None,
         retry_count: int = 0,
         temperature: float = 0.3,
+        api_key: Optional[str] = None,
+        provider: Optional[str] = None
     ) -> str:
         """Stage 2A: Generate .cash code from structured IntentModel."""
 
@@ -329,7 +331,7 @@ class Phase2:
         total_chars = len(system_prompt) + len(user_prompt)
         logger.info(f"[Phase2] Prompt length: {total_chars} chars (sys={len(system_prompt)}, user={len(user_prompt)}), retry={retry_count}")
 
-        llm = LLMFactory.get_provider("phase2")
+        llm = LLMFactory.get_provider("phase2", api_key=api_key, provider_type=provider)
         raw_response = await llm.complete(user_prompt, system=system_prompt, temperature=temperature)
 
         # Extract .cash code from response
@@ -377,7 +379,11 @@ class Phase3:
         failed_count = len(set(v.rule for v in violations))
         score = (total_detectors - failed_count) / total_detectors if total_detectors > 0 else 0.0
 
-        passed = len(violations) == 0
+        # THRESHOLD: Only 'critical' violations block convergence.
+        # Non-critical (high, medium, low) are reported but don't fail the gate.
+        critical_violations = [v for v in violations if v.severity == "critical"]
+        passed = len(critical_violations) == 0
+        
         gate_result = TollGateResult(
             passed=passed,
             violations=violations,

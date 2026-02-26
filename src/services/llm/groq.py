@@ -6,8 +6,10 @@ from groq import AsyncGroq
 
 class GroqProvider(LLMProvider):
 
-    def __init__(self, model: Optional[str] = None):
-        api_key = os.getenv("GROQ_API_KEY")
+    def __init__(self, model: Optional[str] = None, api_key: Optional[str] = None):
+        if not api_key:
+            api_key = os.getenv("GROQ_API_KEY")
+        
         if not api_key:
             raise ValueError("GROQ_API_KEY is not set")
 
