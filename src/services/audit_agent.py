@@ -231,6 +231,33 @@ class AuditAgent:
                     f"{explanation[:80]} | {biz_notes[:80]}"
                 )
 
+                # ── 4.5 Inject Semantic Issue into Report ──────────────────
+                if semantic_category != "none":
+                    title_map = {
+                        "funds_unspendable": "Critical Risk: Funds Permanently Locked",
+                        "major_protocol_flaw": "Critical Risk: Major Protocol Flaw",
+                        "moderate_logic_risk": "Security Risk: Moderate Logic Flaw",
+                        "minor_design_risk": "Design Risk: Suboptimal Architecture",
+                    }
+                    severity_map = {
+                        "funds_unspendable": Severity.CRITICAL,
+                        "major_protocol_flaw": Severity.CRITICAL,
+                        "moderate_logic_risk": Severity.HIGH,
+                        "minor_design_risk": Severity.MEDIUM,
+                    }
+                    
+                    issues.append(
+                        AuditIssue(
+                            title=title_map.get(semantic_category, f"Semantic Risk: {semantic_category}"),
+                            severity=severity_map.get(semantic_category, Severity.HIGH),
+                            line=0,
+                            description=explanation or f"Semantic risk category '{semantic_category}' detected.",
+                            recommendation=biz_notes or "Review the contract logic and ensure all spending paths are reachable.",
+                            rule_id=f"semantic_{semantic_category}",
+                            can_fix=False, # Semantic logic deadlocks usually require human redesign
+                        )
+                    )
+
             except Exception as e:
                 logger.error(f"[Semantic Audit] LLM classification failed: {e} — defaulting to 'none'.")
                 semantic_category = "none"
