@@ -36,6 +36,8 @@ class GenerationController:
         # BYOK Extraction
         api_key = req.context.get("api_key") if req.context else None
         provider = req.context.get("provider") if req.context else None
+        groq_key = req.context.get("groq_key") if req.context else None
+        openrouter_key = req.context.get("openrouter_key") if req.context else None
 
         session = self.session_mgr.get_or_create(session_id)
         
@@ -49,7 +51,9 @@ class GenerationController:
             security_level, 
             on_update=on_update,
             api_key=api_key,
-            provider=provider
+            provider=provider,
+            groq_key=groq_key,
+            openrouter_key=openrouter_key
         )
 
         if result["type"] == "error":

@@ -100,7 +100,9 @@ class AuditAgent:
         intent: str = "", 
         effective_mode: str = "", 
         api_key: Optional[str] = None, 
-        provider: Optional[str] = None
+        provider: Optional[str] = None,
+        groq_key: Optional[str] = None,
+        openrouter_key: Optional[str] = None
     ) -> AuditReport:
         issues: List[AuditIssue] = []
 
@@ -192,7 +194,13 @@ class AuditAgent:
                 from src.services.llm.factory import LLMFactory
                 import json
 
-                audit_provider = LLMFactory.get_provider("audit", api_key=api_key, provider_type=provider)
+                audit_provider = LLMFactory.get_provider(
+                    "audit", 
+                    api_key=api_key, 
+                    provider_type=provider,
+                    groq_key=groq_key,
+                    openrouter_key=openrouter_key
+                )
                 user_prompt = _build_semantic_user_prompt(code, intent)
 
                 raw_response = await audit_provider.complete(

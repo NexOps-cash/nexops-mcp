@@ -35,7 +35,9 @@ class GuardedPipelineEngine:
         security_level: str = "high",
         on_update: Optional[Any] = None,
         api_key: Optional[str] = None,
-        provider: Optional[str] = None
+        provider: Optional[str] = None,
+        groq_key: Optional[str] = None,
+        openrouter_key: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Execute the full 4-stage guarded pipeline.
@@ -52,7 +54,14 @@ class GuardedPipelineEngine:
 
         # PHASE 1: Structured Intent Parsing
         await _notify("phase1_parsing", "Analyzing user intent and extracting contract features...")
-        ir = await Phase1.run(intent, security_level, api_key=api_key, provider=provider)
+        ir = await Phase1.run(
+            intent, 
+            security_level, 
+            api_key=api_key, 
+            provider=provider,
+            groq_key=groq_key,
+            openrouter_key=openrouter_key
+        )
         intent_model = ir.metadata.intent_model
         
         if not intent_model:
@@ -69,7 +78,15 @@ class GuardedPipelineEngine:
         for gen_attempt in range(max_gen_retries):
             # Step 2A: Draft
             await _notify("phase2_drafting", "Generating code draft...", gen_attempt + 1)
-            code = await Phase2.run(ir, violations=previous_violations, retry_count=gen_attempt, api_key=api_key, provider=provider)
+            code = await Phase2.run(
+                ir, 
+                violations=previous_violations, 
+                retry_count=gen_attempt, 
+                api_key=api_key, 
+                provider=provider,
+                groq_key=groq_key,
+                openrouter_key=openrouter_key
+            )
 
             contract_mode = (
                 getattr(ir.metadata, "effective_mode", None)
@@ -115,7 +132,15 @@ class GuardedPipelineEngine:
                         )
                         for v in lint_result["violations"]
                     ]
-                    code = await Phase2.run(ir, violations=lint_violations, retry_count=gen_attempt, api_key=api_key, provider=provider)
+                    code = await Phase2.run(
+                        ir, 
+                        violations=lint_violations, 
+                        retry_count=gen_attempt, 
+                        api_key=api_key, 
+                        provider=provider,
+                        groq_key=groq_key,
+                        openrouter_key=openrouter_key
+                    )
                 else:
                     logger.error("[DSLLint] Lint loop exhausted — forcing full regeneration.")
                     await _notify("phase2_lint_exhausted", "DSL Linting failed to converge. Forcing full regeneration...", gen_attempt + 1, "error")
@@ -154,7 +179,9 @@ class GuardedPipelineEngine:
                     error_obj=error_obj,
                     ir=ir,
                     api_key=api_key,
-                    provider=provider
+                    provider=provider,
+                    groq_key=groq_key,
+                    openrouter_key=openrouter_key
                 )
 
             if not compile_success:
@@ -265,17 +292,17 @@ class GuardedPipelineEngine:
         error_obj: Dict[str, Any],
         ir: ContractIR,
         api_key: Optional[str] = None,
-        provider: Optional[str] = None
+        provider: Optional[str] = None,
+        groq_key: Optional[str] = None,
+        openrouter_key: Optional[str] = None
     ) -> str:
         """Helper to fix syntax errors. Tries deterministic fixes first, then LLM."""
         import re as _re
-
         # Extract fields from structured error dict
         error_type  = error_obj.get("type", "UnknownError")
         error_raw   = error_obj.get("raw", "")
         error_token = error_obj.get("token", "")
         error_hint  = error_obj.get("hint", "")
-
         # ── Deterministic: UnusedVariableError ───────────────────────────────────
         if error_type == "UnusedVariableError" and error_token:
             var_name = error_token
@@ -288,13 +315,11 @@ class GuardedPipelineEngine:
             if fixed != code:
                 logger.info(f"[Fix] Deterministic: stripped unused variable '{var_name}' (no LLM call)")
                 return fixed.strip()
-
         # ── Deterministic: ExtraneousInputError — missing closing brace ──────────
         if error_type == "ExtraneousInputError" and error_token == "<EOF>":
             if code.count("{") > code.count("}"):
                 logger.info("[Fix] Deterministic: adding missing closing brace")
                 return (code + "\n}").strip()
-
         # ── Deterministic: Extraneous tx.time / tx.age (malformed timelock) ──────
         if error_type == "ExtraneousInputError" and error_token in ("tx.time", "tx.age"):
             fixed = _re.sub(
@@ -305,49 +330,44 @@ class GuardedPipelineEngine:
             if fixed != code:
                 logger.info("[Fix] Deterministic: normalized malformed timelock usage")
                 return fixed.strip()
-
         # ── Deterministic: TypeMismatchError — bytes → bytes32 ───────────────────
         if error_type == "TypeMismatchError" and "bytes32" in error_raw:
             fixed = _re.sub(r"\bbytes\s+(\w+)", r"bytes32 \1", code)
             if fixed != code:
                 logger.info("[Fix] Deterministic: upgraded bytes → bytes32")
                 return fixed.strip()
-
         # ── Deterministic: ParseError — stray ternary '?' ────────────────────────
         if error_type == "ParseError" and error_token == "?":
             fixed = code.replace("?", "")
             logger.info("[Fix] Deterministic: stripped unsupported ternary '?' token")
             return fixed.strip()
-
         # ── LLM fallback for non-deterministic errors ────────────────────────────
         from src.services.llm.factory import LLMFactory
         import json
-
         unified_rules = build_unified_dsl_rules()
         system = f"""You are performing CashScript syntax repair ONLY.
-
 You MUST preserve ALL structural invariants below.
 You MUST NOT weaken value anchoring.
 You MUST NOT introduce hardcoded indices.
 You MUST NOT remove output length guards.
 You MUST NOT change business logic, thresholds, or signatures.
 Fix ONLY token-level grammar errors shown in the compiler error.
-
 {unified_rules}
-
 Return ONLY the complete fixed .cash source. No markdown. No explanation."""
-
         error_payload = json.dumps(error_obj, indent=2)
         user = f"""STRUCTURED COMPILER ERROR (JSON):
 {error_payload}
-
 CODE:
 {code}
-
 Fix ONLY the error described above.
 Return ONLY the complete fixed .cash source."""
-
-        llm = LLMFactory.get_provider("fix", api_key=api_key, provider_type=provider)
+        llm = LLMFactory.get_provider(
+            "fix", 
+            api_key=api_key, 
+            provider_type=provider,
+            groq_key=groq_key,
+            openrouter_key=openrouter_key
+        )
         raw_response = await llm.complete(user, system=system)
 
         from src.services.pipeline import _extract_cash_code

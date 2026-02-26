@@ -226,12 +226,26 @@ class Phase1:
     """Analyze user intent into a structured IntentModel. Returns ContractIR."""
 
     @staticmethod
-    async def run(intent: str, security_level: str = "high", api_key: Optional[str] = None, provider: Optional[str] = None) -> ContractIR:
+    async def run(
+        self,
+        intent: str,
+        security_level: str = "high",
+        api_key: Optional[str] = None,
+        provider: Optional[str] = None,
+        groq_key: Optional[str] = None,
+        openrouter_key: Optional[str] = None
+    ) -> ContractIR:
         """Call LLM to parse raw text into an IntentModel."""
 
         prompt = _build_phase1_prompt(intent, security_level)
 
-        llm = LLMFactory.get_provider("phase1", api_key=api_key, provider_type=provider)
+        llm = LLMFactory.get_provider(
+            "phase1",
+            api_key=api_key,
+            provider_type=provider,
+            groq_key=groq_key,
+            openrouter_key=openrouter_key
+        )
         raw_response = await llm.complete(prompt)
 
         # Parse LLM JSON response into IntentModel and wrap in ContractIR
@@ -282,42 +296,36 @@ class Phase2:
         retry_count: int = 0,
         temperature: float = 0.3,
         api_key: Optional[str] = None,
-        provider: Optional[str] = None
+        provider: Optional[str] = None,
+        groq_key: Optional[str] = None,
+        openrouter_key: Optional[str] = None
     ) -> str:
         """Stage 2A: Generate .cash code from structured IntentModel."""
-
         # Build feature-gated structured knowledge (covenant rules injected conditionally)
         structured_knowledge = build_structured_knowledge(ir)
-
         # Build compact violation context only on retry
         violation_context = ""
         if violations and retry_count > 0:
             violation_context = _build_violation_context(violations)
-
         # Activate Rules based on intent model features
         rule_engine = get_rule_engine()
         intent_model = ir.metadata.intent_model
         tags = intent_model.features if intent_model else []
         active_rules = rule_engine.get_rules_for_tags(tags)
         rule_context = rule_engine.format_rules_for_prompt(active_rules)
-
         # Determine if covenant rules were injected (for conditional prompt instruction)
         needs_covenant = bool(set(tags) & _COVENANT_TAGS)
-
         # Determine effective mode for Logic Injection
         # "distribution" is broad. Refine it based on tags.
         base_mode = intent_model.contract_type if intent_model else "unknown"
         effective_mode = base_mode
-        
         if base_mode == "distribution":
             if "split" in tags:
                 effective_mode = "split"
             elif "tokens" in tags:
                 effective_mode = "token"
-
         ir.metadata.effective_mode = effective_mode
         logger.info(f"[Phase2] Effective Mode: {effective_mode} (base={base_mode}, tags={tags})")
-
         # Build layered system + user prompt
         system_prompt, user_prompt = _build_phase2_prompt(
             intent_model=intent_model,
@@ -327,11 +335,15 @@ class Phase2:
             needs_covenant=needs_covenant,
             effective_mode=effective_mode,
         )
-
         total_chars = len(system_prompt) + len(user_prompt)
         logger.info(f"[Phase2] Prompt length: {total_chars} chars (sys={len(system_prompt)}, user={len(user_prompt)}), retry={retry_count}")
-
-        llm = LLMFactory.get_provider("phase2", api_key=api_key, provider_type=provider)
+        llm = LLMFactory.get_provider(
+            "phase2", 
+            api_key=api_key, 
+            provider_type=provider,
+            groq_key=groq_key,
+            openrouter_key=openrouter_key
+        )
         raw_response = await llm.complete(user_prompt, system=system_prompt, temperature=temperature)
 
         # Extract .cash code from response

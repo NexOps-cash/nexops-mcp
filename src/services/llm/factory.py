@@ -35,14 +35,36 @@ _MAX_TOKENS = {
 
 class LLMFactory:
     @classmethod
-    def get_provider(cls, task_type: str = "general", api_key: Optional[str] = None, provider_type: Optional[str] = None) -> LLMProvider:
+    def get_provider(
+        cls, 
+        task_type: str = "general", 
+        api_key: Optional[str] = None, 
+        provider_type: Optional[str] = None,
+        groq_key: Optional[str] = None,
+        openrouter_key: Optional[str] = None
+    ) -> LLMProvider:
         """
         Returns a ResilientProvider configured with specialists and fallbacks.
-        max_tokens is set per task type to control cost.
+        Supports dual-key BYOK (groq_key for Phase 1, openrouter_key for others).
         """
-        # BYOK (Bring Your Own Key) Logic
-        if api_key:
-            ptype = (provider_type or "openrouter").lower()
+        # 1. Prioritize Multi-Key BYOK
+        target_key = None
+        target_provider = None
+
+        if task_type == "phase1" and groq_key:
+            target_key = groq_key
+            target_provider = "groq"
+        elif task_type != "phase1" and openrouter_key:
+            target_key = openrouter_key
+            target_provider = "openrouter"
+        
+        # 2. Fallback to Legacy Single-Key BYOK
+        if not target_key and api_key:
+            target_key = api_key
+            target_provider = provider_type or "openrouter"
+
+        if target_key:
+            ptype = target_provider.lower()
             provider = None
             model = None
             
@@ -54,18 +76,17 @@ class LLMFactory:
                     model = "anthropic/claude-haiku-4.5"
                 else:
                     model = "openai/gpt-oss-120b" # Default
-                provider = OpenRouterProvider(model=model, api_key=api_key)
+                provider = OpenRouterProvider(model=model, api_key=target_key)
                 
             elif "groq" in ptype:
                 model = "llama-3.3-70b-versatile"
-                provider = GroqProvider(model=model, api_key=api_key)
+                provider = GroqProvider(model=model, api_key=target_key)
                 
             elif "openai" in ptype:
                 model = "gpt-4o"
-                provider = OpenAIProvider(model=model, api_key=api_key)
+                provider = OpenAIProvider(model=model, api_key=target_key)
             else:
-                # Default to OpenRouter
-                provider = OpenRouterProvider(api_key=api_key)
+                provider = OpenRouterProvider(api_key=target_key)
 
             config = LLMConfig(
                 provider,

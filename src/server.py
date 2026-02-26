@@ -51,12 +51,16 @@ async def audit_endpoint(req: AuditRequest):
     agent = get_audit_agent()
     api_key = req.context.get("api_key") if req.context else None
     provider = req.context.get("provider") if req.context else None
+    groq_key = req.context.get("groq_key") if req.context else None
+    openrouter_key = req.context.get("openrouter_key") if req.context else None
     report = await agent.audit(
         code=req.code, 
         intent=req.intent, 
         effective_mode=req.effective_mode,
         api_key=api_key,
-        provider=provider
+        provider=provider,
+        groq_key=groq_key,
+        openrouter_key=openrouter_key
     )
     return report.model_dump()
 
@@ -66,7 +70,15 @@ async def repair_endpoint(req: RepairRequest):
     agent = get_repair_agent()
     api_key = req.context.get("api_key") if req.context else None
     provider = req.context.get("provider") if req.context else None
-    response = await agent.repair(req, api_key=api_key, provider=provider)
+    groq_key = req.context.get("groq_key") if req.context else None
+    openrouter_key = req.context.get("openrouter_key") if req.context else None
+    response = await agent.repair(
+        req, 
+        api_key=api_key, 
+        provider=provider,
+        groq_key=groq_key,
+        openrouter_key=openrouter_key
+    )
     return response.model_dump()
 
 @app.post("/api/edit")
@@ -104,6 +116,8 @@ async def mcp_ws(ws: WebSocket):
                 context = msg.get("context", {})
                 api_key = context.get("api_key")
                 provider = context.get("provider")
+                groq_key = context.get("groq_key")
+                openrouter_key = context.get("openrouter_key")
                 security_level = context.get("security_level", "high")
 
                 # Transform to internal MCPRequest format
@@ -117,7 +131,9 @@ async def mcp_ws(ws: WebSocket):
                     "context": {
                         "security_level": security_level,
                         "api_key": api_key,
-                        "provider": provider
+                        "provider": provider,
+                        "groq_key": groq_key,
+                        "openrouter_key": openrouter_key
                     }
                 }
                 

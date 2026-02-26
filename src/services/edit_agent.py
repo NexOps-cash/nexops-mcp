@@ -30,6 +30,8 @@ class EditAgent:
         # BYOK Extraction
         api_key = request.context.get("api_key") if request.context else None
         provider = request.context.get("provider") if request.context else None
+        groq_key = request.context.get("groq_key") if request.context else None
+        openrouter_key = request.context.get("openrouter_key") if request.context else None
 
         # ── 1. Build the strict system prompt ──
         sys_prompt = """You are NexOps EditAgent, an expert CashScript smart-contract engineer.
@@ -63,7 +65,13 @@ Apply the edit according to the constraints and return the complete raw code."""
 
         # ── 2. Call the LLM ──
         logger.info(f"EditAgent processing instruction: {instruction[:80]}...")
-        edit_provider = self.factory.get_provider("edit", api_key=api_key, provider_type=provider)
+        edit_provider = self.factory.get_provider(
+            "edit", 
+            api_key=api_key, 
+            provider_type=provider,
+            groq_key=groq_key,
+            openrouter_key=openrouter_key
+        )
 
         try:
             edited_code = await edit_provider.complete(
@@ -74,7 +82,14 @@ Apply the edit according to the constraints and return the complete raw code."""
             logger.error(f"EditAgent LLM call failed: {e}")
             # Return original code with a failure audit
             audit_agent = get_audit_agent()
-            original_report = await audit_agent.audit(code=original_code, effective_mode=effective_mode, api_key=api_key, provider=provider)
+            original_report = await audit_agent.audit(
+                code=original_code, 
+                effective_mode=effective_mode, 
+                api_key=api_key, 
+                provider=provider,
+                groq_key=groq_key,
+                openrouter_key=openrouter_key
+            )
             return EditResponse(
                 edited_code=original_code,
                 success=False,
@@ -84,7 +99,14 @@ Apply the edit according to the constraints and return the complete raw code."""
         if not edited_code:
             logger.warning("EditAgent received empty response from LLM")
             audit_agent = get_audit_agent()
-            original_report = await audit_agent.audit(code=original_code, effective_mode=effective_mode, api_key=api_key, provider=provider)
+            original_report = await audit_agent.audit(
+                code=original_code, 
+                effective_mode=effective_mode, 
+                api_key=api_key, 
+                provider=provider,
+                groq_key=groq_key,
+                openrouter_key=openrouter_key
+            )
             return EditResponse(
                 edited_code=original_code,
                 success=False,
@@ -102,7 +124,14 @@ Apply the edit according to the constraints and return the complete raw code."""
         # ── 4. Run AuditAgent on the result ──
         logger.info("EditAgent running post-edit audit...")
         audit_agent = get_audit_agent()
-        new_report = await audit_agent.audit(code=edited_code, effective_mode=effective_mode, api_key=api_key, provider=provider)
+        new_report = await audit_agent.audit(
+            code=edited_code, 
+            effective_mode=effective_mode, 
+            api_key=api_key, 
+            provider=provider,
+            groq_key=groq_key,
+            openrouter_key=openrouter_key
+        )
 
         logger.info(f"EditAgent complete. Audit score: {new_report.total_score}, Risk: {new_report.risk_level}")
         return EditResponse(
