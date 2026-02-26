@@ -72,12 +72,11 @@ The high-speed guarded synthesis bridge.
 *   **Payload:** `{"prompt": "User requirement text"}`
 *   **Events:** Emit progress stages (`phase1_parsing` → `phase2_linting` → `phase3_validation`).
 
----
+## 🔄 System Pipelines & Flows
 
-## � System Flows
+### 1. Guarded Generation Pipeline
+The synthesis engine follows a strict 4-phase maturity model to move from natural language to verified bytecode.
 
-### 1. Guarded Generation Flow (`WS /ws/generate`)
-The pipeline ensures that the generated code is structurally sound and compiles before reaching the user.
 ```mermaid
 graph TD
     A[User Intent] --> B[Phase 1: Intent Parsing]
@@ -90,8 +89,20 @@ graph TD
     F -- Logic Gap --> C
 ```
 
-### 2. Audit & Scoring Flow (`POST /api/audit`)
-The 70/30 engine evaluates precisely where a contract stands on the security spectrum.
+*   **Phase 1: Intent Parsing** — LLM transforms raw prompts into a structured `IntentModel`, identifying contract type (Escrow, Vault, etc.) and security features.
+*   **Phase 2: Constrained Synthesis Loop** — The core iterative engine:
+    *   **Step 2A (Drafting)**: Initial code generation based on the Intent Model.
+    *   **Step 2B (Language Guard)**: Instant regex-based filter to strip forbidden non-CashScript syntax.
+    *   **Step 2B.5 (DSL Lint Gate)**: Enforces **LNC rules**. Implements *Soft Convergence* (allows up to 4 minor warnings if critical rules pass).
+    *   **Step 2C (Compile Gate)**: Validates syntax via `cashc`. Automatically repairs common syntax errors (bytes32 mismatch, unused vars) using deterministic and LLM loops.
+*   **Phase 3: Toll Gate (Security Invariants)** — Heavyweight structural analysis checking for anti-patterns and ensures strict value anchoring.
+*   **Phase 4: Sanity Check** — Final logical verification ensuring the generated code actually satisfies the user's original business constraints.
+
+---
+
+### 2. Security Audit Pipeline
+The audit engine provides a holistic "Trust Score" by stacking multiple analysis layers.
+
 ```mermaid
 graph LR
     Code --> Det[Deterministic Analyzer]
@@ -101,8 +112,19 @@ graph LR
     Score --> Final[Total Score + Deployment Gate]
 ```
 
-### 3. Automated Repair Flow (`POST /api/repair`)
-Targeted remediation for specific linter violations.
+*   **Phase 1: Compile Check** — Baseline syntax validation. If this fails, the audit aborts and returns 0 pts.
+*   **Phase 2: DSL Lint** — Deterministic check against the 15 LNC structural rules.
+*   **Phase 3: AntiPattern Assessment** — structural scoring based on known BCH vulnerability patterns.
+*   **Phase 4: Semantic Classification (LLM)** — AI-driven assessment of logic risks:
+    *   **Categorization**: Maps logic into one of 5 risk buckets (e.g., `funds_unspendable`).
+    *   **Subjective Score**: Evaluates business logic quality (0–10) including race conditions and fairness.
+*   **Phase 5: Hybrid Scoring** — Final 70/30 aggregation resulting in the `total_score` and deployment gate status.
+
+---
+
+### 3. Automated Repair Pipeline
+Surgically remediates vulnerabilities without breaking existing security guards.
+
 ```mermaid
 graph TD
     Issue[Linter Violation] --> Router[Repair Router]
@@ -113,8 +135,19 @@ graph TD
     Verify --> Done[Secured Patch]
 ```
 
-### 4. Semantic Edit Flow (`POST /api/edit`)
-Updating logic while maintaining security invariants.
+*   **Phase 1: Impact Analysis** — Identifies the exact rule violation and line number from the Audit Report.
+*   **Phase 2: Tiered LLM Repair** — A multi-attempt surgical loop:
+    *   **Attempts 1-2**: Fast, low-latency surgical patching using Haiku 4.5.
+    *   **Attempt 3**: Escalated reasoning using Sonnet 4.6 for complex structural redesigns.
+*   **Phase 3: Deterministic Validation Gate** — The repaired code is only accepted if:
+    *   **Guard Integrity**: No existing `require()` statements were deleted.
+    *   **Lint Regression**: No NEW LNC violations were introduced during the fix.
+
+---
+
+### 4. Semantic Edit Pipeline
+Updating logic while maintaining security invariants through user-directed instructions.
+
 ```mermaid
 graph LR
     Old[Existing Code] --> Intent[New User Instruction]
@@ -122,6 +155,12 @@ graph LR
     Enforcer --> Synth[Synthesis Gate]
     Synth --> New[Updated Secured Contract]
 ```
+
+*   **Phase 1: Constraint Mapping** — The Instruction + Original Code are mapped into a strict "Security Envelope" (enforcing no removal of value anchors or token guards).
+*   **Phase 2: Target Synthesis** — LLM applies the change while ensuring compatibility with CashScript ^0.13.0 and existing structural invariants.
+*   **Phase 3: Verification Audit** — Automatically triggers the **Security Audit Pipeline** on the result to verify the integrity and score of the modified contract.
+
+---
 
 ---
 
@@ -161,7 +200,7 @@ graph LR
 
 ---
 
-## �🛠️ Getting Started
+## 🛠️ Getting Started
 
 ### Prerequisites
 - Python 3.11+
