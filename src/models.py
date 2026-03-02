@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Any, Optional, Dict, List
 from datetime import datetime
 from enum import Enum
@@ -30,6 +30,23 @@ class IntentModel(BaseModel):
     timeout_days: Optional[int] = None
     token_id: Optional[str] = None
     purpose: str = ""
+
+    @field_validator("contract_type", "purpose", mode="before")
+    @classmethod
+    def validate_strings(cls, v: Any) -> str:
+        if v is None:
+            return "generic"
+        return str(v)
+
+    @field_validator("features", "signers", mode="before")
+    @classmethod
+    def validate_lists(cls, v: Any) -> List[str]:
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return [str(x) for x in v]
+        return []
+
 
 # ─── Contract IR (Intermediate Representation) ───────────────────────
 

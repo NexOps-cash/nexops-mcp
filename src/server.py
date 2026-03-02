@@ -21,7 +21,7 @@ logger = logging.getLogger("nexops.server")
 
 app = FastAPI(title="NexOps MCP")
 
-# Add CORS middleware to prevent 403/Origin issues
+# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -29,6 +29,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def add_pna_header(request: Request, call_next):
+    """
+    Handle Chrome's Private Network Access (PNA) preflight.
+    Required when https://www.hexecutioners.club (public) calls http://localhost (private).
+    """
+    if request.method == "OPTIONS" and "access-control-request-private-network" in request.headers:
+        response = await call_next(request)
+        response.headers["Access-Control-Allow-Private-Network"] = "true"
+        response.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin") or "*"
+        return response
+    
+    response = await call_next(request)
+    # Also add it to regular responses just in case
+    if "origin" in request.headers:
+        response.headers["Access-Control-Allow-Private-Network"] = "true"
+    return response
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):

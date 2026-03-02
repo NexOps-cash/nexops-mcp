@@ -539,13 +539,26 @@ def _parse_phase1_response(raw: str, intent: str, security_level: str) -> Contra
         if json_str.endswith('```'):
             json_str = json_str[:-3].strip()
             
-        data = json.loads(json_str)
-        model = IntentModel(**data)
-        
+        try:
+            data = json.loads(json_str)
+            # Ensure critical keys exist even if LLM omitted them
+            for key in ["contract_type", "features", "signers", "purpose"]:
+                if key not in data or data[key] is None:
+                    if key == "features" or key == "signers":
+                        data[key] = []
+                    elif key == "contract_type":
+                        data[key] = "generic"
+                    else:
+                        data[key] = ""
+            model = IntentModel(**data)
+        except Exception as exc:
+            logger.warning(f"Pydantic validation failed, using raw defaults: {exc}")
+            model = IntentModel(contract_type="generic", purpose=f"Fallback: {intent[:50]}...")
+
         ir = ContractIR(
-            contract_name="GeneratedContract", # Placeholder, Phase 2 might refine
-            constructor_params=[], # Will be generated in Phase 2
-            functions=[],          # Will be generated in Phase 2
+            contract_name="GeneratedContract",
+            constructor_params=[],
+            functions=[],
             metadata=ContractMetadata(
                 intent=intent,
                 intent_model=model,
@@ -555,9 +568,16 @@ def _parse_phase1_response(raw: str, intent: str, security_level: str) -> Contra
         )
         return ir
     except Exception as e:
-        logger.error(f"Failed to parse Phase 1 response: {e}\nRaw: {raw}")
+        logger.error(f"Fatal error in _parse_phase1_response: {e}\nRaw: {raw}")
+        # Return a absolute minimal IR to prevent downstream crashes
+        from src.models import IntentModel, ContractMetadata
         return ContractIR(
-            metadata={"intent": intent, "security_level": security_level, "generation_phase": 1}
+            metadata=ContractMetadata(
+                intent=intent, 
+                security_level=security_level, 
+                generation_phase=1,
+                intent_model=IntentModel(contract_type="generic")
+            )
         )
 
 
