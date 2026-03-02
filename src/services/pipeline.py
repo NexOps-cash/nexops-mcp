@@ -23,7 +23,14 @@ from src.services.llm.factory import LLMFactory
 from src.services.anti_pattern_enforcer import get_anti_pattern_enforcer
 from src.services.rule_engine import get_rule_engine
 from knowledge.golden.registry import GoldenRegistry
-from knowledge.golden.golden_adaptation import adapt_business_logic, verify_anchor_integrity
+from knowledge.golden.golden_adaptation import verify_anchor_integrity
+from knowledge.golden.golden_prompt import (
+    extract_constructor_zone,
+    build_golden_llm_prompt,
+    build_golden_retry_prompt,
+    parse_golden_llm_response,
+    recompose_template,
+)
 
 logger = logging.getLogger("nexops.pipeline")
 
@@ -44,6 +51,16 @@ _GOLDEN_TYPE_MAP = {
     "dutch_auction":        "dutch_auction",
     "linear_vesting":       "linear_vesting",
 }
+
+# Required constructor parameters per pattern (Guard 4 enforcement)
+_GOLDEN_REQUIRED_PARAMS = {
+    "escrow_2of3_nft":      ["buyer", "seller", "arbiter", "refundLocktime"],
+    "refundable_crowdfund": ["recipient", "goalAmount", "deadline"],
+    "dutch_auction":        ["seller", "startPrice", "endPrice", "auctionEnd"],
+    "linear_vesting":       ["beneficiary", "cliffTimestamp"],
+}
+
+MAX_GOLDEN_RETRIES = 2
 
 
 # ─── Unified DSL Rules (Steps 2 + 3) ─────────────────────────────────────────
@@ -346,24 +363,114 @@ class Phase2:
         return code
 
 
-def _golden_phase2(ir: ContractIR, contract_type: str) -> str:
-    """Golden adaptation branch. Deterministic. No LLM. Hard-fails on mutation."""
+def _golden_phase2(
+    ir: ContractIR,
+    contract_type: str,
+    llm=None,
+    temperature: float = 0.2,
+) -> str:
+    """
+    Golden adaptation branch.
+    Constrained self-healing retry loop — never falls back to Free synthesis.
+    All 4 guards remain active on every attempt.
+    """
     pattern_id = _GOLDEN_TYPE_MAP[contract_type]
     pattern = _golden_registry.patterns.get(pattern_id)
     if not pattern:
         raise RuntimeError(f"[Golden] Pattern '{pattern_id}' missing from registry.")
 
+    logger.info(f"[Golden] Starting adaptation for pattern: {pattern_id}")
+
     with open(pattern.template_path, "r", encoding="utf-8") as f:
         template = f.read()
 
-    # Placeholder injection (LLM injection comes in next step)
-    injected_logic = "// golden test injection"
-    adapted = adapt_business_logic(template, injected_logic)
+    # Extract mutable zones for prompt construction
+    constructor_zone = extract_constructor_zone(template)
 
-    verify_anchor_integrity(pattern.anchor_hash, adapted)
-    logger.info(f"[Golden] Anchor hash verified for {pattern_id}")
+    required_params   = _GOLDEN_REQUIRED_PARAMS.get(pattern_id, [])
+    template_param_count = len([p for p in constructor_zone.split(",") if p.strip()])
 
-    return adapted
+    intent_model = ir.metadata.intent_model
+    intent_json  = intent_model.model_dump_json() if intent_model else "{}"
+
+    # Build initial prompt
+    system_prompt, user_prompt = build_golden_llm_prompt(
+        pattern_id=pattern_id,
+        intent_json=intent_json,
+        constructor_zone=constructor_zone,
+        required_parameters=required_params,
+    )
+    logger.info(f"[Golden] Prompt built ({len(system_prompt) + len(user_prompt)} chars total)")
+
+    last_raw     = ""
+    last_error   = ""
+
+    for attempt in range(MAX_GOLDEN_RETRIES + 1):  # attempts: 0, 1, 2
+        attempt_num = attempt + 1
+        logger.info(f"[Golden] Attempt {attempt_num}/{MAX_GOLDEN_RETRIES + 1} ...")
+
+        try:
+            # ── LLM call (if wired) or stub ──────────────────────────────
+            if llm is not None:
+                import asyncio
+                raw = asyncio.get_event_loop().run_until_complete(
+                    llm.complete(user_prompt, system=system_prompt, temperature=temperature)
+                )
+            else:
+                # Stub path: deterministic test injection (no LLM)
+                import json as _json
+                raw = _json.dumps({
+                    "constructor_block": constructor_zone,
+                    "business_logic_block": ""
+                })
+
+            last_raw = raw
+            logger.info(f"[Golden] LLM response received ({len(raw)} chars)")
+
+            # ── Guard battery ─────────────────────────────────────────────
+            parsed = parse_golden_llm_response(
+                raw=raw,
+                required_parameters=required_params,
+                template_param_count=template_param_count,
+            )
+            logger.info(f"[Golden] Schema validated — Guards passed")
+
+            # ── Recompose template ────────────────────────────────────────
+            adapted = recompose_template(
+                template=template,
+                constructor_block=parsed["constructor_block"],
+                business_logic_block=parsed["business_logic_block"],
+            )
+
+            # ── Anchor hash verification ──────────────────────────────────
+            verify_anchor_integrity(pattern.anchor_hash, adapted)
+            logger.info(f"[Golden] Anchor hash verified for {pattern_id}")
+            logger.info(f"[Golden] Success on attempt {attempt_num}")
+
+            return adapted
+
+        except Exception as e:
+            last_error = str(e)
+            logger.warning(f"[Golden] Attempt {attempt_num} failed: {last_error}")
+
+            if attempt == MAX_GOLDEN_RETRIES:
+                # Hard abort — never fall back to Free synthesis
+                raise RuntimeError(
+                    f"[Golden] Adaptation failed after {MAX_GOLDEN_RETRIES + 1} attempts. "
+                    f"Last error: {last_error}"
+                )
+
+            # Build corrective retry prompt — system prompt unchanged
+            logger.info(f"[Golden] Building corrective retry prompt for attempt {attempt_num + 1}")
+            system_prompt, user_prompt = build_golden_retry_prompt(
+                original_system=system_prompt,
+                original_user=user_prompt,
+                previous_response=last_raw,
+                error_message=last_error,
+            )
+
+    # Should never reach here
+    raise RuntimeError("[Golden] Unexpected exit from retry loop")
 
 
 async def _free_phase2(

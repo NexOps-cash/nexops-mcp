@@ -103,6 +103,45 @@ Return ONLY the JSON object."""
     return system, user
 
 
+def build_golden_retry_prompt(
+    original_system: str,
+    original_user: str,
+    previous_response: str,
+    error_message: str,
+) -> tuple:
+    """
+    Build a corrective retry prompt.
+
+    Appends a strict correction instruction to the original user prompt.
+    The system prompt (invariant constraints) is never altered.
+    Tells the LLM exactly what failed and what it must fix.
+    """
+    correction = f"""---
+YOUR PREVIOUS OUTPUT WAS REJECTED.
+
+Reason for rejection:
+{error_message}
+
+Previous invalid response:
+{previous_response}
+
+You MUST correct ONLY the specific issue(s) described above.
+
+CORRECTION RULES (non-negotiable):
+- Do NOT modify invariant anchor logic
+- Do NOT include: require(  checkSig(  checkMultiSig(  in business_logic_block
+- Preserve ALL required constructor parameters — no deletions allowed
+- Output STRICT JSON with EXACTLY these two keys and NO others:
+  {{
+    "constructor_block": "...",
+    "business_logic_block": "..."
+  }}
+
+Return corrected JSON only. No explanation. No markdown."""
+
+    return original_system, original_user + "\n\n" + correction
+
+
 # ─── Response Parser ─────────────────────────────────────────────────────────
 
 def parse_golden_llm_response(raw: str, required_parameters: list, template_param_count: int) -> dict:
