@@ -1,0 +1,72 @@
+// ============================================================
+// GOLDEN TEMPLATE
+// Pattern-ID: dutch_auction
+// Version: 1.0
+// Risk-Level: HIGH
+// ============================================================
+
+// @pattern: dutch_auction
+// @invariants: [LINEAR_DECAY, NO_UNDERPAYMENT, SELLER_AUTH]
+
+contract DutchAuction(
+
+    // === MUTABLE_CONSTRUCTOR_START ===
+    pubkey seller,
+    int startPrice,
+    int endPrice,
+    int startBlock,
+    int endBlock
+    // === MUTABLE_CONSTRUCTOR_END ===
+
+) {
+
+    function spend(sig sellerSig) {
+
+        // ====================================================
+        // === INVARIANT_ANCHOR_START =========================
+        // ====================================================
+
+        int elapsed =
+            tx.time - startBlock;
+
+        int duration =
+            endBlock - startBlock;
+
+        int decay =
+            (startPrice - endPrice) *
+            elapsed / duration;
+
+        int currentPrice =
+            startPrice - decay;
+
+        require(
+            tx.outputs[0].value >= currentPrice
+        );
+
+        require(
+            checkSig(sellerSig, seller)
+        );
+
+        // ====================================================
+        // === INVARIANT_ANCHOR_END ===========================
+        // ====================================================
+
+
+        // ====================================================
+        // === BUSINESS_LOGIC_ZONE ============================
+        // ====================================================
+
+        // Optional royalty logic
+        // Optional fee logic
+        // Optional NFT validation
+
+
+        // ====================================================
+        // === VALUE_ANCHOR ==================================
+        // ====================================================
+
+        require(
+            tx.outputs[0].value >= endPrice
+        );
+    }
+}

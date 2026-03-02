@@ -1,0 +1,76 @@
+// ============================================================
+// GOLDEN TEMPLATE
+// Pattern-ID: linear_vesting
+// Version: 1.0
+// Risk-Level: HIGH
+// ============================================================
+
+// @pattern: linear_vesting
+// @invariants: [PROPORTIONAL_UNLOCK, SELF_CONTINUITY, NO_FULL_DRAIN]
+
+contract LinearVesting(
+
+    // === MUTABLE_CONSTRUCTOR_START ===
+    pubkey beneficiary,
+    int startBlock,
+    int endBlock
+    // === MUTABLE_CONSTRUCTOR_END ===
+
+) {
+
+    function spend(sig beneficiarySig) {
+
+        // ====================================================
+        // === INVARIANT_ANCHOR_START =========================
+        // ====================================================
+
+        require(
+            checkSig(beneficiarySig, beneficiary)
+        );
+
+        int totalDuration =
+            endBlock - startBlock;
+
+        int elapsed =
+            tx.time - startBlock;
+
+        int vestedAmount =
+            tx.inputs[0].value *
+            elapsed / totalDuration;
+
+        require(
+            tx.outputs[0].value <= vestedAmount
+        );
+
+        int remaining =
+            tx.inputs[0].value -
+            tx.outputs[0].value;
+
+        // Self-continuity enforcement
+        require(
+            tx.outputs[1].value == remaining
+        );
+
+        // ====================================================
+        // === INVARIANT_ANCHOR_END ===========================
+        // ====================================================
+
+
+        // ====================================================
+        // === BUSINESS_LOGIC_ZONE ============================
+        // ====================================================
+
+        // Optional cliff logic
+        // Optional pause authority
+        // Optional governance constraints
+
+
+        // ====================================================
+        // === VALUE_ANCHOR ==================================
+        // ====================================================
+
+        require(
+            tx.outputs.length >= 1
+        );
+    }
+}

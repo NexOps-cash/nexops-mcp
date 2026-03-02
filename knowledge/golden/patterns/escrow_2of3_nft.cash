@@ -1,0 +1,75 @@
+// ============================================================
+// GOLDEN TEMPLATE
+// Pattern-ID: escrow_2of3_nft
+// Version: 1.0
+// Risk-Level: HIGH
+// ============================================================
+
+// @pattern: escrow_2of3_nft
+// @invariants: [MULTISIG_2OF3, TIMELOCK_REFUND, NFT_CONTINUITY, VALUE_PRESERVATION]
+// @allowed_mutation: [CONSTRUCTOR, BUSINESS_LOGIC]
+// @forbidden_mutation: [INVARIANT_ANCHOR, VALUE_ANCHOR]
+
+contract Escrow2of3NFT(
+
+    // === MUTABLE_CONSTRUCTOR_START ===
+    pubkey buyer,
+    pubkey seller,
+    pubkey arbiter,
+    int refundLocktime
+    // === MUTABLE_CONSTRUCTOR_END ===
+
+) {
+
+    function spend(sig sig1, sig sig2) {
+
+        // ====================================================
+        // === INVARIANT_ANCHOR_START =========================
+        // ====================================================
+
+        bool buyerSeller =
+            checkSig(sig1, buyer) && checkSig(sig2, seller);
+
+        bool buyerArbiter =
+            checkSig(sig1, buyer) && checkSig(sig2, arbiter);
+
+        bool sellerArbiter =
+            checkSig(sig1, seller) && checkSig(sig2, arbiter);
+
+        bool multisigPath =
+            buyerSeller || buyerArbiter || sellerArbiter;
+
+        bool refundPath =
+            tx.time >= refundLocktime &&
+            checkSig(sig1, buyer);
+
+        require(multisigPath || refundPath);
+
+        // NFT continuity enforcement
+        require(
+            tx.outputs[0].tokenCategory ==
+            tx.inputs[0].tokenCategory
+        );
+
+        // ====================================================
+        // === INVARIANT_ANCHOR_END ===========================
+        // ====================================================
+
+
+        // ====================================================
+        // === BUSINESS_LOGIC_ZONE ============================
+        // ====================================================
+
+        // Optional fee splits, metadata checks, etc.
+
+
+        // ====================================================
+        // === VALUE_ANCHOR ==================================
+        // ====================================================
+
+        require(
+            tx.outputs[0].value ==
+            tx.inputs[0].value
+        );
+    }
+}

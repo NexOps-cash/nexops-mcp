@@ -1,0 +1,67 @@
+// ============================================================
+// GOLDEN TEMPLATE
+// Pattern-ID: refundable_crowdfund
+// Version: 1.0
+// Risk-Level: HIGH
+// ============================================================
+
+// @pattern: refundable_crowdfund
+// @invariants: [GOAL_THRESHOLD, DEADLINE_LOCK, REFUND_PATH, VALUE_PROTECTION]
+
+contract RefundableCrowdfund(
+
+    // === MUTABLE_CONSTRUCTOR_START ===
+    pubkey beneficiary,
+    int goalAmount,
+    int deadline
+    // === MUTABLE_CONSTRUCTOR_END ===
+
+) {
+
+    function spend(sig beneficiarySig) {
+
+        // ====================================================
+        // === INVARIANT_ANCHOR_START =========================
+        // ====================================================
+
+        bool campaignEnded =
+            tx.time >= deadline;
+
+        bool goalReached =
+            tx.inputs[0].value >= goalAmount;
+
+        bool successBranch =
+            campaignEnded &&
+            goalReached &&
+            checkSig(beneficiarySig, beneficiary);
+
+        bool refundBranch =
+            campaignEnded &&
+            !goalReached;
+
+        require(successBranch || refundBranch);
+
+        // ====================================================
+        // === INVARIANT_ANCHOR_END ===========================
+        // ====================================================
+
+
+        // ====================================================
+        // === BUSINESS_LOGIC_ZONE ============================
+        // ====================================================
+
+        // Optional reward tiers
+        // Optional contributor tracking logic
+        // Optional metadata validation
+
+
+        // ====================================================
+        // === VALUE_ANCHOR ==================================
+        // ====================================================
+
+        // Refund must preserve contributor value
+        require(
+            tx.outputs[0].value <= tx.inputs[0].value
+        );
+    }
+}
