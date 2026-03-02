@@ -22,10 +22,27 @@ from src.models import (
 from src.services.llm.factory import LLMFactory
 from src.services.anti_pattern_enforcer import get_anti_pattern_enforcer
 from src.services.rule_engine import get_rule_engine
+from knowledge.golden.registry import GoldenRegistry
+from knowledge.golden.golden_adaptation import adapt_business_logic, verify_anchor_integrity
 
 logger = logging.getLogger("nexops.pipeline")
 
 MAX_RETRIES = 3
+
+# ─── Golden Registry (loaded once at startup) ─────────────────────────────────
+_golden_registry = GoldenRegistry()
+_golden_registry.load_pattern("escrow_2of3_nft",     "escrow_2of3_nft.cash")
+_golden_registry.load_pattern("refundable_crowdfund", "refundable_crowdfund.cash")
+_golden_registry.load_pattern("dutch_auction",        "dutch_auction.cash")
+_golden_registry.load_pattern("linear_vesting",       "linear_vesting.cash")
+
+# Mapping from Phase 1 contract_type → Golden pattern_id
+_GOLDEN_TYPE_MAP = {
+    "escrow":       "escrow_2of3_nft",
+    "crowdfunding": "refundable_crowdfund",
+    "auction":      "dutch_auction",
+    "vesting":      "linear_vesting",
+}
 
 
 # ─── Unified DSL Rules (Steps 2 + 3) ─────────────────────────────────────────
@@ -301,57 +318,111 @@ class Phase2:
         openrouter_key: Optional[str] = None
     ) -> str:
         """Stage 2A: Generate .cash code from structured IntentModel."""
-        # Build feature-gated structured knowledge (covenant rules injected conditionally)
-        structured_knowledge = build_structured_knowledge(ir)
-        # Build compact violation context only on retry
-        violation_context = ""
-        if violations and retry_count > 0:
-            violation_context = _build_violation_context(violations)
-        # Activate Rules based on intent model features
-        rule_engine = get_rule_engine()
-        intent_model = ir.metadata.intent_model
-        tags = intent_model.features if intent_model else []
-        active_rules = rule_engine.get_rules_for_tags(tags)
-        rule_context = rule_engine.format_rules_for_prompt(active_rules)
-        # Determine if covenant rules were injected (for conditional prompt instruction)
-        needs_covenant = bool(set(tags) & _COVENANT_TAGS)
-        # Determine effective mode for Logic Injection
-        # "distribution" is broad. Refine it based on tags.
-        base_mode = intent_model.contract_type if intent_model else "unknown"
-        effective_mode = base_mode
-        if base_mode == "distribution":
-            if "split" in tags:
-                effective_mode = "split"
-            elif "tokens" in tags:
-                effective_mode = "token"
-        ir.metadata.effective_mode = effective_mode
-        logger.info(f"[Phase2] Effective Mode: {effective_mode} (base={base_mode}, tags={tags})")
-        # Build layered system + user prompt
-        system_prompt, user_prompt = _build_phase2_prompt(
-            intent_model=intent_model,
-            structured_knowledge=structured_knowledge,
-            violation_context=violation_context,
-            rule_context=rule_context,
-            needs_covenant=needs_covenant,
-            effective_mode=effective_mode,
-        )
-        total_chars = len(system_prompt) + len(user_prompt)
-        logger.info(f"[Phase2] Prompt length: {total_chars} chars (sys={len(system_prompt)}, user={len(user_prompt)}), retry={retry_count}")
-        llm = LLMFactory.get_provider(
-            "phase2", 
-            api_key=api_key, 
-            provider_type=provider,
-            groq_key=groq_key,
-            openrouter_key=openrouter_key
-        )
-        raw_response = await llm.complete(user_prompt, system=system_prompt, temperature=temperature)
 
-        # Extract .cash code from response
-        code = _extract_cash_code(raw_response)
+        intent_model = ir.metadata.intent_model
+        contract_type = intent_model.contract_type if intent_model else ""
+
+        # ─── Routing Bridge ────────────────────────────────────────────
+        if contract_type in _GOLDEN_TYPE_MAP:
+            logger.info(f"[Phase 2] Routing: GOLDEN_ADAPTATION (type={contract_type})")
+            code = _golden_phase2(ir, contract_type)
+        else:
+            logger.info(f"[Phase 2] Routing: FREE_SYNTHESIS (type={contract_type})")
+            code = await _free_phase2(
+                ir=ir,
+                violations=violations,
+                retry_count=retry_count,
+                temperature=temperature,
+                api_key=api_key,
+                provider=provider,
+                groq_key=groq_key,
+                openrouter_key=openrouter_key
+            )
+
         ir.metadata.generation_phase = 2
         ir.metadata.retry_count = retry_count
-        logger.info(f"Phase 2A complete: {len(code)} chars, retry={retry_count}, temp={temperature}")
+        logger.info(f"Phase 2A complete: {len(code)} chars, retry={retry_count}")
         return code
+
+
+def _golden_phase2(ir: ContractIR, contract_type: str) -> str:
+    """Golden adaptation branch. Deterministic. No LLM. Hard-fails on mutation."""
+    pattern_id = _GOLDEN_TYPE_MAP[contract_type]
+    pattern = _golden_registry.patterns.get(pattern_id)
+    if not pattern:
+        raise RuntimeError(f"[Golden] Pattern '{pattern_id}' missing from registry.")
+
+    with open(pattern.template_path, "r", encoding="utf-8") as f:
+        template = f.read()
+
+    # Placeholder injection (LLM injection comes in next step)
+    injected_logic = "// golden test injection"
+    adapted = adapt_business_logic(template, injected_logic)
+
+    verify_anchor_integrity(pattern.anchor_hash, adapted)
+    logger.info(f"[Golden] Anchor hash verified for {pattern_id}")
+
+    return adapted
+
+
+async def _free_phase2(
+    ir: ContractIR,
+    violations: Optional[List[ViolationDetail]],
+    retry_count: int,
+    temperature: float,
+    api_key: Optional[str],
+    provider: Optional[str],
+    groq_key: Optional[str],
+    openrouter_key: Optional[str],
+) -> str:
+    """Free synthesis branch. Uses LLM to generate from scratch."""
+    # Build feature-gated structured knowledge (covenant rules injected conditionally)
+    structured_knowledge = build_structured_knowledge(ir)
+    # Build compact violation context only on retry
+    violation_context = ""
+    if violations and retry_count > 0:
+        violation_context = _build_violation_context(violations)
+    # Activate Rules based on intent model features
+    rule_engine = get_rule_engine()
+    intent_model = ir.metadata.intent_model
+    tags = intent_model.features if intent_model else []
+    active_rules = rule_engine.get_rules_for_tags(tags)
+    rule_context = rule_engine.format_rules_for_prompt(active_rules)
+    # Determine if covenant rules were injected (for conditional prompt instruction)
+    needs_covenant = bool(set(tags) & _COVENANT_TAGS)
+    # Determine effective mode for Logic Injection
+    # "distribution" is broad. Refine it based on tags.
+    base_mode = intent_model.contract_type if intent_model else "unknown"
+    effective_mode = base_mode
+    if base_mode == "distribution":
+        if "split" in tags:
+            effective_mode = "split"
+        elif "tokens" in tags:
+            effective_mode = "token"
+    ir.metadata.effective_mode = effective_mode
+    logger.info(f"[Phase2] Effective Mode: {effective_mode} (base={base_mode}, tags={tags})")
+    # Build layered system + user prompt
+    system_prompt, user_prompt = _build_phase2_prompt(
+        intent_model=intent_model,
+        structured_knowledge=structured_knowledge,
+        violation_context=violation_context,
+        rule_context=rule_context,
+        needs_covenant=needs_covenant,
+        effective_mode=effective_mode,
+    )
+    total_chars = len(system_prompt) + len(user_prompt)
+    logger.info(f"[Phase2] Prompt length: {total_chars} chars (sys={len(system_prompt)}, user={len(user_prompt)}), retry={retry_count}")
+    llm = LLMFactory.get_provider(
+        "phase2",
+        api_key=api_key,
+        provider_type=provider,
+        groq_key=groq_key,
+        openrouter_key=openrouter_key
+    )
+    raw_response = await llm.complete(user_prompt, system=system_prompt, temperature=temperature)
+
+    # Extract .cash code from response
+    return _extract_cash_code(raw_response)
 
 
 # ─── Phase 3: Structural Toll Gate ───────────────────────────────────

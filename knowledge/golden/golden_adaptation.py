@@ -1,5 +1,9 @@
 import hashlib
-from registry import GoldenRegistry
+
+try:
+    from knowledge.golden.registry import GoldenRegistry
+except ImportError:
+    from registry import GoldenRegistry
 
 
 def extract_invariant(content: str) -> str:
