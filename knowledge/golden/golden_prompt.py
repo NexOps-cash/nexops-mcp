@@ -105,60 +105,118 @@ Return ONLY the JSON object."""
 
 # ─── Response Parser ─────────────────────────────────────────────────────────
 
-def parse_golden_llm_response(raw: str, required_parameters: list) -> dict:
+def parse_golden_llm_response(raw: str, required_parameters: list, template_param_count: int) -> dict:
     """
-    Parse and validate the LLM's JSON response.
+    Parse and validate the LLM's JSON response for Golden adaptation.
 
-    Validates:
-    - Response is valid JSON
-    - Contains constructor_block and business_logic_block keys
-    - constructor_block contains all required parameters
+    Guards (in order):
+      1. Strict JSON schema — exactly 2 keys, no extras, no missing
+      2. Length sanity — no empty or absurdly long output
+      3. Forbidden token scan — invariant + security primitive tokens blocked in business logic
+      4. Parameter count preservation — LLM cannot remove constructor params
 
-    Returns dict with {constructor_block, business_logic_block}.
-    Raises ValueError on any violation.
+    Raises ValueError on any violation. No auto-correction.
     """
     import json
 
-    # Strip markdown fences if present
+    # ──────────────────────────────────────────────────────────────────
+    # GUARD 0: Strip markdown fences (only structural cleanup, not correction)
+    # ──────────────────────────────────────────────────────────────────
     raw = raw.strip()
     if raw.startswith("```"):
         raw = re.sub(r"^```[a-z]*\n?", "", raw)
         raw = re.sub(r"\n?```$", "", raw)
+    raw = raw.strip()
 
+    # ──────────────────────────────────────────────────────────────────
+    # GUARD 1: Strict JSON schema — valid JSON, exactly 2 required keys
+    # ──────────────────────────────────────────────────────────────────
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as e:
-        raise ValueError(f"LLM returned invalid JSON: {e}\nRaw: {raw[:200]}")
+        raise ValueError(f"[Guard 1] LLM returned invalid JSON: {e}\nRaw: {raw[:300]}")
 
-    if "constructor_block" not in data:
-        raise ValueError("LLM response missing 'constructor_block'")
-    if "business_logic_block" not in data:
-        raise ValueError("LLM response missing 'business_logic_block'")
+    REQUIRED_KEYS = {"constructor_block", "business_logic_block"}
+    actual_keys = set(data.keys())
 
-    constructor_block = data["constructor_block"]
+    missing_keys = REQUIRED_KEYS - actual_keys
+    if missing_keys:
+        raise ValueError(f"[Guard 1] LLM response missing required keys: {missing_keys}")
 
-    # Validate all required parameters are preserved
-    for param in required_parameters:
-        if param not in constructor_block:
-            raise ValueError(
-                f"LLM dropped required parameter '{param}' from constructor_block"
-            )
+    extra_keys = actual_keys - REQUIRED_KEYS
+    if extra_keys:
+        raise ValueError(f"[Guard 1] LLM response contains unexpected keys: {extra_keys} — zero tolerance")
 
-    # Validate no invariant markers leaked into LLM output
-    forbidden_tokens = [
+    constructor_block    = data["constructor_block"]
+    business_logic_block = data["business_logic_block"]
+
+    # ──────────────────────────────────────────────────────────────────
+    # GUARD 2: Length sanity check
+    # ──────────────────────────────────────────────────────────────────
+    MAX_BUSINESS_LOGIC_CHARS = 2000
+
+    if not constructor_block or not constructor_block.strip():
+        raise ValueError("[Guard 2] constructor_block is empty — rejected")
+
+    if len(business_logic_block) > MAX_BUSINESS_LOGIC_CHARS:
+        raise ValueError(
+            f"[Guard 2] business_logic_block too long: {len(business_logic_block)} chars "
+            f"(max {MAX_BUSINESS_LOGIC_CHARS}) — possible prompt injection"
+        )
+
+    # ──────────────────────────────────────────────────────────────────
+    # GUARD 3: Forbidden token scan in business_logic_block
+    # Any attempt to rewrite invariants or re-define security primitives is rejected.
+    # ──────────────────────────────────────────────────────────────────
+    FORBIDDEN_IN_BUSINESS_LOGIC = [
+        # Invariant zone markers
         "INVARIANT_ANCHOR_START",
         "INVARIANT_ANCHOR_END",
         "VALUE_ANCHOR",
+        # Security primitives — must not be redefined in business logic zone
+        "require(",
+        "checkSig(",
+        "checkMultiSig(",
     ]
-    for token in forbidden_tokens:
-        if token in constructor_block or token in data["business_logic_block"]:
+
+    for token in FORBIDDEN_IN_BUSINESS_LOGIC:
+        if token in business_logic_block:
             raise ValueError(
-                f"LLM attempted to write invariant marker '{token}' — rejected"
+                f"[Guard 3] Forbidden token '{token}' found in business_logic_block — "
+                "LLM attempted to rewrite security logic"
+            )
+
+    # Also scan constructor_block for invariant marker leakage
+    for token in ["INVARIANT_ANCHOR_START", "INVARIANT_ANCHOR_END", "VALUE_ANCHOR"]:
+        if token in constructor_block:
+            raise ValueError(
+                f"[Guard 3] Invariant marker '{token}' leaked into constructor_block — rejected"
+            )
+
+    # ──────────────────────────────────────────────────────────────────
+    # GUARD 4: Parameter count preservation
+    # LLM cannot reduce number of constructor parameters
+    # ──────────────────────────────────────────────────────────────────
+    # Count comma-separated declarations (crude but reliable for CashScript params)
+    returned_param_count = len([p for p in constructor_block.split(",") if p.strip()])
+
+    if returned_param_count < template_param_count:
+        raise ValueError(
+            f"[Guard 4] Constructor parameter count decreased: "
+            f"template had {template_param_count}, LLM returned {returned_param_count} — "
+            "no deletions allowed"
+        )
+
+    # Guard 4b: All named required parameters must be present
+    for param in required_parameters:
+        if param not in constructor_block:
+            raise ValueError(
+                f"[Guard 4] Required parameter '{param}' missing from constructor_block"
             )
 
     return {
-        "constructor_block": constructor_block,
-        "business_logic_block": data["business_logic_block"],
+        "constructor_block":    constructor_block,
+        "business_logic_block": business_logic_block,
     }
 
 
