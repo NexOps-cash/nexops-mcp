@@ -37,11 +37,12 @@ _golden_registry.load_pattern("dutch_auction",        "dutch_auction.cash")
 _golden_registry.load_pattern("linear_vesting",       "linear_vesting.cash")
 
 # Mapping from Phase 1 contract_type → Golden pattern_id
+# Phase 1 now outputs exact IDs — this is a direct set membership check
 _GOLDEN_TYPE_MAP = {
-    "escrow":       "escrow_2of3_nft",
-    "crowdfunding": "refundable_crowdfund",
-    "auction":      "dutch_auction",
-    "vesting":      "linear_vesting",
+    "escrow_2of3_nft":      "escrow_2of3_nft",
+    "refundable_crowdfund": "refundable_crowdfund",
+    "dutch_auction":        "dutch_auction",
+    "linear_vesting":       "linear_vesting",
 }
 
 
@@ -489,16 +490,22 @@ def _build_phase1_prompt(intent: str, security_level: str) -> str:
 
 Rules:
 1. Identify the high-level `contract_type` from this list ONLY:
-   - "multisig"      → multiple parties must sign (no fund movement required)
-   - "distribution"  → funds are released/paid to an external recipient permanently
-                       triggers: "release", "payout", "send to", "pay to", "transfer to", "bounty", "claim"
-   - "escrow"        → multi-party release with timeout reclaim branch
-   - "vesting"       → time-locked self-continuing covenant (funds stay in contract until cliff)
-   - "swap"          → atomic exchange, hashlock or HTLC
-   - "token"         → CashTokens fungible/NFT logic
-   - "covenant"      → stateful self-continuing contract
-   - "stateful"      → generic state-preserving contract
-   - "timelock"      → single-beneficiary time-gated release
+   - "escrow_2of3_nft"       → 2-of-3 multisig escrow with timeout refund branch (and optional NFT custody)
+                               triggers: "escrow", "multisig", "refund after timeout", "arbiter", "NFT custody"
+   - "refundable_crowdfund"  → goal-based fundraise where contributors are refunded if goal is missed
+                               triggers: "crowdfund", "fundraise", "goal", "refund if fail", "deadline", "backers"
+   - "dutch_auction"         → price decays linearly over time, first acceptable buyer wins
+                               triggers: "auction", "dutch", "price decay", "declining price", "time-based price"
+   - "linear_vesting"        → beneficiary unlocks tokens proportionally over time, self-continuing covenant
+                               triggers: "vesting", "vest", "unlock over time", "cliff", "linear release", "salary"
+   - "multisig"              → multiple parties must sign (no fund movement or escrow logic required)
+   - "distribution"          → funds are released/paid to an external recipient permanently
+                               triggers: "release", "payout", "send to", "pay to", "transfer to", "bounty", "claim"
+   - "swap"                  → atomic exchange, hashlock or HTLC
+   - "token"                 → CashTokens fungible/NFT logic
+   - "covenant"              → stateful self-continuing contract
+   - "stateful"              → generic state-preserving contract
+   - "timelock"              → single-beneficiary time-gated release
    - If funds are divided among multiple recipients then include "split" in features.
 2. Extract specific `features` from this set: [multisig, timelock, stateful, spending, tokens, minting, burn, distribution, split].
 3. Identify `signers` (names or roles mentioned).
