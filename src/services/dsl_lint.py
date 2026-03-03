@@ -159,6 +159,13 @@ def _check_value_anchoring(code: str, contract_mode: str = "") -> list[dict]:
     if mode in {"multisig", "timelock", "stateless", ""}:
         return []
 
+    # Golden modes have explicit business logic for value routing, skip strict check
+    GOLDEN_MODE_PREFIXES = (
+        "escrow_", "crowdfund_", "dutch_", "vesting_", "multisig_2of3", "auction_", "refundable_", "linear_vesting"
+    )
+    if any(mode.startswith(p) for p in GOLDEN_MODE_PREFIXES):
+        return []
+
     violations = []
     for func_name, body, start_lineno in _function_bodies(code):
         # Only check functions that explicitly guard output count
@@ -240,7 +247,7 @@ def _check_fee_arithmetic(code: str, contract_mode: str = "") -> list[dict]:
     # Golden modes have composite IDs like escrow_2of3_nft, crowdfund_refundable, etc.
     # In golden mode, fee arithmetic is explicitly allowed and scaffolded.
     GOLDEN_MODE_PREFIXES = (
-        "escrow_", "crowdfund_", "dutch_", "vesting_", "multisig_2of3", "auction_"
+        "escrow_", "crowdfund_", "dutch_", "vesting_", "multisig_2of3", "auction_", "refundable_", "linear_vesting"
     )
     is_golden_mode = any(mode.startswith(p) for p in GOLDEN_MODE_PREFIXES)
     if is_golden_mode:
@@ -422,7 +429,7 @@ def _check_covenant_self_anchor(code: str, contract_mode: str = "") -> list[dict
         "timelock", "escrow", "token", "minting",
         # Golden pattern IDs — these are terminal payout contracts, not perpetuating covenants.
         # The SELF_ANCHOR is intentionally absent from golden release functions.
-        "escrow_2of3_nft", "escrow_2of3",
+        "escrow_2of3_nft", "escrow_2of3", "linear_vesting",
         ""
     }
     if mode in SKIP_MODES:

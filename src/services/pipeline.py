@@ -55,9 +55,9 @@ _GOLDEN_TYPE_MAP = {
 # Required constructor parameters per pattern (Guard 4 enforcement)
 _GOLDEN_REQUIRED_PARAMS = {
     "escrow_2of3_nft":      ["buyer", "seller", "arbiter", "refundLocktime"],
-    "refundable_crowdfund": ["recipient", "goalAmount", "deadline"],
-    "dutch_auction":        ["seller", "startPrice", "endPrice", "auctionEnd"],
-    "linear_vesting":       ["beneficiary", "cliffTimestamp"],
+    "refundable_crowdfund": ["beneficiary", "goalAmount", "deadline"],
+    "dutch_auction":        ["seller", "startBlock", "endBlock", "startPrice", "endPrice"],
+    "linear_vesting":       ["beneficiary", "cliffBlock", "endBlock", "unlockAmount"],
 }
 
 MAX_GOLDEN_RETRIES = 2

@@ -87,6 +87,11 @@ RULES FOR business_logic_block:
 - You MUST NOT: include INVARIANT_ANCHOR_START, INVARIANT_ANCHOR_END, or VALUE_ANCHOR markers
 - The invariant block above already handles multisig, token continuity. Do not duplicate it.
 
+FORBIDDEN_IN_BUSINESS_LOGIC (especially for linear_vesting):
+- tx.outputs.length modification or reassignment
+- this.activeBytecode modification
+- tx.outputs[2] reassignment
+
 FEE PATTERN (use this exact structure when a platform fee is requested):
   When implementing a percentage-based fee (e.g. 1%):
   int inputVal = tx.inputs[this.activeInputIndex].value;
@@ -149,6 +154,7 @@ business_logic_block — LOGIC ALLOWED but strictly scoped:
 - You MUST NOT include any of these forbidden tokens:
     this.activeBytecode    INVARIANT_ANCHOR_START    INVARIANT_ANCHOR_END    VALUE_ANCHOR
 - You MUST NOT modify tokenCategory or tokenAmount (those are protected above).
+- FORBIDDEN_IN_BUSINESS_LOGIC: tx.outputs.length modification, this.activeBytecode modification, tx.outputs[2] reassignment.
 - You MUST NOT access tx.inputs[0], tx.inputs[1], tx.inputs[2] (use this.activeInputIndex).
 - If a fee is required, follow the fee pattern exactly:
     int inputVal = tx.inputs[this.activeInputIndex].value;

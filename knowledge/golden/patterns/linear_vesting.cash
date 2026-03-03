@@ -18,7 +18,8 @@ contract LinearVesting(
     pubkey beneficiary,
     int cliffBlock,
     int endBlock,
-    int unlockAmount
+    int unlockAmount,
+    pubkey feeRecipient
     // === MUTABLE_CONSTRUCTOR_END ===
 
 ) {
@@ -30,24 +31,31 @@ contract LinearVesting(
         // === INVARIANT_ANCHOR_START =========================
         // ====================================================
 
-        // Cliff must have passed before any unlock (tx.time only supports >= in CashScript 0.13)
+        // Cliff must have passed
         require(tx.time >= cliffBlock);
-
-        // Note: vest before endBlock is enforced economically.
-        // Use 'finalize' function for full release after endBlock.
 
         // Only beneficiary can withdraw
         require(checkSig(beneficiarySig, beneficiary));
 
-        // Two-output structure: [0] = beneficiary withdrawal, [1] = contract remainder
-        require(tx.outputs.length == 2);
+        // Strict 3-output structure:
+        // [0] beneficiary withdrawal (net)
+        // [1] platform fee
+        // [2] contract remainder (self-anchor)
+        require(tx.outputs.length == 3);
 
-        // Withdrawal cannot exceed scheduled unlockAmount
+        // Withdrawal cap enforcement
         require(tx.outputs[0].value <= unlockAmount);
 
-        // Self-continuity: remainder must return to this contract
+        // Fee recipient binding
         require(
-            tx.outputs[1].lockingBytecode == this.activeBytecode
+            tx.outputs[1].lockingBytecode ==
+            new LockingBytecodeP2PKH(hash160(feeRecipient))
+        );
+
+        // Self-continuity for remainder
+        require(
+            tx.outputs[2].lockingBytecode ==
+            this.activeBytecode
         );
 
         // ====================================================
@@ -59,17 +67,22 @@ contract LinearVesting(
         // === BUSINESS_LOGIC_ZONE ============================
         // ====================================================
 
-        // Optional: cliff bonuses, partial unlock schedules, milestone logic
+        // LLM computes fee here.
+        // Must NOT change output structure.
+        // Must NOT change self-anchor logic.
+        // Must NOT modify unlockAmount cap.
 
 
         // ====================================================
         // === VALUE_ANCHOR ==================================
         // ====================================================
 
-        // Remainder must equal input value minus withdrawal (no value leakage)
+        // Exact value conservation:
         require(
-            tx.outputs[1].value ==
-            tx.inputs[this.activeInputIndex].value - tx.outputs[0].value
+            tx.outputs[2].value ==
+            tx.inputs[this.activeInputIndex].value
+            - tx.outputs[0].value
+            - tx.outputs[1].value
         );
     }
 

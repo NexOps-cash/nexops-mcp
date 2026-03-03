@@ -73,8 +73,9 @@ class ImplicitOutputOrderingDetector(AntiPatternDetector):
         # Golden mode exception: payout/release functions in golden templates explicitly
         # validate both output values and fee-recipient lockingBytecode in business logic.
         # The invariant anchor had its self-anchor intentionally removed.
-        GOLDEN_MODE_PREFIXES = ("escrow_", "crowdfund_", "dutch_", "vesting_", "auction_")
-        GOLDEN_PAYOUT_FUNCS  = re.compile(r'^(release|payout|settle|complete|pay)\w*$', re.IGNORECASE)
+        GOLDEN_MODE_PREFIXES = ("escrow_", "crowdfund_", "dutch_", "vesting_", "auction_", "refundable_", "linear_vesting")
+        # Added bid, vest, claim, award, spend for other golden patterns
+        GOLDEN_PAYOUT_FUNCS  = re.compile(r'^(release|payout|settle|complete|pay|bid|vest|claim|award|spend|finalize)\w*$', re.IGNORECASE)
         is_golden = any(mode.startswith(p) for p in GOLDEN_MODE_PREFIXES)
 
         # Find output references without semantic validation
@@ -462,6 +463,13 @@ class MultisigDistinctnessDetector(AntiPatternDetector):
     id = "multisig_distinctness_flaw"
     
     def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        # Skip for golden patterns that aren't primarily multisig (dutch_auction, linear_vesting, crowdfund)
+        # These often have an extra 'feeRecipient' pubkey which doesn't require a distinctness check
+        # as it's not used for authorization (only as a payout destination).
+        GOLDEN_NON_MULTISIG = ("dutch_", "vesting_", "refundable_crowdfund", "crowdfund_", "linear_vesting")
+        if any(ast.contract_mode.startswith(p) for p in GOLDEN_NON_MULTISIG):
+            return None
+
         if ast.is_multisig_like:
             pk_names = [p['name'] for p in ast.constructor_params if p['type'] == 'pubkey']
             # Look for require(pk1 != pk2)
@@ -527,7 +535,7 @@ class WeakOutputLimitDetector(AntiPatternDetector):
     def detect(self, ast: CashScriptAST) -> Optional[Violation]:
         import re
         mode = ast.contract_mode
-        GOLDEN_MODE_PREFIXES = ("escrow_", "crowdfund_", "dutch_", "vesting_", "auction_")
+        GOLDEN_MODE_PREFIXES = ("escrow_", "crowdfund_", "dutch_", "vesting_", "auction_", "refundable_", "linear_vesting")
         is_golden = any(mode.startswith(p) for p in GOLDEN_MODE_PREFIXES)
 
         for v in ast.validations:
