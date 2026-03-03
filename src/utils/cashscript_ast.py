@@ -105,9 +105,10 @@ class CashScriptAST:
     This provides semantic analysis capabilities for anti-pattern detection.
     """
     
-    def __init__(self, code: str):
+    def __init__(self, code: str, contract_mode: str = ""):
         self.code = code
         self.lines = code.split('\n')
+        self.contract_mode = (contract_mode or "").lower().strip()  # e.g. 'escrow_2of3_nft'
         
         # Parsed elements
         self.output_references: List[OutputReference] = []
@@ -325,10 +326,18 @@ class CashScriptAST:
         return violations
 
     def has_unguarded_division(self) -> List[ArithmeticOp]:
-        """Find division operations without dominating require(divisor > 0)"""
+        """Find division operations without dominating require(divisor > 0).
+        
+        NOTE: Numeric literal denominators (e.g. / 100, % 10) are always safe
+        and are exempt from this check — they cannot be zero at runtime.
+        """
         unguarded = []
         for op in self.arithmetic_ops:
             if op.op in ('/', '%'):
+                # Exempt: denominator is a pure numeric literal (never zero)
+                divisor = (op.divisor_expression or "").strip()
+                if divisor.isdigit():
+                    continue  # Literal constant — division by zero impossible
                 # Check for dominating require in same function
                 guarded = False
                 for v in self.validations:

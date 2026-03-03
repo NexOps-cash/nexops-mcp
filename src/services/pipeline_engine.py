@@ -63,6 +63,7 @@ class GuardedPipelineEngine:
             openrouter_key=openrouter_key
         )
         intent_model = ir.metadata.intent_model
+        contract_mode = intent_model.contract_type if intent_model else ""
         
         if not intent_model:
             return {"type": "error", "error": {"code": "intent_parse_failed", "message": "Failed to parse intent model."}}
@@ -193,7 +194,7 @@ class GuardedPipelineEngine:
 
             # PHASE 3: Toll Gate (Security Invariants)
             await _notify("phase3_validation", "Running Phase 3 Security Guard (Toll Gate)...", gen_attempt + 1)
-            toll_gate = Phase3.validate(code)
+            toll_gate = Phase3.validate(code, contract_mode=contract_mode)
             if not toll_gate.passed:
                 logger.warning(f"Toll Gate failed with {len(toll_gate.violations)} violations. Retrying with violation feedback...")
                 await _notify("phase3_fail", f"Security violations found: {len(toll_gate.violations)}. Retrying generation with feedback...", gen_attempt + 1, "warning")

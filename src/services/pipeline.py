@@ -585,7 +585,7 @@ class Phase3:
     """Deterministic validation. No LLM calls. Returns TollGateResult."""
 
     @staticmethod
-    def validate(code: str) -> TollGateResult:
+    def validate(code: str, contract_mode: str = "") -> TollGateResult:
         """Run all detectors on code. Returns pass/fail with violation details."""
 
         violations: List[ViolationDetail] = []
@@ -593,7 +593,7 @@ class Phase3:
 
         # 1. Run AntiPatternEnforcer (uses CashScriptAST + all 11 detectors)
         enforcer = get_anti_pattern_enforcer()
-        result = enforcer.validate_code(code, stage="generation")
+        result = enforcer.validate_code(code, stage="generation", contract_mode=contract_mode)
 
         if not result["valid"]:
             for v in result.get("violations", []):

@@ -224,11 +224,28 @@ def _check_implicit_output_ordering(code: str) -> list[dict]:
     return violations
 
 
-def _check_fee_arithmetic(code: str) -> list[dict]:
+def _check_fee_arithmetic(code: str, contract_mode: str = "") -> list[dict]:
     """
     LNC-005: Detect implicit fee arithmetic (subtracting from input value).
     Patterns: value - fee, .value - <any expr>, inputValue - ...
+
+    GOLDEN MODE EXCEPTION:
+    In golden adaptation modes (e.g. escrow_2of3_nft), fee subtraction is the
+    CORRECT pattern — the business logic zone explicitly scaffolds:
+      require(tx.outputs[0].value == inputVal - fee);
+    These modes are identified by having a composite ID (pattern with underscore suffix).
     """
+    mode = (contract_mode or "").lower().strip()
+
+    # Golden modes have composite IDs like escrow_2of3_nft, crowdfund_refundable, etc.
+    # In golden mode, fee arithmetic is explicitly allowed and scaffolded.
+    GOLDEN_MODE_PREFIXES = (
+        "escrow_", "crowdfund_", "dutch_", "vesting_", "multisig_2of3", "auction_"
+    )
+    is_golden_mode = any(mode.startswith(p) for p in GOLDEN_MODE_PREFIXES)
+    if is_golden_mode:
+        return []  # Fee arithmetic is valid in golden adaptation — skip this check
+
     violations = []
     for lineno, line in _lines(code):
         # Detect patterns like: .value - fee, .value - 1000, inputValue -
@@ -400,7 +417,14 @@ def _check_covenant_self_anchor(code: str, contract_mode: str = "") -> list[dict
 
     # 2. SKIP MODES (Stateless / Single-Spend)
     # These modes don't care about self-anchoring (or use unrelated logic).
-    SKIP_MODES = {"multisig", "multisig_simple_spend", "p2pkh", "stateless", "timelock", "escrow", "token", "minting", ""}
+    SKIP_MODES = {
+        "multisig", "multisig_simple_spend", "p2pkh", "stateless",
+        "timelock", "escrow", "token", "minting",
+        # Golden pattern IDs — these are terminal payout contracts, not perpetuating covenants.
+        # The SELF_ANCHOR is intentionally absent from golden release functions.
+        "escrow_2of3_nft", "escrow_2of3",
+        ""
+    }
     if mode in SKIP_MODES:
         return []
 

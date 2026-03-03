@@ -154,7 +154,7 @@ class AntiPatternEnforcer:
         
         return context
     
-    def validate_code(self, code: str, stage: str = "generation") -> Dict[str, Any]:
+    def validate_code(self, code: str, stage: str = "generation", contract_mode: str = "") -> Dict[str, Any]:
         """
         Validate code against ALL anti-patterns using semantic detection.
         
@@ -163,6 +163,8 @@ class AntiPatternEnforcer:
         Args:
             code: The CashScript code to validate
             stage: "generation" or "audit"
+            contract_mode: Optional contract type hint (e.g. 'escrow_2of3_nft').
+                           Drives golden/free mode branching in individual detectors.
         
         Returns:
             {
@@ -174,9 +176,9 @@ class AntiPatternEnforcer:
         """
         violations = []
         
-        # Parse code into AST for semantic analysis
+        # Parse code into AST for semantic analysis — inject mode so detectors can branch
         try:
-            ast = CashScriptAST(code)
+            ast = CashScriptAST(code, contract_mode=contract_mode)
         except Exception as e:
             logger.error(f"Failed to parse code: {e}")
             return {
