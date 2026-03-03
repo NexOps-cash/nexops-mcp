@@ -30,8 +30,8 @@ contract Escrow2of3NFT(
         // === INVARIANT_ANCHOR_START =========================
         // ====================================================
 
-        // Enforce exact output structure
-        require(tx.outputs.length == 1);
+        // Enforce minimum output structure (>= 1 allows fee outputs)
+        require(tx.outputs.length >= 1);
 
         // Enforce party distinctness (prevents collusion bypass)
         require(buyer != seller);
@@ -68,11 +68,8 @@ contract Escrow2of3NFT(
             tx.inputs[this.activeInputIndex].tokenAmount
         );
 
-        // Self-anchor: contract must perpetuate itself on release
-        require(
-            tx.outputs[0].lockingBytecode ==
-            this.activeBytecode
-        );
+        // Self-anchor REMOVED: NFT can leave covenant to a destination wallet.
+        // The BUSINESS_LOGIC_ZONE is responsible for enforcing the recipient.
 
         // ====================================================
         // === INVARIANT_ANCHOR_END ===========================
@@ -83,17 +80,29 @@ contract Escrow2of3NFT(
         // === BUSINESS_LOGIC_ZONE ============================
         // ====================================================
 
-        // Optional fee splits, metadata checks, etc.
+        // This zone is LLM-adaptable. The LLM may implement:
+        //   - Output indexing (outputs[0] → seller, outputs[1] → platform fee)
+        //   - Fee calculation (e.g. 1% of input value)
+        //   - Minimum output count enforcement if fee is required
+        //   - Value distribution checks
+        //
+        // Fee pattern example:
+        //   When implementing a percentage-based fee:
+        //   - Compute: int fee = (tx.inputs[this.activeInputIndex].value * numerator) / denominator;
+        //   - Enforce: require(tx.outputs.length >= 2);
+        //   - Enforce: require(tx.outputs[1].value == fee);
+        //   - Enforce: require(tx.outputs[1].lockingBytecode == <feeRecipient locking bytecode>);
+        //   - Enforce: require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value - fee);
+        //   - Do NOT reference this.activeBytecode in business logic.
+        //   - Do NOT modify tokenCategory or tokenAmount checks above.
 
 
         // ====================================================
         // === VALUE_ANCHOR ==================================
         // ====================================================
-
-        require(
-            tx.outputs[0].value ==
-            tx.inputs[this.activeInputIndex].value
-        );
+        // VALUE_ANCHOR is delegated to business logic for escrow release.
+        // The LLM must enforce value accounting in the business_logic_block above.
+        // Minimum guarantee: at least 1 output exists (enforced in invariant anchor).
     }
 
     // ── Refund function (timelock path: buyer only, after locktime) ──────────

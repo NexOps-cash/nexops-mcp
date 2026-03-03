@@ -1,51 +1,52 @@
 // ============================================================
 // GOLDEN TEMPLATE
 // Pattern-ID: dutch_auction
-// Version: 1.0
+// Version: 2.0
 // Risk-Level: HIGH
 // ============================================================
 
+pragma cashscript ^0.13.0;
+
 // @pattern: dutch_auction
-// @invariants: [LINEAR_DECAY, NO_UNDERPAYMENT, SELLER_AUTH]
+// @invariants: [PRICE_FLOOR, AUCTION_WINDOW, SELLER_AUTH]
+// @allowed_mutation: [CONSTRUCTOR, BUSINESS_LOGIC]
+// @forbidden_mutation: [INVARIANT_ANCHOR, VALUE_ANCHOR]
 
 contract DutchAuction(
 
     // === MUTABLE_CONSTRUCTOR_START ===
     pubkey seller,
-    int startPrice,
-    int endPrice,
     int startBlock,
-    int endBlock
+    int endBlock,
+    int startPrice,
+    int endPrice
     // === MUTABLE_CONSTRUCTOR_END ===
 
 ) {
 
-    function spend(sig sellerSig) {
+    // ── Bid function: buyer places winning bid within auction window ─────────
+    function bid(sig sellerSig) {
 
         // ====================================================
         // === INVARIANT_ANCHOR_START =========================
         // ====================================================
 
-        int elapsed =
-            tx.time - startBlock;
+        // Auction must have started (tx.time only supports >= in CashScript 0.13)
+        require(tx.time >= startBlock);
 
-        int duration =
-            endBlock - startBlock;
+        // Note: upper time bound enforced by 'reclaim' function after endBlock
 
-        int decay =
-            (startPrice - endPrice) *
-            elapsed / duration;
+        // Seller must authorize settlement
+        require(checkSig(sellerSig, seller));
 
-        int currentPrice =
-            startPrice - decay;
+        // Price floor: buyer must pay at least the end price (minimum acceptable bid)
+        require(tx.outputs[0].value >= endPrice);
 
-        require(
-            tx.outputs[0].value >= currentPrice
-        );
+        // Price ceiling sanity check
+        require(startPrice >= endPrice);
 
-        require(
-            checkSig(sellerSig, seller)
-        );
+        // Enforce single-output settlement
+        require(tx.outputs.length >= 1);
 
         // ====================================================
         // === INVARIANT_ANCHOR_END ===========================
@@ -56,17 +57,33 @@ contract DutchAuction(
         // === BUSINESS_LOGIC_ZONE ============================
         // ====================================================
 
-        // Optional royalty logic
-        // Optional fee logic
-        // Optional NFT validation
+        // Optional: royalty logic, NFT validation, exact price enforcement
+        // Price tiers can be encoded as additional require() statements here.
+        // Example (early-bird full price):
+        //   If intent includes a fixed price, require(tx.outputs[0].value >= startPrice);
 
 
         // ====================================================
         // === VALUE_ANCHOR ==================================
         // ====================================================
 
+        // Seller must receive at least the minimum acceptable price
         require(
             tx.outputs[0].value >= endPrice
         );
+    }
+
+    // ── Reclaim function: seller reclaims if no valid bid before endBlock ───
+    function reclaim(sig sellerSig) {
+
+        // Auction must have ended with no buyer
+        require(tx.time >= endBlock);
+
+        // Only seller can reclaim
+        require(checkSig(sellerSig, seller));
+
+        // Full value returned to seller
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
     }
 }

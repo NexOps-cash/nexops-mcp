@@ -1,12 +1,16 @@
 // ============================================================
 // GOLDEN TEMPLATE
 // Pattern-ID: refundable_crowdfund
-// Version: 1.0
+// Version: 2.0
 // Risk-Level: HIGH
 // ============================================================
 
+pragma cashscript ^0.13.0;
+
 // @pattern: refundable_crowdfund
 // @invariants: [GOAL_THRESHOLD, DEADLINE_LOCK, REFUND_PATH, VALUE_PROTECTION]
+// @allowed_mutation: [CONSTRUCTOR, BUSINESS_LOGIC]
+// @forbidden_mutation: [INVARIANT_ANCHOR, VALUE_ANCHOR]
 
 contract RefundableCrowdfund(
 
@@ -18,28 +22,24 @@ contract RefundableCrowdfund(
 
 ) {
 
-    function spend(sig beneficiarySig) {
+    // ── Claim function: beneficiary claims when goal is met after deadline ──
+    function claim(sig beneficiarySig) {
 
         // ====================================================
         // === INVARIANT_ANCHOR_START =========================
         // ====================================================
 
-        bool campaignEnded =
-            tx.time >= deadline;
+        // Campaign must have ended (tx.time only valid in require())
+        require(tx.time >= deadline);
 
-        bool goalReached =
-            tx.inputs[0].value >= goalAmount;
+        // Goal must have been reached
+        require(tx.inputs[this.activeInputIndex].value >= goalAmount);
 
-        bool successBranch =
-            campaignEnded &&
-            goalReached &&
-            checkSig(beneficiarySig, beneficiary);
+        // Only beneficiary can claim
+        require(checkSig(beneficiarySig, beneficiary));
 
-        bool refundBranch =
-            campaignEnded &&
-            !goalReached;
-
-        require(successBranch || refundBranch);
+        // Enforce output count
+        require(tx.outputs.length >= 1);
 
         // ====================================================
         // === INVARIANT_ANCHOR_END ===========================
@@ -50,18 +50,30 @@ contract RefundableCrowdfund(
         // === BUSINESS_LOGIC_ZONE ============================
         // ====================================================
 
-        // Optional reward tiers
-        // Optional contributor tracking logic
-        // Optional metadata validation
+        // Optional: fee logic, tiered rewards, partial disbursement
 
 
         // ====================================================
         // === VALUE_ANCHOR ==================================
         // ====================================================
 
-        // Refund must preserve contributor value
+        // Beneficiary receives the full raised amount (or minus fee if set in business logic)
         require(
-            tx.outputs[0].value <= tx.inputs[0].value
+            tx.outputs[0].value <= tx.inputs[this.activeInputIndex].value
         );
+    }
+
+    // ── Refund function: contributors can reclaim if deadline passed & goal not met ──
+    function refund() {
+
+        // Campaign must have ended
+        require(tx.time >= deadline);
+
+        // Goal must NOT have been reached (refund path)
+        require(tx.inputs[this.activeInputIndex].value < goalAmount);
+
+        // Refund output must not exceed the contributed amount
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].value <= tx.inputs[this.activeInputIndex].value);
     }
 }

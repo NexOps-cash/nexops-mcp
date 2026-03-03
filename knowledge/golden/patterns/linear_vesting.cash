@@ -1,54 +1,53 @@
 // ============================================================
 // GOLDEN TEMPLATE
 // Pattern-ID: linear_vesting
-// Version: 1.0
+// Version: 2.0
 // Risk-Level: HIGH
 // ============================================================
 
+pragma cashscript ^0.13.0;
+
 // @pattern: linear_vesting
-// @invariants: [PROPORTIONAL_UNLOCK, SELF_CONTINUITY, NO_FULL_DRAIN]
+// @invariants: [BENEFICIARY_AUTH, UNLOCK_GATE, REMAINDER_PRESERVATION, OUTPUT_STRUCTURE]
+// @allowed_mutation: [CONSTRUCTOR, BUSINESS_LOGIC]
+// @forbidden_mutation: [INVARIANT_ANCHOR, VALUE_ANCHOR]
 
 contract LinearVesting(
 
     // === MUTABLE_CONSTRUCTOR_START ===
     pubkey beneficiary,
-    int startBlock,
-    int endBlock
+    int cliffBlock,
+    int endBlock,
+    int unlockAmount
     // === MUTABLE_CONSTRUCTOR_END ===
 
 ) {
 
-    function spend(sig beneficiarySig) {
+    // ── Vest function: partial unlock after cliff ────────────────────────────
+    function vest(sig beneficiarySig) {
 
         // ====================================================
         // === INVARIANT_ANCHOR_START =========================
         // ====================================================
 
+        // Cliff must have passed before any unlock (tx.time only supports >= in CashScript 0.13)
+        require(tx.time >= cliffBlock);
+
+        // Note: vest before endBlock is enforced economically.
+        // Use 'finalize' function for full release after endBlock.
+
+        // Only beneficiary can withdraw
+        require(checkSig(beneficiarySig, beneficiary));
+
+        // Two-output structure: [0] = beneficiary withdrawal, [1] = contract remainder
+        require(tx.outputs.length == 2);
+
+        // Withdrawal cannot exceed scheduled unlockAmount
+        require(tx.outputs[0].value <= unlockAmount);
+
+        // Self-continuity: remainder must return to this contract
         require(
-            checkSig(beneficiarySig, beneficiary)
-        );
-
-        int totalDuration =
-            endBlock - startBlock;
-
-        int elapsed =
-            tx.time - startBlock;
-
-        int vestedAmount =
-            tx.inputs[0].value *
-            elapsed / totalDuration;
-
-        require(
-            tx.outputs[0].value <= vestedAmount
-        );
-
-        int remaining =
-            tx.inputs[0].value -
-            tx.outputs[0].value;
-
-        // Self-continuity enforcement
-        require(
-            tx.outputs[1].value == remaining
+            tx.outputs[1].lockingBytecode == this.activeBytecode
         );
 
         // ====================================================
@@ -60,17 +59,31 @@ contract LinearVesting(
         // === BUSINESS_LOGIC_ZONE ============================
         // ====================================================
 
-        // Optional cliff logic
-        // Optional pause authority
-        // Optional governance constraints
+        // Optional: cliff bonuses, partial unlock schedules, milestone logic
 
 
         // ====================================================
         // === VALUE_ANCHOR ==================================
         // ====================================================
 
+        // Remainder must equal input value minus withdrawal (no value leakage)
         require(
-            tx.outputs.length >= 1
+            tx.outputs[1].value ==
+            tx.inputs[this.activeInputIndex].value - tx.outputs[0].value
         );
+    }
+
+    // ── Finalize function: full release after vesting period ends ───────────
+    function finalize(sig beneficiarySig) {
+
+        // Vesting period must have fully ended
+        require(tx.time >= endBlock);
+
+        // Only beneficiary can finalize
+        require(checkSig(beneficiarySig, beneficiary));
+
+        // Single output: all remaining funds to beneficiary
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
     }
 }
