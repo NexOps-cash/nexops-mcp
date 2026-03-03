@@ -22,30 +22,44 @@ logger = logging.getLogger("nexops.server")
 app = FastAPI(title="NexOps MCP")
 
 # Add CORS middleware
+origins = [
+    "https://www.hexecutioners.club",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5173", # Common Vite port
+    "http://127.0.0.1:5173",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 @app.middleware("http")
 async def add_pna_header(request: Request, call_next):
     """
-    Handle Chrome's Private Network Access (PNA) preflight.
-    Required when https://www.hexecutioners.club (public) calls http://localhost (private).
+    Handle Chrome's Private Network Access (PNA) preflight and regular requests.
+    Required when a public site (https://www.hexecutioners.club) calls a local address.
     """
-    if request.method == "OPTIONS" and "access-control-request-private-network" in request.headers:
-        response = await call_next(request)
-        response.headers["Access-Control-Allow-Private-Network"] = "true"
-        response.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin") or "*"
-        return response
-    
+    # 1. Capture the response first
+    # For OPTIONS requests, CORSMiddleware might handle it, so we catch its response.
     response = await call_next(request)
-    # Also add it to regular responses just in case
-    if "origin" in request.headers:
+    
+    # 2. Add the PNA header if requested or for loopback access
+    # Chrome sends 'Access-Control-Request-Private-Network: true' in preflight
+    # We respond with 'Access-Control-Allow-Private-Network: true'
+    if request.headers.get("access-control-request-private-network") == "true":
         response.headers["Access-Control-Allow-Private-Network"] = "true"
+    
+    # Also add it to any request from hexecutioners just to be safe with Chrome's aggressive PNA
+    origin = request.headers.get("origin")
+    if origin == "https://www.hexecutioners.club":
+        response.headers["Access-Control-Allow-Private-Network"] = "true"
+        
     return response
 
 @app.exception_handler(RequestValidationError)
