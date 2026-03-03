@@ -317,17 +317,33 @@ class Phase1:
             current_type = ir.metadata.intent_model.contract_type
             intent_lower = intent.lower()
 
-            # Escrow: vague type OR intent keywords with multisig context
-            _ESCROW_SIGNALS = {"escrow", "arbiter", "multisig", "2-of-3", "2of3", "custody", "nft custody"}
-            if (
-                current_type in ("escrow", "multisig", "generic", "unknown")
-                and (
-                    current_type == "escrow"
-                    or "escrow" in tags
-                    or any(s in intent_lower for s in _ESCROW_SIGNALS)
-                )
-            ):
-                ir.metadata.intent_model.contract_type = "escrow_2of3_nft"
+            # Escrow: Upgrade to golden NFT pattern ONLY if NFT/token/custody context exists.
+            # Otherwise, general escrows stay as 'escrow' (triggers free generation).
+            _NFT_SIGNALS = {"nft", "token", "custody", "tokencategory", "nft custody"}
+            
+            # 1. Defend against pre-assigned golden type (downgrade if no NFT signals)
+            if current_type == "escrow_2of3_nft":
+                if not any(s in intent_lower for s in _NFT_SIGNALS):
+                    logger.info(f"[Phase1] Escrow downgrade: '{current_type}' → 'escrow' (no NFT context)")
+                    ir.metadata.intent_model.contract_type = "escrow"
+                    current_type = "escrow"
+
+            # 2. Upgrade from generic if NFT signals exist
+            is_escrow_intent = (
+                current_type == "escrow" 
+                or "escrow" in tags 
+                or "escrow" in intent_lower
+                or "arbiter" in intent_lower
+            )
+            
+            if current_type in ("escrow", "multisig", "generic", "unknown") and is_escrow_intent:
+                # Gated: Only upgrade to golden if NFT/Tokens are mentioned
+                if any(s in intent_lower for s in _NFT_SIGNALS):
+                    ir.metadata.intent_model.contract_type = "escrow_2of3_nft"
+                else:
+                    # Fallback: leave as 'escrow' or 'multisig' (Phase 2 treats these as free gen)
+                    if current_type == "generic" or current_type == "unknown":
+                        ir.metadata.intent_model.contract_type = "escrow"
 
             # Crowdfunding: keyword signals
             elif current_type in ("crowdfunding", "crowdfund", "generic") and any(
@@ -643,17 +659,19 @@ def _build_phase1_prompt(intent: str, security_level: str) -> str:
 
 Rules:
 1. Identify the high-level `contract_type` from this list ONLY:
-   - "escrow_2of3_nft"       → 2-of-3 multisig escrow with timeout refund branch (and optional NFT custody)
-                               triggers: "escrow", "multisig", "refund after timeout", "arbiter", "NFT custody"
+   - "escrow_2of3_nft"       → 2-of-3 multisig escrow with timeout refund branch and NFT/token custody
+                                triggers: "escrow with NFT", "token custody", "nft custody", "custody"
+   - "escrow"               → generic escrow logic (payout, multisig, timelock)
+                                triggers: "escrow", "arbiter", "refund after timeout", "payout escrow"
    - "refundable_crowdfund"  → goal-based fundraise where contributors are refunded if goal is missed
-                               triggers: "crowdfund", "fundraise", "goal", "refund if fail", "deadline", "backers"
+                                triggers: "crowdfund", "fundraise", "goal", "refund if fail", "deadline", "backers"
    - "dutch_auction"         → price decays linearly over time, first acceptable buyer wins
-                               triggers: "auction", "dutch", "price decay", "declining price", "time-based price"
+                                triggers: "auction", "dutch", "price decay", "declining price", "time-based price"
    - "linear_vesting"        → beneficiary unlocks tokens proportionally over time, self-continuing covenant
-                               triggers: "vesting", "vest", "unlock over time", "cliff", "linear release", "salary"
+                                triggers: "vesting", "vest", "unlock over time", "cliff", "linear release", "salary"
    - "multisig"              → multiple parties must sign (no fund movement or escrow logic required)
    - "distribution"          → funds are released/paid to an external recipient permanently
-                               triggers: "release", "payout", "send to", "pay to", "transfer to", "bounty", "claim"
+                                triggers: "release", "payout", "send to", "pay to", "transfer to", "bounty", "claim"
    - "swap"                  → atomic exchange, hashlock or HTLC
    - "token"                 → CashTokens fungible/NFT logic
    - "covenant"              → stateful self-continuing contract
