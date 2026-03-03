@@ -1,12 +1,14 @@
 // ============================================================
 // GOLDEN TEMPLATE
 // Pattern-ID: escrow_2of3_nft
-// Version: 1.0
+// Version: 2.0
 // Risk-Level: HIGH
 // ============================================================
 
+pragma cashscript ^0.13.0;
+
 // @pattern: escrow_2of3_nft
-// @invariants: [MULTISIG_2OF3, TIMELOCK_REFUND, NFT_CONTINUITY, VALUE_PRESERVATION]
+// @invariants: [MULTISIG_2OF3, TIMELOCK_REFUND, NFT_CONTINUITY, VALUE_PRESERVATION, SELF_ANCHOR]
 // @allowed_mutation: [CONSTRUCTOR, BUSINESS_LOGIC]
 // @forbidden_mutation: [INVARIANT_ANCHOR, VALUE_ANCHOR]
 
@@ -21,34 +23,55 @@ contract Escrow2of3NFT(
 
 ) {
 
-    function spend(sig sig1, sig sig2) {
+    // ── Release function (2-of-3 multisig path) ─────────────────────────────
+    function release(sig sig1, sig sig2) {
 
         // ====================================================
         // === INVARIANT_ANCHOR_START =========================
         // ====================================================
 
-        bool buyerSeller =
-            checkSig(sig1, buyer) && checkSig(sig2, seller);
+        // Enforce exact output structure
+        require(tx.outputs.length == 1);
 
-        bool buyerArbiter =
-            checkSig(sig1, buyer) && checkSig(sig2, arbiter);
+        // Enforce party distinctness (prevents collusion bypass)
+        require(buyer != seller);
+        require(buyer != arbiter);
+        require(seller != arbiter);
 
-        bool sellerArbiter =
-            checkSig(sig1, seller) && checkSig(sig2, arbiter);
+        // 2-of-3 multisig: any two parties must agree
+        // Each sig slot corresponds to a specific caller position
+        bool caller1IsBuyer   = checkSig(sig1, buyer);
+        bool caller1IsSeller  = checkSig(sig1, seller);
+        bool caller1IsArbiter = checkSig(sig1, arbiter);
+        bool caller2IsBuyer   = checkSig(sig2, buyer);
+        bool caller2IsSeller  = checkSig(sig2, seller);
+        bool caller2IsArbiter = checkSig(sig2, arbiter);
 
-        bool multisigPath =
-            buyerSeller || buyerArbiter || sellerArbiter;
+        bool validPair =
+            (caller1IsBuyer   && caller2IsSeller)  ||
+            (caller1IsBuyer   && caller2IsArbiter) ||
+            (caller1IsSeller  && caller2IsBuyer)   ||
+            (caller1IsSeller  && caller2IsArbiter) ||
+            (caller1IsArbiter && caller2IsBuyer)   ||
+            (caller1IsArbiter && caller2IsSeller);
+        require(validPair);
 
-        bool refundPath =
-            tx.time >= refundLocktime &&
-            checkSig(sig1, buyer);
-
-        require(multisigPath || refundPath);
-
-        // NFT continuity enforcement
+        // NFT continuity: token category must be preserved
         require(
             tx.outputs[0].tokenCategory ==
-            tx.inputs[0].tokenCategory
+            tx.inputs[this.activeInputIndex].tokenCategory
+        );
+
+        // Token amount preservation (prevents silent token burn)
+        require(
+            tx.outputs[0].tokenAmount ==
+            tx.inputs[this.activeInputIndex].tokenAmount
+        );
+
+        // Self-anchor: contract must perpetuate itself on release
+        require(
+            tx.outputs[0].lockingBytecode ==
+            this.activeBytecode
         );
 
         // ====================================================
@@ -69,7 +92,22 @@ contract Escrow2of3NFT(
 
         require(
             tx.outputs[0].value ==
-            tx.inputs[0].value
+            tx.inputs[this.activeInputIndex].value
         );
+    }
+
+    // ── Refund function (timelock path: buyer only, after locktime) ──────────
+    function refund(sig buyerSig) {
+
+        require(tx.time >= refundLocktime);
+        require(checkSig(buyerSig, buyer));
+
+        require(tx.outputs.length == 1);
+
+        // Validate output destination before accessing token properties
+        // (prevents implicit_output_ordering attacks)
+        require(tx.outputs[0].tokenCategory == tx.inputs[this.activeInputIndex].tokenCategory);
+        require(tx.outputs[0].tokenAmount   == tx.inputs[this.activeInputIndex].tokenAmount);
+        require(tx.outputs[0].value         == tx.inputs[this.activeInputIndex].value);
     }
 }

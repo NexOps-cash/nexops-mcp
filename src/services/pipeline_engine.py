@@ -226,29 +226,14 @@ class GuardedPipelineEngine:
                 }
             }
 
-        # FALLBACK: If all retries fail, load a pre-made canonical template.
-        logger.error(f"Pipeline exhausted. Falling back to pre-made template... (Last Error: {last_error})")
-        await _notify("fallback", "Guarded synthesis failed to converge. Loading canonical template...", max_gen_retries, "warning")
-        
-        fallback_code = self._get_fallback_contract(intent_model)
-        
-        # Determine the name of the contract from the fallback code, default to FallbackContract
-        import re
-        match = re.search(r'contract\s+(\w+)\s*\(', fallback_code)
-        contract_name = match.group(1) if match else "FallbackContract"
-        
-        return {
-            "type": "success",  # Return success to the frontend, but flag it as a fallback
-            "data": {
-                "contract_name": contract_name,
-                "code": fallback_code,
-                "intent_model": intent_model.dict(),
-                "toll_gate": {"passed": True, "violations": [], "structural_score": 1.0, "hallucination_flags": []},
-                "sanity_check": {"success": True, "violations": []},
-                "session_id": "fallback-session",
-                "fallback_used": True
-            }
-        }
+        # FALLBACK DISABLED (temporary) — hard fail to expose real LLM quality
+        logger.error(f"Pipeline exhausted after {max_gen_retries} attempts. FALLBACK DISABLED. (Last Error: {last_error})")
+        raise RuntimeError(
+            f"Pipeline exhausted after {max_gen_retries} attempts. "
+            f"Last error: {last_error}. "
+            "Fallback disabled — fix the upstream issue."
+        )
+
 
     def _get_fallback_contract(self, intent_model: IntentModel) -> str:
         """Map intent to a canonical, pre-verified physical fallback file."""

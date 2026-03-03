@@ -262,7 +262,6 @@ class Phase1:
 
     @staticmethod
     async def run(
-        self,
         intent: str,
         security_level: str = "high",
         api_key: Optional[str] = None,
@@ -310,12 +309,54 @@ class Phase1:
         if ir.metadata.intent_model:
             ir.metadata.intent_model.features = tags
 
+        # ─── Golden Pattern Normalization Layer (Deterministic) ─────────
+        # LLM outputs vague types ("escrow", "generic", etc.)
+        # This layer upgrades to exact Golden pattern IDs via keyword signals.
+        # Must run AFTER feature enrichment so tags are fully populated.
+        if ir.metadata.intent_model:
+            current_type = ir.metadata.intent_model.contract_type
+            intent_lower = intent.lower()
+
+            # Escrow: vague type OR intent keywords with multisig context
+            _ESCROW_SIGNALS = {"escrow", "arbiter", "multisig", "2-of-3", "2of3", "custody", "nft custody"}
+            if (
+                current_type in ("escrow", "multisig", "generic", "unknown")
+                and (
+                    current_type == "escrow"
+                    or "escrow" in tags
+                    or any(s in intent_lower for s in _ESCROW_SIGNALS)
+                )
+            ):
+                ir.metadata.intent_model.contract_type = "escrow_2of3_nft"
+
+            # Crowdfunding: keyword signals
+            elif current_type in ("crowdfunding", "crowdfund", "generic") and any(
+                w in intent_lower for w in ("crowdfund", "fundrais", "goal", "backers", "pledge")
+            ):
+                ir.metadata.intent_model.contract_type = "refundable_crowdfund"
+
+            # Auction: keyword signals
+            elif current_type in ("auction", "generic") and any(
+                w in intent_lower for w in ("auction", "bid", "dutch", "price decay", "declining price")
+            ):
+                ir.metadata.intent_model.contract_type = "dutch_auction"
+
+            # Vesting: keyword signals
+            elif current_type in ("vesting", "stateful", "covenant", "generic") and any(
+                w in intent_lower for w in ("vest", "vesting", "cliff", "unlock over time", "linear release", "salary")
+            ):
+                ir.metadata.intent_model.contract_type = "linear_vesting"
+
+            normalized_type = ir.metadata.intent_model.contract_type
+            if normalized_type != current_type:
+                logger.info(f"[Phase1] Golden normalization: '{current_type}' → '{normalized_type}'")
+
         logger.info(f"Phase 1 complete: type={ir.metadata.intent_model.contract_type if ir.metadata.intent_model else 'unknown'}, tags={tags}")
-        
+
         # Diagnostic log for Phase 1 output
         if ir.metadata.intent_model:
              logger.info(f"[DEBUG] Phase1 output: type={ir.metadata.intent_model.contract_type}, features={ir.metadata.intent_model.features}")
-        
+
         return ir
 
 
@@ -343,7 +384,13 @@ class Phase2:
         # ─── Routing Bridge ────────────────────────────────────────────
         if contract_type in _GOLDEN_TYPE_MAP:
             logger.info(f"[Phase 2] Routing: GOLDEN_ADAPTATION (type={contract_type})")
-            code = _golden_phase2(ir, contract_type)
+            code = await _golden_phase2(
+                ir=ir,
+                contract_type=contract_type,
+                api_key=api_key,
+                openrouter_key=openrouter_key,
+                groq_key=groq_key,
+            )
         else:
             logger.info(f"[Phase 2] Routing: FREE_SYNTHESIS (type={contract_type})")
             code = await _free_phase2(
@@ -363,16 +410,18 @@ class Phase2:
         return code
 
 
-def _golden_phase2(
+async def _golden_phase2(
     ir: ContractIR,
     contract_type: str,
-    llm=None,
-    temperature: float = 0.2,
+    api_key: Optional[str] = None,
+    openrouter_key: Optional[str] = None,
+    groq_key: Optional[str] = None,
 ) -> str:
     """
     Golden adaptation branch.
     Constrained self-healing retry loop — never falls back to Free synthesis.
     All 4 guards remain active on every attempt.
+    Uses LLMFactory.get_provider('golden') → Claude 4.6 Sonnet via OpenRouter.
     """
     pattern_id = _GOLDEN_TYPE_MAP[contract_type]
     pattern = _golden_registry.patterns.get(pattern_id)
@@ -387,7 +436,7 @@ def _golden_phase2(
     # Extract mutable zones for prompt construction
     constructor_zone = extract_constructor_zone(template)
 
-    required_params   = _GOLDEN_REQUIRED_PARAMS.get(pattern_id, [])
+    required_params      = _GOLDEN_REQUIRED_PARAMS.get(pattern_id, [])
     template_param_count = len([p for p in constructor_zone.split(",") if p.strip()])
 
     intent_model = ir.metadata.intent_model
@@ -402,32 +451,28 @@ def _golden_phase2(
     )
     logger.info(f"[Golden] Prompt built ({len(system_prompt) + len(user_prompt)} chars total)")
 
-    last_raw     = ""
-    last_error   = ""
+    # Obtain LLM provider via factory (provider-agnostic, BYOK-aware)
+    llm = LLMFactory.get_provider(
+        "golden",
+        api_key=api_key,
+        openrouter_key=openrouter_key,
+        groq_key=groq_key,
+    )
+
+    last_raw   = ""
+    last_error = ""
 
     for attempt in range(MAX_GOLDEN_RETRIES + 1):  # attempts: 0, 1, 2
         attempt_num = attempt + 1
         logger.info(f"[Golden] Attempt {attempt_num}/{MAX_GOLDEN_RETRIES + 1} ...")
 
         try:
-            # ── LLM call (if wired) or stub ──────────────────────────────
-            if llm is not None:
-                import asyncio
-                raw = asyncio.get_event_loop().run_until_complete(
-                    llm.complete(user_prompt, system=system_prompt, temperature=temperature)
-                )
-            else:
-                # Stub path: deterministic test injection (no LLM)
-                import json as _json
-                raw = _json.dumps({
-                    "constructor_block": constructor_zone,
-                    "business_logic_block": ""
-                })
-
+            # ── LLM call via factory abstraction ────────────────────────────
+            raw = await llm.complete(user_prompt, system=system_prompt, temperature=0.1)
             last_raw = raw
             logger.info(f"[Golden] LLM response received ({len(raw)} chars)")
 
-            # ── Guard battery ─────────────────────────────────────────────
+            # ── Guard battery (all 4 guards) ───────────────────────────────
             parsed = parse_golden_llm_response(
                 raw=raw,
                 required_parameters=required_params,
@@ -471,6 +516,7 @@ def _golden_phase2(
 
     # Should never reach here
     raise RuntimeError("[Golden] Unexpected exit from retry loop")
+
 
 
 async def _free_phase2(

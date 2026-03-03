@@ -25,6 +25,7 @@ _MAX_TOKENS = {
     "phase1": 512,    # JSON intent model — tiny
     "phase2": 1000,   # Full contract synthesis — Sonnet quality in ~800 tokens
     "phase2_retry": 600,  # Haiku retry — compact fix
+    "golden": 800,    # Golden adaptation — constrained JSON only (constructor + business logic)
     "fix": 400,       # Syntax fix — minimal change
     "repair": 1500,   # Security fix — complex surgical edit
     "edit": 2000,     # User-directed code edit — needs room for full contract rewrite
@@ -129,6 +130,25 @@ class LLMFactory:
                 temperature=0.2,
                 label="Groq-Llama-3.3-Fallback",
                 max_tokens=_MAX_TOKENS["phase2"],
+            ))
+
+        elif task_type == "golden":
+            # Golden Adaptation: Claude 4.6 Sonnet — constrained JSON output, ultra-low temp
+            # Must return strict {constructor_block, business_logic_block} JSON only
+            # 800 token cap prevents runaway output and prompt injection
+            if has_openrouter:
+                configs.append(LLMConfig(
+                    OpenRouterProvider(model="anthropic/claude-sonnet-4.6"),
+                    temperature=0.1,
+                    label="Claude-4.6-Sonnet-Golden-Primary",
+                    max_tokens=_MAX_TOKENS["golden"],
+                ))
+            # Groq Llama 3.3 as fallback — disciplined enough for constrained JSON
+            configs.append(LLMConfig(
+                GroqProvider(model="llama-3.3-70b-versatile"),
+                temperature=0.1,
+                label="Groq-Llama-3.3-Golden-Fallback",
+                max_tokens=_MAX_TOKENS["golden"],
             ))
 
         elif task_type == "fix":

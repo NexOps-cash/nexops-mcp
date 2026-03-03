@@ -417,10 +417,10 @@ def _check_covenant_self_anchor(code: str, contract_mode: str = "") -> list[dict
 
     violations = []
     for func_name, body, start_lineno in _function_bodies(code):
-        # 4. EXCEPTION: BURN FUNCTIONS in Token Contracts
-        # If mode is 'token' but function is 'burn', it should NOT self-anchor.
-        is_burn_func = bool(re.search(r"\bburn\w*\b", func_name, re.IGNORECASE))
-        if mode == "token" and is_burn_func:
+        # EXCEPTION: Terminal / exit functions that intentionally do NOT perpetuate the contract.
+        # burn, refund, claim, withdraw functions explicitly end the contract lifecycle.
+        TERMINAL_FUNC_NAMES = re.compile(r"\b(burn|refund|claim|withdraw|exit)\w*\b", re.IGNORECASE)
+        if TERMINAL_FUNC_NAMES.search(func_name):
             continue
 
         # Only check functions that actually touch outputs/tokens

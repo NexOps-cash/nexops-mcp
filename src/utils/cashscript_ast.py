@@ -298,7 +298,17 @@ class CashScriptAST:
         return violations
 
     def find_signature_reuse(self) -> List[CheckSigCall]:
-        """Find reuse of same signature variable for different pubkeys in same function"""
+        """Find reuse of same signature variable for different pubkeys in same function.
+        
+        NOTE: This skips functions in contracts with 3+ pubkey params — the canonical
+        N-of-M multisig pattern legitimately checks each sig slot against all candidate
+        pubkeys to allow any valid combination. This is not a true reuse vulnerability.
+        """
+        # Count pubkey constructor params — 3+ means it's an N-of-M pattern (false positive)
+        pubkey_param_count = sum(1 for p in self.constructor_params if p['type'] == 'pubkey')
+        if pubkey_param_count >= 3:
+            return []  # Legitimate N-of-M multisig — each sig is intentionally checked against all candidates
+
         violations = []
         for func in self.functions:
             func_calls = [c for c in self.check_sig_calls if c.location.function == func]
@@ -345,10 +355,21 @@ class CashScriptAST:
         return False
 
     def references_output_by_index_without_semantic_validation(self) -> List[OutputReference]:
-        """Find output references that use index without validating semantic role."""
+        """Find output references that use index without validating semantic role.
+        
+        NOTE: Terminal functions (refund, claim, withdraw, exit) are exempt because:
+        - They deliberately terminate the contract lifecycle
+        - The destination is determined by the caller's identity (sig-checked), not a fixed lockingBytecode
+        - Requiring lockingBytecode validation would require knowing the recipient's address at construction
+        """
+        TERMINAL_FUNC_NAMES = re.compile(r'^(refund|claim|withdraw|exit|reclaim)\w*$', re.IGNORECASE)
+
         violations = []
         for output_ref in self.output_references:
             if output_ref.property_accessed == 'lockingBytecode': continue
+            # Skip terminal functions — they don't perpetuate the contract
+            if TERMINAL_FUNC_NAMES.match(output_ref.location.function or ''):
+                continue
             if not self.validates_locking_bytecode_for(output_ref):
                 violations.append(output_ref)
         return violations

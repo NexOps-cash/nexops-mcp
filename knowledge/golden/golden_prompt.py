@@ -71,21 +71,24 @@ def build_golden_llm_prompt(
 
     system = f"""You are the NexOps Golden Template Adapter for pattern: {pattern_id.upper()}.
 
-Your ONLY job is to adapt TWO zones of a pre-audited contract template:
-1. constructor_block — adapt the constructor parameters to the user's requirements
-2. business_logic_block — add optional business logic to the designated zone
+Your ONLY job is to return a JSON object with exactly two keys.
 
-MANDATORY CONSTRAINTS:
-- You MUST preserve all required parameters: [{params_str}]
-- You MUST NOT modify invariant logic (the security core is locked)
-- You MUST NOT generate a full contract
-- You MUST NOT add require() statements that override invariant anchors
-- The business logic zone is for OPTIONAL additions only (fee splits, metadata, extra checks)
+RULES FOR constructor_block:
+- Adapt the constructor parameters to match the user's intent
+- MUST preserve ALL of these parameters (may add more, never remove): [{params_str}]
+- No executable code — only CashScript parameter declarations (type name, ...)
 
-OUTPUT FORMAT — Return ONLY this JSON (no markdown, no explanation):
+RULES FOR business_logic_block:
+- This zone is COMMENTS ONLY. You may write // comment lines to describe the contract.
+- DO NOT write any executable CashScript statements here. Not even one.
+- DO NOT write: require(  bytes  int  bool  checkSig(  checkMultiSig(  tx.  this.
+- The invariant block already handles ALL on-chain logic. Do not duplicate it.
+- If you have nothing useful to comment, return an empty string: ""
+
+OUTPUT FORMAT — Return ONLY this JSON (no markdown fences, no explanation):
 {{
-  "constructor_block": "<adapted constructor parameters as CashScript param declarations>",
-  "business_logic_block": "<optional CashScript statements for the business logic zone>"
+  "constructor_block": "<adapted constructor parameter declarations>",
+  "business_logic_block": "<// comment lines only, or empty string>"
 }}"""
 
     user = f"""PATTERN: {pattern_id}
@@ -125,19 +128,28 @@ Reason for rejection:
 Previous invalid response:
 {previous_response}
 
-You MUST correct ONLY the specific issue(s) described above.
+CRITICAL CORRECTION RULES:
 
-CORRECTION RULES (non-negotiable):
-- Do NOT modify invariant anchor logic
-- Do NOT include: require(  checkSig(  checkMultiSig(  in business_logic_block
-- Preserve ALL required constructor parameters — no deletions allowed
-- Output STRICT JSON with EXACTLY these two keys and NO others:
-  {{
-    "constructor_block": "...",
-    "business_logic_block": "..."
-  }}
+business_logic_block = COMMENTS ONLY.
+- Write only // comment lines.
+- NO executable statements. Not a single one.
+- The following are ALL forbidden inside business_logic_block:
+    require(    checkSig(    checkMultiSig(
+    bytes       int          bool
+    tx.         this.        0x
+- If you have nothing to comment, return an empty string: ""
 
-Return corrected JSON only. No explanation. No markdown."""
+constructor_block:
+- Preserve ALL required parameters — no deletions allowed.
+- No executable code — only CashScript param declarations.
+
+Output STRICT JSON with EXACTLY these two keys and NO others:
+{{
+  "constructor_block": "...",
+  "business_logic_block": "// comment only, or empty"
+}}
+
+Return corrected JSON only. No explanation. No markdown fences."""
 
     return original_system, original_user + "\n\n" + correction
 
@@ -212,10 +224,18 @@ def parse_golden_llm_response(raw: str, required_parameters: list, template_para
         "INVARIANT_ANCHOR_START",
         "INVARIANT_ANCHOR_END",
         "VALUE_ANCHOR",
-        # Security primitives — must not be redefined in business logic zone
+        # Security primitives — must not appear in business logic zone
         "require(",
         "checkSig(",
         "checkMultiSig(",
+        # Hardcoded input indexes — must always use this.activeInputIndex
+        "tx.inputs[0]",
+        "tx.inputs[1]",
+        "tx.inputs[2]",
+        # Raw hex / token primitives that belong in invariant
+        "tokenCategory",
+        "tokenAmount",
+        "lockingBytecode",
     ]
 
     for token in FORBIDDEN_IN_BUSINESS_LOGIC:
@@ -273,7 +293,20 @@ def recompose_template(template: str, constructor_block: str, business_logic_blo
     ei = template.find(ce)
     if si == -1 or ei == -1:
         raise ValueError("Constructor markers missing from template during recomposition")
-    template = template[:si + len(cs)] + "\n    " + constructor_block + "\n    " + template[ei:]
+    # Find the end of the MUTABLE_CONSTRUCTOR_END line (skip past it entirely —
+    # it's a comment that must not appear inside the parameter list)
+    ce_line_end = template.find("\n", ei)
+    if ce_line_end == -1:
+        ce_line_end = len(template)
+    else:
+        ce_line_end += 1  # include the newline itself so we resume on the next line
+    template = (
+        template[:si + len(cs)]
+        + "\n    "
+        + constructor_block
+        + "\n    "
+        + template[ce_line_end:]
+    )
 
     # Replace business logic placeholder
     bl = "=== BUSINESS_LOGIC_ZONE ==="
@@ -282,9 +315,22 @@ def recompose_template(template: str, constructor_block: str, business_logic_blo
         raise ValueError("BUSINESS_LOGIC_ZONE marker missing during recomposition")
     # Find the next marker after business logic to know where to stop replacing
     rest_start = bi + len(bl)
-    next_marker = template.find("=== ", rest_start)
-    if next_marker != -1:
-        template = template[:rest_start] + "\n        " + business_logic_block + "\n\n        " + template[next_marker:]
+
+    # Search for VALUE_ANCHOR specifically — NOT a generic "=== " which matches
+    # the separator comment lines (// ====) and corrupts the output.
+    value_anchor_marker = "=== VALUE_ANCHOR"
+    va_pos = template.find(value_anchor_marker, rest_start)
+
+    if va_pos != -1:
+        # Walk back to the start of the line so we keep the '        // ====' separator intact.
+        va_line_start = template.rfind("\n", 0, va_pos) + 1
+        template = (
+            template[:rest_start]
+            + "\n\n        "
+            + business_logic_block
+            + "\n\n\n        "
+            + template[va_line_start:]
+        )
     else:
         template = template[:rest_start] + "\n        " + business_logic_block + "\n"
 
