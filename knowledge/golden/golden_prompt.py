@@ -77,18 +77,32 @@ RULES FOR constructor_block:
 - Adapt the constructor parameters to match the user's intent
 - MUST preserve ALL of these parameters (may add more, never remove): [{params_str}]
 - No executable code — only CashScript parameter declarations (type name, ...)
+- If the user requests a fee recipient, add: pubkey feeRecipient
 
 RULES FOR business_logic_block:
-- This zone is COMMENTS ONLY. You may write // comment lines to describe the contract.
-- DO NOT write any executable CashScript statements here. Not even one.
-- DO NOT write: require(  bytes  int  bool  checkSig(  checkMultiSig(  tx.  this.
-- The invariant block already handles ALL on-chain logic. Do not duplicate it.
-- If you have nothing useful to comment, return an empty string: ""
+- This zone accepts CashScript statements for economic distribution (fees, payouts).
+- You MUST implement any fee or distribution logic requested by the user here.
+- You may use: require()  int  bool  arithmetic  tx.outputs[N].value  tx.outputs[N].lockingBytecode
+- You MUST NOT: reference this.activeBytecode, modify tokenCategory, modify tokenAmount
+- You MUST NOT: include INVARIANT_ANCHOR_START, INVARIANT_ANCHOR_END, or VALUE_ANCHOR markers
+- The invariant block above already handles multisig, token continuity. Do not duplicate it.
+
+FEE PATTERN (use this exact structure when a platform fee is requested):
+  When implementing a percentage-based fee (e.g. 1%):
+  int inputVal = tx.inputs[this.activeInputIndex].value;
+  int fee = inputVal / 100;  // 1%
+  require(tx.outputs.length >= 2);
+  require(tx.outputs[1].value == fee);
+  require(tx.outputs[1].lockingBytecode == new LockingBytecodeP2PKH(hash160(feeRecipient)));
+  require(tx.outputs[0].value == inputVal - fee);
+
+If NO fee is requested, enforce full value transfer:
+  require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
 
 OUTPUT FORMAT — Return ONLY this JSON (no markdown fences, no explanation):
 {{
   "constructor_block": "<adapted constructor parameter declarations>",
-  "business_logic_block": "<// comment lines only, or empty string>"
+  "business_logic_block": "<CashScript logic statements for value distribution, or empty string>"
 }}"""
 
     user = f"""PATTERN: {pattern_id}
@@ -130,14 +144,19 @@ Previous invalid response:
 
 CRITICAL CORRECTION RULES:
 
-business_logic_block = COMMENTS ONLY.
-- Write only // comment lines.
-- NO executable statements. Not a single one.
-- The following are ALL forbidden inside business_logic_block:
-    require(    checkSig(    checkMultiSig(
-    bytes       int          bool
-    tx.         this.        0x
-- If you have nothing to comment, return an empty string: ""
+business_logic_block — LOGIC ALLOWED but strictly scoped:
+- You MAY write CashScript statements for value distribution (fees, payouts).
+- You MUST NOT include any of these forbidden tokens:
+    this.activeBytecode    INVARIANT_ANCHOR_START    INVARIANT_ANCHOR_END    VALUE_ANCHOR
+- You MUST NOT modify tokenCategory or tokenAmount (those are protected above).
+- You MUST NOT access tx.inputs[0], tx.inputs[1], tx.inputs[2] (use this.activeInputIndex).
+- If a fee is required, follow the fee pattern exactly:
+    int inputVal = tx.inputs[this.activeInputIndex].value;
+    int fee = inputVal / 100;
+    require(tx.outputs.length >= 2);
+    require(tx.outputs[1].value == fee);
+    require(tx.outputs[0].value == inputVal - fee);
+- If NO fee is required: require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
 
 constructor_block:
 - Preserve ALL required parameters — no deletions allowed.
@@ -146,7 +165,7 @@ constructor_block:
 Output STRICT JSON with EXACTLY these two keys and NO others:
 {{
   "constructor_block": "...",
-  "business_logic_block": "// comment only, or empty"
+  "business_logic_block": "<distribution logic or empty string>"
 }}
 
 Return corrected JSON only. No explanation. No markdown fences."""
@@ -220,22 +239,16 @@ def parse_golden_llm_response(raw: str, required_parameters: list, template_para
     # Any attempt to rewrite invariants or re-define security primitives is rejected.
     # ──────────────────────────────────────────────────────────────────
     FORBIDDEN_IN_BUSINESS_LOGIC = [
-        # Invariant zone markers
+        # Invariant zone markers — LLM must never reference these
         "INVARIANT_ANCHOR_START",
         "INVARIANT_ANCHOR_END",
         "VALUE_ANCHOR",
-        # Security primitives — must not appear in business logic zone
-        "require(",
-        "checkSig(",
-        "checkMultiSig(",
+        # Self-anchor primitive — belongs to invariant, not business logic
+        "this.activeBytecode",
         # Hardcoded input indexes — must always use this.activeInputIndex
         "tx.inputs[0]",
         "tx.inputs[1]",
         "tx.inputs[2]",
-        # Raw hex / token primitives that belong in invariant
-        "tokenCategory",
-        "tokenAmount",
-        "lockingBytecode",
     ]
 
     for token in FORBIDDEN_IN_BUSINESS_LOGIC:

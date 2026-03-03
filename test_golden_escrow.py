@@ -53,8 +53,8 @@ logger = logging.getLogger("nexops.golden_test")
 # ── Test Target ────────────────────────────────────────────────────────────────
 TEST = {
     "id":     "G-01",
-    "name":   "2-of-3 Escrow with NFT Custody",
-    "intent": "Create a 2-of-3 escrow with NFT custody, refund after 800000",
+    "name":   "2-of-3 Escrow with NFT Custody + 1% Fee",
+    "intent": "Create a 2-of-3 escrow with NFT custody, refund after 800000, and add 1% platform fee to feeRecipient",
 }
 
 # ── LLM Response Interceptor ──────────────────────────────────────────────────
