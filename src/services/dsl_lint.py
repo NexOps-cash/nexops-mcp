@@ -151,8 +151,8 @@ def _check_value_anchoring(code: str, contract_mode: str = "") -> list[dict]:
     Also accepts sum-preservation patterns where any output value equals
     tx.inputs[this.activeInputIndex].value.
     """
-    COVENANT_MODES = {"escrow", "vesting", "token", "covenant", "stateful"}
-
+    COVENANT_MODES = {"escrow", "vesting", "token", "covenant", "stateful", "vault"}
+    
     mode = (contract_mode or "").lower().strip()
 
     # Skip anchoring for clearly stateless contracts
@@ -161,10 +161,21 @@ def _check_value_anchoring(code: str, contract_mode: str = "") -> list[dict]:
 
     # Golden modes have explicit business logic for value routing, skip strict check
     GOLDEN_MODE_PREFIXES = (
-        "escrow_", "crowdfund_", "dutch_", "vesting_", "multisig_2of3", "auction_", "refundable_", "linear_vesting"
+        "escrow_", "crowdfund_", "dutch_", "vesting_", "multisig_2of3", "auction_", 
+        "refundable_", "linear_vesting", "streaming"
     )
     if any(mode.startswith(p) for p in GOLDEN_MODE_PREFIXES):
         return []
+
+    # Pre-scan for common input value variable names
+    # e.g., int inputVal = tx.inputs[this.activeInputIndex].value;
+    input_val_vars = set()
+    input_var_match = re.search(r"int\s+(\w+)\s*=\s*tx\.inputs\[this\.activeInputIndex\]\.value", code)
+    if input_var_match:
+        input_val_vars.add(input_var_match.group(1))
+    
+    # Generic input value patterns for regex
+    input_pattern = r"(?:tx\.inputs\[this\.activeInputIndex\]\.value|" + "|".join(list(input_val_vars) + ["inputVal"]) + r")"
 
     violations = []
     for func_name, body, start_lineno in _function_bodies(code):
@@ -177,17 +188,16 @@ def _check_value_anchoring(code: str, contract_mode: str = "") -> list[dict]:
 
         # Accept direct equality anchor:
         # require(tx.outputs[N].value == tx.inputs[this.activeInputIndex].value)
-
         direct_anchor = bool(re.search(
-            r"require\s*\(\s*tx\.outputs\[\d+\]\.value\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.value\s*\)",
-            body,
+            r"require\s*\(\s*tx\.outputs\[\d+\]\.value\s*==\s*" + input_pattern + r"\s*\)",
+            body, re.DOTALL
         ))
 
-        # Accept sum-preservation pattern:
+        # Accept sum-preservation pattern (up to 2 outputs + remainder)
         # require(tx.outputs[0].value + tx.outputs[1].value == tx.inputs[this.activeInputIndex].value)
         sum_anchor = bool(re.search(
-            r"require\s*\(\s*tx\.outputs\[\d+\]\.value\s*\+\s*tx\.outputs\[\d+\]\.value\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.value\s*\)",
-            body,
+            r"require\s*\(\s*tx\.outputs\[\d+\]\.value\s*\+\s*tx\.outputs\[\d+\]\.value\s*==\s*" + input_pattern + r"\s*\)",
+            body, re.DOTALL
         ))
 
         has_value_anchor = direct_anchor or sum_anchor
@@ -247,11 +257,12 @@ def _check_fee_arithmetic(code: str, contract_mode: str = "") -> list[dict]:
     # Golden modes have composite IDs like escrow_2of3_nft, crowdfund_refundable, etc.
     # In golden mode, fee arithmetic is explicitly allowed and scaffolded.
     GOLDEN_MODE_PREFIXES = (
-        "escrow_", "crowdfund_", "dutch_", "vesting_", "multisig_2of3", "auction_", "refundable_", "linear_vesting"
+        "escrow_", "crowdfund_", "dutch_", "vesting_", "multisig_2of3", "auction_", 
+        "refundable_", "linear_vesting", "streaming"
     )
     is_golden_mode = any(mode.startswith(p) for p in GOLDEN_MODE_PREFIXES)
-    if is_golden_mode:
-        return []  # Fee arithmetic is valid in golden adaptation — skip this check
+    if is_golden_mode or mode == "vault" or mode == "streaming":
+        return []  # Fee arithmetic/subtraction is valid in golden, vault, and streaming modes
 
     violations = []
     for lineno, line in _lines(code):
@@ -449,8 +460,8 @@ def _check_covenant_self_anchor(code: str, contract_mode: str = "") -> list[dict
     violations = []
     for func_name, body, start_lineno in _function_bodies(code):
         # EXCEPTION: Terminal / exit functions that intentionally do NOT perpetuate the contract.
-        # burn, refund, claim, withdraw functions explicitly end the contract lifecycle.
-        TERMINAL_FUNC_NAMES = re.compile(r"\b(burn|refund|claim|withdraw|exit)\w*\b", re.IGNORECASE)
+        # burn, refund, claim, withdraw, drain, close, liquidate, sweep functions explicitly end the contract lifecycle.
+        TERMINAL_FUNC_NAMES = re.compile(r"\b(burn|refund|claim|withdraw|exit|drain|close|liquidate|sweep)\w*\b", re.IGNORECASE)
         if TERMINAL_FUNC_NAMES.search(func_name):
             continue
 

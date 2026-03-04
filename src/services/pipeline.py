@@ -213,7 +213,7 @@ def build_pattern_rails(tags: List[str]) -> str:
 
 # Tags that require covenant/output/token validation rules
 # Tags that require covenant/output/token validation rules
-_COVENANT_TAGS = {"covenant", "stateful", "vesting", "vault"}
+_COVENANT_TAGS = {"covenant", "stateful", "vesting", "vault", "streaming"}
 
 # YAML file cache: filename -> parsed dict
 _yaml_cache: dict = {}
@@ -362,6 +362,18 @@ class Phase1:
                 w in intent_lower for w in ("vest", "vesting", "cliff", "unlock over time", "linear release", "salary")
             ):
                 ir.metadata.intent_model.contract_type = "linear_vesting"
+
+            # Streaming: keyword signals (must be before generic vesting)
+            elif current_type in ("streaming", "vesting", "generic") and any(
+                w in intent_lower for w in ("stream", "streaming", "decay", "linear decay", "block-by-block")
+            ):
+                ir.metadata.intent_model.contract_type = "streaming"
+
+            # Vault: keyword signals
+            elif current_type in ("vault", "covenant", "generic", "stateful") and any(
+                w in intent_lower for w in ("vault", "cold storage", "withdrawal limit", "controlled release")
+            ):
+                ir.metadata.intent_model.contract_type = "vault"
 
             normalized_type = ir.metadata.intent_model.contract_type
             if normalized_type != current_type:
@@ -663,12 +675,15 @@ Rules:
                                 triggers: "escrow with NFT", "token custody", "nft custody", "custody"
    - "escrow"               → generic escrow logic (payout, multisig, timelock)
                                 triggers: "escrow", "arbiter", "refund after timeout", "payout escrow"
+   - "vault"                 → secure self-continuing covenant for fund storage and controlled withdrawal
+                                triggers: "vault", "cold storage", "withdrawal lock", "controlled spend"
    - "refundable_crowdfund"  → goal-based fundraise where contributors are refunded if goal is missed
-                                triggers: "crowdfund", "fundraise", "goal", "refund if fail", "deadline", "backers"
    - "dutch_auction"         → price decays linearly over time, first acceptable buyer wins
                                 triggers: "auction", "dutch", "price decay", "declining price", "time-based price"
    - "linear_vesting"        → beneficiary unlocks tokens proportionally over time, self-continuing covenant
-                                triggers: "vesting", "vest", "unlock over time", "cliff", "linear release", "salary"
+                                triggers: "vesting", "vest", "cliff", "unlock over time", "linear release", "salary"
+   - "streaming"             → continuous linear release or decay of funds over time
+                                triggers: "stream", "streaming", "decay", "linear decay", "block-by-block release"
    - "multisig"              → multiple parties must sign (no fund movement or escrow logic required)
    - "distribution"          → funds are released/paid to an external recipient permanently
                                 triggers: "release", "payout", "send to", "pay to", "transfer to", "bounty", "claim"
@@ -713,7 +728,13 @@ def _build_phase2_prompt(
     user_prompt: compact intent JSON + KB + optional violations (dynamic)
     """
     # ── SYSTEM PROMPT (static, cacheable) ──────────────────────────────
-    if needs_covenant:
+    if effective_mode == "vault":
+        covenant_rule = (
+            "VAULT MODE: require(tx.outputs.length <= 2); "
+            "require(tx.outputs[0].lockingBytecode == this.activeBytecode); "
+            "require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value - tx.outputs[1].value); "
+        )
+    elif needs_covenant:
         covenant_rule = (
             "COVENANT MODE: require(tx.outputs.length==1); "
             "require(tx.outputs[0].lockingBytecode==this.activeBytecode); "

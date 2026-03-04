@@ -154,3 +154,40 @@ distribution:
     notes:
       - "tokenCategory and tokenAmount MUST both be preserved unless explicitly minting/burning."
       - "DO NOT use this.activeBytecode — this is a distribution, not a covenant."
+
+streaming:
+  description: "Continuous linear release or decay of funds over time (streaming)."
+  rules:
+    - id: STREAM-INTERPOLATION
+      rule: "DO NOT use tx.time in math. Pass 'int requestTime' as an argument, use require(tx.time >= requestTime), and use requestTime for math."
+    - id: STREAM-CONTINUATION
+      rule: "MUST use self-continuation (this.activeBytecode) for the remaining balance."
+    - id: STREAM-VALUE-ANCHOR
+      rule: "The sum of the payout and the continuation MUST equal the input value."
+  canonical_linear:
+    description: "Linear streaming payout using a validated requestTime parameter."
+    shape: |
+      function claim(sig beneficiarySig, int requestTime, int claimAmount) {
+          // 1. Validate time (tx.time is MINIMUM, requestTime is TARGET)
+          require(tx.time >= requestTime);
+          require(requestTime >= startTime);
+          
+          // 2. Linear math using requestTime (NOT tx.time)
+          int elapsed = requestTime - startTime;
+          int duration = endTime - startTime;
+          int vested = (totalAmount * elapsed) / duration;
+          
+          int maxClaimable = vested - alreadyWithdrawn;
+          require(claimAmount <= maxClaimable);
+          
+          // 3. Authorization
+          require(checkSig(beneficiarySig, beneficiary));
+          
+          // 4. Covenant: payout + remainder == input
+          require(tx.outputs.length == 2);
+          require(tx.outputs[1].lockingBytecode == this.activeBytecode);
+          require(tx.outputs[0].value + tx.outputs[1].value == tx.inputs[this.activeInputIndex].value);
+      }
+    notes:
+      - "State tracking (alreadyWithdrawn) often requires an NFT or stateful parameter update."
+      - "For simple decay where the balance just drops, initialBalance is used instead of totalAmount."
