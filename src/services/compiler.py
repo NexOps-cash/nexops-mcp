@@ -96,11 +96,17 @@ class CompilerService:
 
         try:
             cmd = "cashc"
+            # Windows fallback (local npm)
             if os.name == 'nt':
                 appdata = os.environ.get('APPDATA', '')
                 npm_path = os.path.join(appdata, 'npm', 'cashc.cmd')
                 if os.path.exists(npm_path):
                     cmd = npm_path
+            else:
+                # Linux/Railway fallback: check local node_modules
+                local_npm_path = os.path.join(os.getcwd(), "node_modules", ".bin", "cashc")
+                if os.path.exists(local_npm_path):
+                    cmd = local_npm_path
 
             result = subprocess.run(
                 [cmd, tmp_path, "--hex"],

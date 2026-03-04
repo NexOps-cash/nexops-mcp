@@ -1,0 +1,11 @@
+{
+    "name": "nexops-mcp-backend",
+    "version": "0.1.0",
+    "description": "NexOps MCP Backend Compiler Support",
+    "dependencies": {
+        "@cashscript/cashc": "^0.13.0"
+    },
+    "engines": {
+        "node": ">=20.0.0"
+    }
+}
