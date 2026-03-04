@@ -3,7 +3,7 @@
     "version": "0.1.0",
     "description": "NexOps MCP Backend Compiler Support",
     "dependencies": {
-        "cashc": "0.13.0"
+        "cashc": "0.13.0-next.2"
     },
     "engines": {
         "node": ">=20.0.0"
