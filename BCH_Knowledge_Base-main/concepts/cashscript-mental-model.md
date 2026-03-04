@@ -185,7 +185,7 @@ require(identifier == 0x01);  // Validate this is indeed a loan
 ```cashscript
 // Keep fixed parts, update variable parts
 bytes20 fixedPartLoanState = loanState.split(20)[0];
-bytes27 newLoanCommitment = fixedPartLoanState + nextInterestRate + bytes5(interestManagerConfiguration);
+bytes27 newLoanCommitment = fixedPartLoanState + nextInterestRate + toPaddedBytes(interestManagerConfiguration, 5);
 ```
 
 ### First Byte as Type Identifier
@@ -385,12 +385,11 @@ require(tx.outputs.length <= MAX_OUTPUTS);
 ### Rule 6: Use Function Identifiers
 
 ```cashscript
-// Single-byte identifiers for function contracts
-enum LoanFunction {
-  LIQUIDATED = 0x01,
-  MANAGE_LOAN = 0x02,
-  // ...
-}
+// Single-byte identifiers for function contracts (used as NFT commitments)
+// 0x01 = liquidate
+// 0x02 = manage loan
+// 0x03 = pay interest
+// ...
 ```
 
 ### Rule 7: Minimum Value Requirements

@@ -60,7 +60,7 @@ const artifact = compileFile('path/to/contract.cash');
 
 // Compile from string
 const contractCode = `
-    pragma cashscript ^0.12.1;
+    pragma cashscript ^0.13.0;
     contract SimpleContract(pubkey owner) {
         function spend(sig ownerSig) {
             require(checkSig(ownerSig, owner));
@@ -92,31 +92,35 @@ const provider = new ElectrumNetworkProvider('mainnet');
 const provider = new ElectrumNetworkProvider('chipnet');
 
 // Custom server
-const provider = new ElectrumNetworkProvider('mainnet', 'fulcrum.example.com');
+const provider = new ElectrumNetworkProvider('mainnet', { hostname: 'fulcrum.example.com' });
 ```
 
 ### Custom Provider Options
 
 ```javascript
+// Custom ElectrumClient instance
 const provider = new ElectrumNetworkProvider('mainnet', {
-    servers: ['electrum.example.com:50001'],
-    timeout: 10000,
-    retries: 3
+    electrum: myElectrumClient
+});
+
+// Manual connection management
+const provider = new ElectrumNetworkProvider('mainnet', {
+    manualConnectionManagement: true
 });
 ```
 
 ## Contract Options
 
-### Address Type
+### Contract Type
 
 ```javascript
 const options = {
     provider: provider,
-    addressType: 'p2sh32'  // or 'p2sh20' or 'p2s'
+    contractType: 'p2sh32'  // or 'p2sh20' or 'p2s'
 };
 ```
 
-**Address Types:**
+**Contract Types:**
 - `p2sh32`: SHA-256 hash (default, more secure)
 - `p2sh20`: RIPEMD-160 hash (less secure, legacy)
 - `p2s`: Pay to Script - direct script usage without hashing (more efficient, standard)
@@ -198,8 +202,8 @@ console.log('Bytecode:', contract.bytecode);
 // Contract byte size
 console.log('Size:', contract.bytesize);
 
-// Contract functions
-console.log('Functions:', Object.keys(contract.functions));
+// Contract unlockers
+console.log('Unlockers:', Object.keys(contract.unlock));
 ```
 
 ### Balance and UTXOs
@@ -279,7 +283,7 @@ const contract2 = factory.createContract([pubkey2]);
 ```javascript
 function createTimeLockContract(owner, lockTime) {
     const artifact = compileString(`
-        pragma cashscript ^0.12.1;
+        pragma cashscript ^0.13.0;
         contract TimeLock(pubkey owner, int lockTime) {
             function spend(sig ownerSig) {
                 require(checkSig(ownerSig, owner));
@@ -380,14 +384,13 @@ function createTypedContract(
 ```javascript
 const config = {
     network: process.env.NETWORK || 'mainnet',
-    addressType: 'p2sh32',
-    timeout: 30000
+    contractType: 'p2sh32',
 };
 
 const provider = new ElectrumNetworkProvider(config.network);
 const contract = new Contract(artifact, args, {
     provider,
-    addressType: config.addressType
+    contractType: config.contractType
 });
 ```
 
@@ -444,8 +447,8 @@ async function validateContract(contract) {
             throw new Error('Invalid contract address');
         }
         
-        if (!contract.functions || Object.keys(contract.functions).length === 0) {
-            throw new Error('Contract has no functions');
+        if (!contract.unlock || Object.keys(contract.unlock).length === 0) {
+            throw new Error('Contract has no unlock functions');
         }
         
         return true;
@@ -473,7 +476,7 @@ const contract = new Contract(artifact, args, { provider });
 console.log('Contract Debug Info:');
 console.log('- Address:', contract.address);
 console.log('- Bytecode length:', contract.bytecode.length);
-console.log('- Functions:', Object.keys(contract.functions));
+console.log('- Unlockers:', Object.keys(contract.unlock));
 console.log('- Provider network:', provider.network);
 ```
 

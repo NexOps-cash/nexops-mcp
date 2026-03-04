@@ -4,14 +4,14 @@
 
 | Type | Operations | Methods | Conversions | Size | Constraints |
 |------|-----------|---------|-------------|------|-------------|
-| `bool` | `! && || == !=` | - | - | 1 bit | - |
-| `int` | `+ - * / % < <= > >= == !=` | - | `bytes(int)` `bytesN(int)` | Variable | Integer-only, div/0 fails, underscores OK: `1_000_000`, scientific: `1e6` |
+| `bool` | `! && || == !=` | - | `int(bool)` | 1 bit | - |
+| `int` | `+ - * / % < <= > >= == !=` `<< >>` (May 2026) | - | `bytes(int)` `bool(int)` `toPaddedBytes(int, N)` | Variable | Integer-only, div/0 fails, underscores OK: `1_000_000`, scientific: `1e6` |
 | `string` | `+ == !=` | `.length` `.reverse()` `.split(i)` `.slice(start,end)` | `bytes(string)` | Variable | UTF-8 encoded |
-| `bytes` | `+ == != & | ^` | `.length` `.reverse()` `.split(i)` `.slice(start,end)` | Variable | Hex: `0x1234abcd` |
-| `bytesN` | Same as bytes | Same as bytes | `bytesN(any)` | N bytes (1-64) | Fixed length, N=1-64, `byte` alias for `bytes1` |
+| `bytes` | `+ == != & | ^` `<< >> ~` (May 2026) | `.length` `.reverse()` `.split(i)` `.slice(start,end)` | Variable | Hex: `0x1234abcd` |
+| `bytesN` | Same as bytes | Same as bytes | `unsafe_bytesN(bytes)` | N bytes (1-64) | Fixed length, N=1-64, `byte` alias for `bytes1` |
 | `pubkey` | `== !=` | - | Auto to bytes | 33 bytes | Bitcoin public key |
-| `sig` | `== !=` | - | Auto to bytes | ~65 bytes | Transaction signature |
-| `datasig` | `== !=` | - | Auto to bytes | ~64 bytes | Data signature |
+| `sig` | `== !=` | - | Auto to bytes | 65 (Schnorr) or 71-73 (ECDSA) bytes | Transaction signature + hashtype |
+| `datasig` | `== !=` | - | Auto to bytes | 64 (Schnorr) or 70-72 (ECDSA) bytes | Data signature (no hashtype) |
 
 **Common bytesN**: `bytes1` (byte), `bytes4` (prefix), `bytes20` (hash160), `bytes32` (sha256), `bytes64` (signature)
 
@@ -36,32 +36,60 @@ require(campaignID != 0xFFFFFFFFFF);       // Sentinel value check (bytes5)
 
 **Why MSB matters**: In Script Number encoding, the MSB indicates sign. If you use the full byte range, you risk creating values that get interpreted as negative. Always subtract 1 bit from max capacity.
 
-### CRITICAL: int Type Casting Limit
+### int Type Casting Note
 
-Only `bytes1` through `bytes8` can be cast to `int`. Larger bounded bytes types cause a compile error:
+Prior to v0.13, only `bytes1` through `bytes8` could be cast to `int` — larger bounded bytes types caused a compile error. This limitation is removed in v0.13.
 
-| Type | Cast to int | Error |
-|------|-------------|-------|
-| `bytes1-bytes8` | ✅ `int(value)` | - |
-| `bytes9-bytes64` | ❌ | "Type 'bytesN' is not castable to type 'int'" |
+### CRITICAL: `unsafe_` Casts Are Unverified Type Claims
 
+The `unsafe_` prefix means the compiler performs **no runtime checks or conversions** — it is a pure type assertion that trusts the developer. If the actual data doesn't match the claimed type, the contract may fail or behave incorrectly at runtime.
+
+**Three kinds of unsafe casts:**
+- **`unsafe_bytesN(bytes)`** — Claims unbounded `bytes` is exactly N bytes long. No length check is added. If the actual length differs, downstream operations (e.g., `LockingBytecodeP2PKH` expecting exactly 20 bytes) will fail at runtime.
+- **`unsafe_int(bytes)`** — Reinterprets bytes as int without `OP_BIN2NUM` conversion. If the bytes are not minimally encoded, arithmetic may produce unexpected results.
+- **`unsafe_bool(int)`** — Reinterprets int as bool without `OP_0NOTEQUAL` conversion. Non-zero values other than 1 remain as-is instead of being normalized to `true`.
+
+**ALWAYS comment WHY an unsafe cast is safe:**
 ```cashscript
-// OK - bytes8 or smaller
-bytes8 amount = bytes8(commitment.slice(0, 8));
-require(int(amount) > 0);
-
-// COMPILE ERROR - bytes16 cannot cast to int
-bytes16 liquidity = bytes16(commitment.slice(0, 16));
-require(int(liquidity) > 0);  // ❌ Error!
+// SAFE: commitment is always 40 bytes (enforced by output constraints in the write function)
+bytes40 commitment = unsafe_bytes40(tx.inputs[0].nftCommitment);
 ```
 
-**Auto-increment pattern with overflow check:**
+**Recommended pattern: cast the commitment ONCE at read time.** When you cast the full commitment to a bounded type (e.g., `bytes40`), the compiler can calculate exact sizes for ALL subsequent `split()` operations on both `[0]` and `[1]`. This eliminates the need for any further unsafe casts:
 ```cashscript
-bytes4 currentID = bytes4(tx.inputs[0].nftCommitment.split(4)[0]);
-int newID = int(currentID) + 1;
-require(newID != 2147483647);  // Check BEFORE using new value
-require(tx.outputs[0].nftCommitment == bytes4(newID) + restOfCommitment);
+// One unsafe cast with safety comment — all downstream splits are fully typed
+bytes40 commitment = unsafe_bytes40(tx.inputs[0].nftCommitment);
+bytes20 ownerPkh = commitment.split(20)[0];     // bytes20 (compiler knows: 20)
+bytes2 lockBlocks = commitment.split(38)[1];     // bytes2  (compiler knows: 40-38=2)
 ```
+
+**When `unsafe_` is NOT needed:**
+- After casting commitment to bounded `bytesN` — all splits on it return bounded types
+- `split(literal)[0]` on any bytes already returns bounded `bytesN`
+- `slice(literal, literal)` already returns bounded `bytesN`
+- `.reverse()` on `bytesN` preserves the bounded type
+
+**When `unsafe_` IS needed:**
+- Casting an unbounded `bytes` value to a bounded type (e.g., `nftCommitment` to `bytes40`)
+- `split(literal)[1]` on unbounded `bytes` returns unbounded `bytes`
+- `split(variable)` returns unbounded `bytes` for both sides
+
+### v0.13 Type Casting Migration
+
+v0.13 introduced breaking changes to distinguish between **type conversions** (actual opcode-level operations that transform data) and **type casts** (compile-time type claims with no runtime effect, prefixed `unsafe_`). In v0.12, both used the same `bytesN()` syntax, which was ambiguous. Code written for v0.12 must be updated:
+
+| v0.12 Syntax | v0.13 Replacement | Purpose |
+|---|---|---|
+| `bytes4(intVal)` | `toPaddedBytes(intVal, 4)` | Encode int as fixed-width bytes (little-endian, zero-padded) |
+| `bytes4(bytesVal)` | `unsafe_bytes4(bytesVal)` | Claim unbounded bytes is exactly 4 bytes (no runtime check) |
+| `int(bytesVal)` | `int(bytesVal)` | Unchanged — converts bytes to Script Number |
+| `bool(intVal)` | `bool(intVal)` | Now actually converts (applies `OP_0NOTEQUAL`); previously was a no-op |
+
+New casts added in v0.13:
+- **`unsafe_int(bytesVal)`** — Reinterpret bytes as int without `OP_BIN2NUM` conversion
+- **`unsafe_bool(intVal)`** — Reinterpret int as bool without `OP_0NOTEQUAL` conversion
+
+The `toPaddedBytes(value, size)` function replaces all `bytesN(int)` encoding patterns. The size parameter can be any integer, not just powers of 2.
 
 ## FUNCTION REFERENCE
 
@@ -80,7 +108,9 @@ require(tx.outputs[0].nftCommitment == bytes4(newID) + restOfCommitment);
 | `checkMultiSig` | `([sig, ...], [pubkey, ...])` | `bool` | Multi-sig. INLINE arrays only: `checkMultisig([s1,s2], [pk1,pk2,pk3])`. NOT in TypeScript SDK |
 | `checkDataSig` | `(datasig, bytes, pubkey)` | `bool` | Data signature. NULLFAIL applies |
 | `bytes` | `(any)` | `bytes` | Type conversion |
-| `bytesN` | `(any)` | `bytesN` | Fixed-length conversion (pads/truncates) |
+| `toPaddedBytes` | `(int value, int length)` | `bytes` | Pads int to fixed-length bytes (NUM2BIN). v0.13+ |
+| `unsafe_bytesN` | `(bytes)` | `bytesN` | Semantic cast to bytesN. No length validation. v0.13+ |
+| `unsafe_bool` | `(int)` | `bool` | Semantic boolean cast without conversion. v0.13+ |
 
 ## GLOBAL VARIABLES
 
@@ -99,12 +129,12 @@ require(tx.outputs[0].nftCommitment == bytes4(newID) + restOfCommitment);
 | `tx.inputs[i].outpointIndex` | `int` | UTXO source output index | - |
 | `tx.inputs[i].sequenceNumber` | `int` | nSequence value | Relative timelock in v2 tx only |
 | `tx.inputs[i].tokenCategory` | `bytes` | Input token category | 32-byte ID + optional capability (0x01=mutable, 0x02=minting) |
-| `tx.inputs[i].nftCommitment` | `bytes` | Input NFT commitment | CashTokens, max 40 bytes (128 in May 2026) |
+| `tx.inputs[i].nftCommitment` | `bytes` | Input NFT commitment | CashTokens, max 128 bytes |
 | `tx.inputs[i].tokenAmount` | `int` | Input fungible tokens | CashTokens, max 64-bit |
 | `tx.outputs[i].value` | `int` | Output satoshi amount | Bounds: `i < tx.outputs.length` |
 | `tx.outputs[i].lockingBytecode` | `bytes` | Output script bytecode | - |
 | `tx.outputs[i].tokenCategory` | `bytes` | Output token category | 32-byte ID + optional capability (0x01=mutable, 0x02=minting) |
-| `tx.outputs[i].nftCommitment` | `bytes` | Output NFT commitment | CashTokens, max 40 bytes (128 in May 2026) |
+| `tx.outputs[i].nftCommitment` | `bytes` | Output NFT commitment | CashTokens, max 128 bytes |
 | `tx.outputs[i].tokenAmount` | `int` | Output fungible tokens | CashTokens |
 | `this.activeInputIndex` | `int` | Current input being evaluated | - |
 
@@ -118,7 +148,7 @@ require(tx.outputs[0].nftCommitment == bytes4(newID) + restOfCommitment);
 - `new LockingBytecodeP2PKH(bytes20 pkHash)` - Pay to public key hash
 - `new LockingBytecodeP2SH20(bytes20 scriptHash)` - Pay to script hash (20-byte)
 - `new LockingBytecodeP2SH32(bytes32 scriptHash)` - Pay to script hash (32-byte)
-- `new LockingBytecodeNullData(bytes[] chunks)` - OP_RETURN data output
+- `new LockingBytecodeNullData([chunk1, chunk2, ...])` - OP_RETURN data output (inline array literal)
 
 ### CRITICAL: P2SH32 Address Type (HARDCODED CONTRACT ADDRESSES)
 
@@ -141,7 +171,7 @@ require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2SH32(addressHash))
 // Error: Type 'bytes31' can not be assigned to variable of type 'bytes32'
 
 // ✓ CORRECT - explicit bytes32 cast or direct literal
-bytes32 addressHash = bytes32(someData.split(1)[1]);  // Explicit cast to bytes32
+bytes32 addressHash = unsafe_bytes32(someData.split(1)[1]);  // Explicit cast to bytes32
 // OR better: use direct literal assignment
 bytes32 votingBoothHash = 0x1234...;  // Hardcode the address directly
 
@@ -188,12 +218,12 @@ Critical when minting NFTs exist - without this check, minting capability allows
 **CRITICAL**: BCH has no global state. Store data in NFT commitments (local transferrable state).
 
 **Size limits**:
-- 40 bytes (current)
+- 40 bytes (current standard limit)
 - 128 bytes (May 2026 upgrade)
 
 **Pattern**: Contract introspects input commitment, enforces output commitment with updated state.
 ```cashscript
-contract StatefulContract(bytes32 stateTokenCategory) {
+contract StatefulContract(bytes32 stateTokenCategory, pubkey owner) {
     function updateState(sig ownerSig, bytes newState) {
         require(checkSig(ownerSig, owner));
         // Read current state from input NFT commitment
@@ -208,7 +238,7 @@ contract StatefulContract(bytes32 stateTokenCategory) {
 
 **Key concepts**:
 - **Local transferrable state**: NFT commitments persist across transactions
-- **Local transferrable functions**: Store function logic in 128-byte commitments (post-May 2026)
+- **Local transferrable functions**: Store function logic in 128-byte commitments
 - **NOT OP_RETURN**: OP_RETURN is provably unspendable (funds burned), not for storage
 
 ## OP_RETURN OUTPUTS
@@ -248,7 +278,7 @@ function update(string newMessage) { message = newMessage; }
 →
 ```cashscript
 // CashScript (UTXO model - enforce recreation)
-contract Message(bytes message) {
+contract Message(bytes message, pubkey owner) {
     function update(bytes newMessage, sig ownerSig) {
         require(checkSig(ownerSig, owner));
         // Enforce output creates NEW contract instance
@@ -266,7 +296,7 @@ contract Message(bytes message) {
 
 ## STRUCTURED COMMITMENT PACKING
 
-**NFT commitments (40 bytes current, 128 in May 2026) require careful layout planning**. Production contracts pack multiple values with explicit byte positions:
+**NFT commitments (128 bytes max) require careful layout planning**. Production contracts pack multiple values with explicit byte positions:
 
 ```cashscript
 // PRODUCTION PATTERN: Pack multiple values into commitment (40 bytes current)
@@ -275,28 +305,31 @@ bytes20 userPkh = 0xaabbccdd...;  // 20 bytes
 int lockBlocks = 1000;             // Will become 2 bytes
 
 // WRITE: Pack into commitment
-require(tx.outputs[0].nftCommitment == userPkh + bytes18(0) + bytes2(lockBlocks));
+require(tx.outputs[0].nftCommitment == userPkh + toPaddedBytes(0, 18) + toPaddedBytes(lockBlocks, 2));
 
 // READ: Unpack from commitment
-bytes20 storedPkh = bytes20(tx.inputs[0].nftCommitment.split(20)[0]);
-bytes stakeBlocks = bytes2(tx.inputs[0].nftCommitment.split(38)[1]);  // Skip 38, take last 2
+// SAFE: commitment is always 40 bytes (enforced by the WRITE constraint above)
+bytes40 commitment = unsafe_bytes40(tx.inputs[0].nftCommitment);
+bytes20 storedPkh = commitment.split(20)[0];       // bytes20 (compiler knows: 20)
+bytes2 stakeBlocks = commitment.split(38)[1];       // bytes2  (compiler knows: 40-38=2)
 int blocks = int(stakeBlocks);
 ```
 
 ### CRITICAL: Chained Split Operations and Tuple Destructuring
 
-**Production contracts use chained splits for complex layouts:**
+**Use `.slice()` for middle extraction:**
 
 ```cashscript
 // PATTERN: Extract multiple values from middle of commitment
 // Layout: [other(31) + pledgeID(4) + campaignID(5)] = 40 bytes
 
-// Chained split: skip 31 bytes, then split remaining 9 bytes at position 4
-bytes4 pledgeID, bytes5 campaignID = tx.inputs[0].nftCommitment.split(31)[1].split(4);
+// slice(start, end) with literal bounds returns bounded bytesN directly
+bytes4 pledgeID = tx.inputs[0].nftCommitment.slice(31, 35);
+bytes5 campaignID = tx.inputs[0].nftCommitment.slice(35, 40);
 
 // Another example: extract middle field
 // Layout: [prefix(26) + endBlock(4) + suffix(10)]
-bytes4 endBlock = tx.inputs[0].nftCommitment.split(26)[1].split(4)[0];  // Skip 26, take next 4
+bytes4 endBlock = tx.inputs[0].nftCommitment.slice(26, 30);
 ```
 
 **Tuple destructuring syntax (CRITICAL - often overlooked):**
@@ -314,14 +347,14 @@ bytes20 addr, bytes remaining = commitment.split(20);  // Common pattern
 // PATTERN: Update only the last N bytes of commitment
 bytes restCommitment = tx.inputs[0].nftCommitment.split(31)[0];  // Keep first 31 bytes
 int newPledgeID = int(pledgeID) + 1;
-require(tx.outputs[0].nftCommitment == restCommitment + bytes4(newPledgeID) + campaignID);
+require(tx.outputs[0].nftCommitment == restCommitment + toPaddedBytes(newPledgeID, 4) + campaignID);
 
 // PATTERN: Update only the first N bytes
 bytes existingTail = tx.inputs[0].nftCommitment.split(2)[1];  // Keep last 38 bytes
-require(tx.outputs[0].nftCommitment == bytes2(newFee) + existingTail);
+require(tx.outputs[0].nftCommitment == toPaddedBytes(newFee, 2) + existingTail);
 ```
 
-**Common layouts (40 bytes current, 128 in May 2026)**:
+**Common layouts (128 bytes max)**:
 ```
 [pubkeyhash(20) + fee(2) + adminPkh(18)]                    // Admin contract
 [pubkeyhash(20) + reserved(18) + blocks(2)]                 // Time-locked
@@ -329,12 +362,12 @@ require(tx.outputs[0].nftCommitment == bytes2(newFee) + existingTail);
 [prefix(31) + pledgeID(4) + campaignID(5)]                  // Campaign state
 ```
 
-**Byte-size reference**:
-- `bytes2` = 0-65535 (sufficient for block counts, small fees)
-- `bytes4` = 0-4,294,967,295 (timestamps, larger values)
-- `bytes5` = 0-1,099,511,627,775 (5-byte IDs, up to ~1 trillion)
-- `bytes6` = 0-281,474,976,710,655 (6-byte amounts)
-- `bytes8` = int max range (Script Number limit)
+**Byte-size reference** (unsigned byte capacity; if cast to `int`, MSB is sign bit — see Script Number Encoding above):
+- `bytes2` = 0-65,535 unsigned, 0-32,767 as int (block counts, small fees)
+- `bytes4` = 0-4,294,967,295 unsigned, 0-2,147,483,647 as int (timestamps)
+- `bytes5` = up to ~1 trillion unsigned (5-byte IDs)
+- `bytes6` = up to ~281 trillion unsigned (6-byte amounts)
+- `bytes8` = int max range (Script Number encoding)
 - `bytes20` = pubkeyhash (P2PKH address)
 - `bytes32` = token category ID, hashes
 
@@ -361,30 +394,32 @@ int reserve = int(commitment.split(72)[0].split(8)[1]);
 // .split(8)[1] → bytes64 (72-8=64 bytes!), NOT bytes8!
 // ERROR: "Type 'bytes64' is not castable to type 'int'"
 
-// CORRECT: Use slice() for middle extraction
-bytes8 reserveBytes = bytes8(commitment.slice(64, 72));  // bytes 64-71
+// CORRECT: Use slice() for middle extraction (literal bounds → bounded bytes)
+bytes8 reserveBytes = commitment.slice(64, 72);  // bytes 64-71
 int reserve = int(reserveBytes);
 
-// CORRECT: Use split() for head extraction
-bytes20 ownerPkh = bytes20(commitment.split(20)[0]);  // first 20 bytes
+// RECOMMENDED: Cast commitment to bounded type ONCE, then all splits are safe
+// SAFE: commitment is always 40 bytes (enforced at write time)
+bytes40 c = unsafe_bytes40(tx.inputs[0].nftCommitment);
+bytes20 ownerPkh = c.split(20)[0];    // bytes20 (compiler knows: 20)
+bytes4 suffix = c.split(36)[1];        // bytes4  (compiler knows: 40-36=4)
 
-// CORRECT: Use split() for tail extraction (40-byte commitment)
-bytes4 suffix = bytes4(commitment.split(36)[1]);  // last 4 bytes
-
-// CORRECT: Sequential destructuring with split()
-bytes20 owner, bytes rest = commitment.split(20);
-bytes8 balance, bytes rest2 = rest.split(8);
-bytes4 timestamp = bytes4(rest2.split(4)[0]);
+// Also works: sequential destructuring on bounded bytes
+bytes20 owner, bytes20 rest = c.split(20);  // both sides bounded (20, 40-20=20)
+bytes8 balance, bytes12 rest2 = rest.split(8);
+bytes4 timestamp = rest2.split(4)[0];
 ```
 
 **Common extraction patterns by position:**
-```
-Commitment: [field0(20) | field1(8) | field2(32) | field3(4)] = 64 bytes
+```cashscript
+// Developer asserts commitment is 64 bytes (contract must enforce this at write time)
+bytes64 commitment = unsafe_bytes64(tx.inputs[0].nftCommitment);
 
-Field 0 (offset 0, size 20):   bytes20(commitment.split(20)[0])
-Field 1 (offset 20, size 8):   bytes8(commitment.slice(20, 28))
-Field 2 (offset 28, size 32):  bytes32(commitment.slice(28, 60))
-Field 3 (offset 60, size 4):   bytes4(commitment.split(60)[1])
+// Now ALL splits return bounded types — compiler calculates both sides
+Field 0 (offset 0, size 20):   commitment.split(20)[0]    // bytes20 (compiler knows: 20)
+Field 1 (offset 20, size 8):   commitment.slice(20, 28)    // bytes8
+Field 2 (offset 28, size 32):  commitment.slice(28, 60)    // bytes32
+Field 3 (offset 60, size 4):   commitment.split(60)[1]     // bytes4  (compiler knows: 64-60=4)
 ```
 
 ## DUST AND FEE ACCOUNTING
@@ -400,7 +435,7 @@ require(amount >= 5000);               // Ensure enough for future fees
 require(tx.outputs[0].value == tx.inputs[0].value - 3000);  // 3000 = miner fee + 2x dust UTXOs
 
 // PATTERN: Fee collection into contract
-bytes2 stakeFee = bytes2(tx.inputs[0].nftCommitment.split(2)[0]);
+bytes2 stakeFee = tx.inputs[0].nftCommitment.split(2)[0];  // split(literal)[0] returns bytes2
 require(tx.outputs[0].value == tx.inputs[0].value + int(stakeFee));
 
 // PATTERN: Withdraw accumulated fees
@@ -563,11 +598,11 @@ function pledge(int pledgeAmount) {
 
     // Receipt contains proof data
     require(tx.outputs[1].nftCommitment ==
-        bytes6(pledgeAmount) +      // What was pledged
-        bytes21(0) +                // Padding
-        endBlock +                  // Campaign deadline
-        bytes4(pledgeID) +          // Unique pledge ID
-        campaignID                  // Which campaign
+        toPaddedBytes(pledgeAmount, 6) +      // What was pledged
+        toPaddedBytes(0, 21) +                // Padding
+        endBlock +                            // Campaign deadline
+        toPaddedBytes(pledgeID, 4) +          // Unique pledge ID
+        campaignID                            // Which campaign
     );
 }
 
@@ -642,109 +677,6 @@ function cancel() {
 
 **Key insight**: BCH value is part of contract state. Design initial values to be identifiable.
 
-## SERVICE PROVIDER FEE PATTERNS
-
-**Built-in protocol monetization for frontends**:
-
-```cashscript
-//////////////////////////////////////////////////////////////////////////////////////////
-//  Initialize a new campaign with optional service provider fee.
-//
-//inputs:
-//  0   masterNFT                 [NFT]       (from Manager contract)
-//  1   creatorBCH                [BCH]       (from campaign creator)
-//outputs:
-//  0   masterNFT                 [NFT]       (to Manager contract)
-//  1   campaignNFT               [NFT]       (to Main contract)
-//  2   serviceFee {optional}     [BCH]       (to service provider)
-//  ?   change {optional}         [BCH]       (to campaign creator)
-//////////////////////////////////////////////////////////////////////////////////////////
-function initialize(bytes20 servicePKH, int serviceFee) {
-    require(serviceFee <= 1000000);  // Max 0.01 BCH absolute cap
-    require(tx.outputs[2].lockingBytecode == new LockingBytecodeP2PKH(servicePKH));
-    require(tx.outputs[2].value == serviceFee);
-    require(tx.outputs[2].tokenCategory == 0x);  // Pure BCH
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////
-//  Claim successful campaign funds with capped service provider fee.
-//
-//inputs:
-//  0   helperMasterNFT           [NFT]       (from Claim contract)
-//  1   campaignNFT               [NFT]       (from Main contract)
-//  2   creatorBCH                [BCH]       (from campaign creator)
-//outputs:
-//  0   helperMasterNFT           [NFT]       (to Claim contract)
-//  1   campaignFunds             [BCH]       (to campaign creator)
-//  2   serviceFee                [BCH]       (to service provider)
-//////////////////////////////////////////////////////////////////////////////////////////
-function claim(bytes20 servicePKH, int serviceFee) {
-    // Integer percentage: value * numerator / denominator
-    require(serviceFee <= tx.inputs[1].value * 50 / 1000);  // Max 5% of campaign
-
-    require(tx.outputs[2].lockingBytecode == new LockingBytecodeP2PKH(servicePKH));
-    require(tx.outputs[2].value == serviceFee);
-    require(tx.outputs[2].tokenCategory == 0x);
-}
-```
-
-**Percentage math patterns**:
-- `value * 50 / 1000` = 5%
-- `value * 10 / 1000` = 1%
-- `value * 1 / 100` = 1%
-- `value / 100` = 1% (simplest)
-
-**Benefits**: Incentivizes frontend development, decentralizes service provision
-
-## MULTI-CONTRACT DEPLOYMENT PATTERNS
-
-**Complex protocols require coordinated contract deployment**:
-
-```cashscript
-// CONTRACT 1: Manager (creates campaigns)
-contract Manager() {
-    function initialize() {
-        // Hardcode target contract address at compile time
-        require(tx.outputs[1].lockingBytecode ==
-            new LockingBytecodeP2SH32(0xe3cab0f5a4aa3b8898d4708dbfa3b4126a723d5d982ac4c2691e33841fa8371f));
-    }
-}
-
-// CONTRACT 2: Main (holds campaigns)
-contract Main() {
-    function externalFunction() {
-        require(this.activeInputIndex == 1);  // I am input 1
-        require(tx.inputs[0].tokenCategory == masterCategory + 0x02);  // Trust input 0
-    }
-}
-
-// CONTRACT 3-N: Helpers (cancel, claim, refund, stop)
-contract Helper() {
-    function action() {
-        // Each helper has its OWN masterNFT
-        require(tx.inputs[0].nftCommitment.split(35)[1] == 0xFFFFFFFFFF);  // Sentinel ID
-        // Main contract NFT is input 1
-        require(tx.inputs[1].tokenCategory == masterCategory + 0x02);
-    }
-}
-```
-
-**Distributed masterNFT pattern**:
-- Each contract in system gets ONE masterNFT with sentinel ID (0xFFFFFFFFFF)
-- MasterNFTs stay in their respective contracts forever
-- Contracts identify each other by shared token category
-- Sentinel value distinguishes master from data NFTs
-
-**Deployment checklist**:
-1. Deploy all contracts (get P2SH32 addresses)
-2. Hardcode addresses in source where needed
-3. Recompile with addresses
-4. Create token category (genesis transaction)
-5. Mint masterNFTs for each contract
-6. Send masterNFTs to their contracts
-
-**CRITICAL**: Contracts are immutable after deployment. All inter-contract addresses must be correct at compile time.
-
 ## PERMISSIONLESS (CONSTRAINT-ONLY) CONTRACTS
 
 **Some protocols require NO authorization at all**. Anyone can execute if they construct valid transactions:
@@ -760,7 +692,7 @@ contract King() {  // Empty constructor
         int colorTurn = turnCounter % 2;  // Whose turn is it?
 
         // Verify source piece belongs to current team
-        byte sourceTeam = tx.inputs[3].nftCommitment.split(6)[1].split(1)[0];
+        byte sourceTeam = tx.inputs[3].nftCommitment.slice(6, 7);
         require(int(sourceTeam) == colorTurn);
 
         // Validate movement rules (king moves 1 square any direction)
@@ -789,7 +721,7 @@ contract ChessMaster(bytes squareCategory, bytes pieceCategory) {
         // Validate state transitions
         int turnCounter = int(tx.inputs[2].nftCommitment);
         int newTurnCounter = turnCounter + 1;
-        require(tx.outputs[2].nftCommitment == bytes8(newTurnCounter));
+        require(tx.outputs[2].nftCommitment == toPaddedBytes(newTurnCounter, 8));
     }
 }
 
@@ -797,7 +729,7 @@ contract ChessMaster(bytes squareCategory, bytes pieceCategory) {
 contract Pawn() {  // Empty!
     function move() {
         // ONLY validates movement rules
-        byte piece = tx.inputs[3].nftCommitment.split(7)[1].split(1)[0];
+        byte piece = tx.inputs[3].nftCommitment.slice(7, 8);
         require(piece == 0x01);  // Must be pawn
 
         // Forward movement validation
@@ -823,17 +755,17 @@ contract Pawn() {  // Empty!
 // Inputs represent: source -> empty squares -> destination
 
 function checkEmpty() {
-    // Get previous square coordinates
-    byte prevX = tx.inputs[this.activeInputIndex - 1].nftCommitment.split(4)[1].split(1)[0];
-    byte prevY = tx.inputs[this.activeInputIndex - 1].nftCommitment.split(5)[1].split(1)[0];
+    // Get previous square coordinates (.slice with literal bounds returns bounded bytes)
+    byte prevX = tx.inputs[this.activeInputIndex - 1].nftCommitment.slice(4, 5);
+    byte prevY = tx.inputs[this.activeInputIndex - 1].nftCommitment.slice(5, 6);
 
     // Get current square coordinates
-    byte thisX = tx.inputs[this.activeInputIndex].nftCommitment.split(4)[1].split(1)[0];
-    byte thisY = tx.inputs[this.activeInputIndex].nftCommitment.split(5)[1].split(1)[0];
+    byte thisX = tx.inputs[this.activeInputIndex].nftCommitment.slice(4, 5);
+    byte thisY = tx.inputs[this.activeInputIndex].nftCommitment.slice(5, 6);
 
     // Get next square coordinates
-    byte nextX = tx.inputs[this.activeInputIndex + 1].nftCommitment.split(4)[1].split(1)[0];
-    byte nextY = tx.inputs[this.activeInputIndex + 1].nftCommitment.split(5)[1].split(1)[0];
+    byte nextX = tx.inputs[this.activeInputIndex + 1].nftCommitment.slice(4, 5);
+    byte nextY = tx.inputs[this.activeInputIndex + 1].nftCommitment.slice(5, 6);
 
     // Verify stepping pattern (must maintain direction)
     int stepToPrevX = int(thisX) - int(prevX);
@@ -841,7 +773,7 @@ function checkEmpty() {
     require(stepToPrevX == stepToNextX);  // Same direction
 
     // Verify this square is empty
-    byte currentTeam = tx.inputs[this.activeInputIndex].nftCommitment.split(6)[1].split(1)[0];
+    byte currentTeam = tx.inputs[this.activeInputIndex].nftCommitment.slice(6, 7);
     require(currentTeam == 0x02);  // Empty square
 }
 ```
@@ -937,7 +869,7 @@ function move() {
     int i = 4;  // Start after source square
     do {
         // Validate each intermediate square is empty
-        byte team = tx.inputs[i].nftCommitment.split(6)[1].split(1)[0];
+        byte team = tx.inputs[i].nftCommitment.slice(6, 7);
         require(team == 0x02);  // Empty
         i = i + 1;
     } while (i < tx.inputs.length - 1);  // Stop before destination
@@ -1001,8 +933,8 @@ contract UTXOAuth() {
 ```cashscript
 contract CommitmentAuth() {
     function adminOnly() {
-        // Admin pubkeyhash stored in NFT commitment
-        bytes20 adminPkh = bytes20(tx.inputs[0].nftCommitment.split(20)[1]);
+        // Admin pubkeyhash stored in NFT commitment (bytes 20-40)
+        bytes20 adminPkh = tx.inputs[0].nftCommitment.slice(20, 40);
         bytes adminBytecode = new LockingBytecodeP2PKH(adminPkh);
         require(tx.inputs[1].lockingBytecode == adminBytecode);  // Admin must provide input
     }
@@ -1030,19 +962,17 @@ function anyFunction() {
 | Arithmetic | `+ - * / %` | `int` | Integer only, div/0 fails |
 | Comparison | `< <= > >= == !=` | `int` `bool` `bytes` `string` | - |
 | Logical | `! && ||` | `bool` | NO short-circuit (all operands evaluated) |
-| Bitwise | `& | ^` | `bytes` only | AND, OR, XOR only. NOT supported on int. No shift or invert |
+| Bitwise | `& | ^ ~ << >>` | `bytes`: all; `int`: `<< >>` only | AND, OR, XOR, invert, left/right shift |
 | Concatenation | `+` | `string` `bytes` | - |
 | Unary | `+ - !` | `int` `bool` | - |
 
 ## UNITS
 
-| BCH Units | Value | Time Units | Value |
-|-----------|-------|------------|-------|
-| `sats` | 1 | `seconds` | 1 |
-| `finney` | 100,000 | `minutes` | 60 |
-| `bits` | 100 | `hours` | 3,600 |
-| `bitcoin` | 100,000,000 | `days` | 86,400 |
-| - | - | `weeks` | 604,800 |
+Postfix suffixes (e.g. `1000 sats`, `30 minutes`). Rarely used — most code uses raw integers.
+
+**BCH**: `sats` (1), `finney` (10), `bits` (100), `bitcoin` (100,000,000)
+
+**Time**: `seconds` (1), `minutes` (60), `hours` (3,600), `days` (86,400), `weeks` (604,800)
 
 ## SYNTAX PATTERNS
 
@@ -1060,7 +990,7 @@ contract MyContract(params) {
 ```cashscript
 int i = 42;
 bytes b = bytes(i);              // Explicit conversion
-bytes4 b4 = bytes4(i);           // Fixed-length (pads/truncates)
+bytes4 b4 = toPaddedBytes(i, 4); // Fixed-length padding (v0.13+)
 
 pubkey pk = 0x03...;
 bytes pkBytes = pk;              // Implicit conversion (specialized types)
@@ -1071,10 +1001,9 @@ bytes sBytes = bytes(s);         // UTF-8 encoding
 
 ### Collections
 ```cashscript
-// Arrays (limited, mainly for checkMultiSig)
-sig[] sigs = [sig1, sig2];
-pubkey[] pks = [pk1, pk2, pk3];
-require(checkMultiSig(sigs, pks));
+// Arrays — inline literals only, no array type declarations
+// Only usable as direct arguments to checkMultiSig and LockingBytecodeNullData
+require(checkMultiSig([s1, s2], [pk1, pk2, pk3]));
 
 // Tuples (from split operations)
 bytes part1, bytes part2 = data.split(5);
@@ -1094,21 +1023,25 @@ do {
 
 ### Bitwise Operations
 ```cashscript
-// Supported: AND, OR, XOR (on bytes ONLY, NOT int)
+// Supported on bytes: AND, OR, XOR, shift, invert
 bytes flags = 0xFF;
-bytes masked = flags & 0x0F;     // AND for masking
-bytes combined = a | b;          // OR for combining
-bytes toggled = a ^ b;           // XOR for toggling
+bytes masked = flags & 0x0F;      // AND for masking
+bytes combined = a | b;           // OR for combining
+bytes toggled = a ^ b;            // XOR for toggling
+bytes inverted = ~flags;          // Bitwise invert
+bytes shifted = flags << 2;       // Left shift
+bytes rightShift = flags >> 1;    // Right shift
 
-// For bit flag validation, use bytes types:
-bytes1 configFlags = 0x05;       // Example: active=1, paused=0, borrowEnabled=1
+// Shift also works on int (arithmetic shift)
+int value = 16;
+int doubled = value << 1;         // 32
+int halved = value >> 1;          // 8
+
+// For bit flag validation:
+bytes1 configFlags = 0x05;        // Example: active=1, paused=0, borrowEnabled=1
 require((configFlags & 0x01) == 0x01);  // Check bit 0 is set
 require((configFlags & 0x04) == 0x00);  // Check bit 2 is clear
 ```
-**Note**: CashScript does NOT support:
-- Bitwise operators on `int` types (use `bytes` instead)
-- Shift operators (`<<`, `>>`)
-- Bitwise NOT (`~`)
 
 ### Array Bounds
 ```cashscript
@@ -1153,11 +1086,11 @@ contract MasterReference() {
 
         // PATTERN: Structured commitment packing (40 bytes current)
         // Layout: userPkh(20) + reserved(18) + lockBlocks(2) = 40 bytes
-        bytes lockLength = bytes2(lockBlocks);
-        require(tx.outputs[1].nftCommitment == userPkh + bytes18(0) + lockLength);
+        bytes lockLength = toPaddedBytes(lockBlocks, 2);
+        require(tx.outputs[1].nftCommitment == userPkh + toPaddedBytes(0, 18) + lockLength);
 
         // PATTERN: Read fee from master NFT commitment (first 2 bytes)
-        bytes2 stakeFee = bytes2(tx.inputs[0].nftCommitment.split(2)[0]);
+        bytes2 stakeFee = tx.inputs[0].nftCommitment.split(2)[0];
 
         // PATTERN: Contract self-preservation with fee collection
         require(tx.outputs[0].value == tx.inputs[0].value + int(stakeFee));
@@ -1195,10 +1128,11 @@ contract MasterReference() {
 
         // PATTERN: Unpack structured commitment
         // Layout: userPkh(20) + reserved(18) + lockBlocks(2)
-        bytes stakeBlocks = bytes2(tx.inputs[0].nftCommitment.split(38)[1]);
-        require(tx.age >= int(stakeBlocks));  // Time lock validation
+        // SAFE: commitment is always 40 bytes (enforced at write time), so split(38)[1] is 2 bytes
+        bytes2 stakeBlocks = unsafe_bytes2(tx.inputs[0].nftCommitment.split(38)[1]);
+        require(this.age >= int(stakeBlocks));  // Time lock validation
 
-        bytes20 payoutAddress = bytes20(tx.inputs[0].nftCommitment.split(20)[0]);
+        bytes20 payoutAddress = tx.inputs[0].nftCommitment.split(20)[0];
         bytes payoutBytecode = new LockingBytecodeP2PKH(payoutAddress);
 
         // PATTERN: Distribute tokens to user
@@ -1231,7 +1165,8 @@ contract MasterReference() {
         require(tx.inputs[1].tokenCategory == 0x);
 
         // PATTERN: Admin authorization via commitment-stored pubkeyhash
-        bytes20 adminAddress = bytes20(tx.inputs[0].nftCommitment.split(20)[1]);
+        // SAFE: commitment layout guarantees 20 bytes after offset 20 (enforced at write time)
+        bytes20 adminAddress = unsafe_bytes20(tx.inputs[0].nftCommitment.split(20)[1]);
         bytes payoutBytecode = new LockingBytecodeP2PKH(adminAddress);
         require(tx.inputs[1].lockingBytecode == payoutBytecode);  // Admin must provide input1
 
@@ -1245,7 +1180,7 @@ contract MasterReference() {
         require(tx.outputs[0].value == 1000);
         require(tx.outputs[0].tokenAmount == tx.inputs[0].tokenAmount);
         bytes restCommitment = tx.inputs[0].nftCommitment.split(2)[1];
-        require(tx.outputs[0].nftCommitment == bytes2(newFee) + restCommitment);
+        require(tx.outputs[0].nftCommitment == toPaddedBytes(newFee, 2) + restCommitment);
     }
 }
 ```
@@ -1254,7 +1189,7 @@ contract MasterReference() {
 1. **`this.activeInputIndex`** - Always validate which input is executing the contract
 2. **Exact counts** - Use `==` not `>=` for input/output validation
 3. **UTXO authorization** - Prove ownership by spending UTXOs, not signatures
-4. **Structured commitments** - Pack multiple values into commitment (40 bytes, 128 in May 2026) with clear layout
+4. **Structured commitments** - Pack multiple values into commitment (128 bytes max) with clear layout
 5. **Capability manipulation** - `.split(32)[0] + 0x01` to change NFT capabilities
 6. **Fee accounting** - Explicit dust (1000 sats) and fee subtraction
 7. **Optional outputs** - Use `if` blocks for variable output counts
@@ -1281,7 +1216,7 @@ contract MasterReference() {
 | `for/while` loops | `do {} while()` | Beta in v0.13.0, body executes first |
 
 **Key paradigm shifts:**
-- **No persistent state** - State lives in NFT commitments (40 bytes, 128 in May 2026)
+- **No persistent state** - State lives in NFT commitments (128 bytes max)
 - **No O(1) lookups** - Must loop over UTXOs, no hash tables
 - **No code reuse** - No import/library/inheritance mechanisms
 - **Fee = tx size** - Cost based on bytes, not opcodes (no "gas optimization")
@@ -1309,8 +1244,10 @@ contract MasterReference() {
 - No implicit numeric conversions (`int` ↔ `string`)
 - Specialized types (`sig`, `pubkey`, `datasig`) auto-convert to `bytes`
 - Fixed-length types: `bytesN` where N ∈ [1, 64]
-- Collections: arrays limited (mainly `sig[]`, `pubkey[]` for checkMultiSig)
+- Collections: no array type declarations; inline array literals `[a, b, c]` only as arguments to `checkMultiSig` and `LockingBytecodeNullData`
 - Tuples: only from `split()` operations
+- **`.slice()` returns bounded bytes**: `.slice(start, end)` with literal int bounds returns `bytesN` where N = end - start. No cast needed.
+- **`.split()` typing depends on position**: `.split(literal)[0]` returns bounded `bytesN`. `.split(literal)[1]` on unbounded `bytes` returns unbounded `bytes` — use `unsafe_bytesN()` to cast when bounded type is needed.
 
 ### Operational Limits
 
@@ -1326,9 +1263,9 @@ contract MasterReference() {
 - Array access: ALWAYS validate `.length` before indexing
 - Integer arithmetic: no decimals, integer division only
 - `checkMultiSig`: NOT supported in TypeScript SDK (compile-time only)
-- NFT commitment: max 40 bytes (128 bytes in May 2026 upgrade)
+- NFT commitment: max 128 bytes
 - String/bytes operations: `.split(index)` returns tuple, requires destructuring
-- Bitwise operators: Only `&`, `|`, `^` supported. NO shift (`<<`, `>>`) or invert (`~`)
+- Bitwise operators: `&`, `|`, `^`, `~` on bytes; `<<`, `>>` on both bytes and int
 - Loops: `do {} while ()` syntax, beta in CashScript 0.13.0. Body executes at least once
 - Token category byte order: Returned in unreversed order
 - Compound assignment: NOT supported (`+=`, `-=`, etc.)
@@ -1341,7 +1278,7 @@ contract MasterReference() {
 - Use `within(x, lower, upper)` for range checks (`x >= lower && x < upper`, upper is exclusive)
 - Use bitwise `&`, `|`, `^` for flag operations and masking
 - Store reused bytecode in variables vs. reconstructing
-- Extract common validation logic into separate contract functions
+- Each function is an independent spending path — functions cannot call each other
 - Check both `tx.time` and `this.age` for robust time locks
 - Validate token category AND amount for CashTokens
 - Use NULLFAIL behavior: empty sig `0x` returns false without failure
@@ -1535,14 +1472,14 @@ contract [ContractName]([constructorParams]) {
 
         // Business logic with inline comments explaining WHY
         bytes nftCommitment = tx.inputs[0].nftCommitment;
-        bytes4 counter = bytes4(nftCommitment.split(4)[0]);
+        bytes4 counter = nftCommitment.split(4)[0];
         int newCounter = int(counter) + 1;
         require(newCounter < 2147483647);            // Prevent overflow
 
         // Recreate NFT with updated state
         require(tx.outputs[0].lockingBytecode == tx.inputs[0].lockingBytecode);
         require(tx.outputs[0].tokenCategory == tx.inputs[0].tokenCategory);
-        require(tx.outputs[0].nftCommitment == bytes4(newCounter) + restOfCommitment);
+        require(tx.outputs[0].nftCommitment == toPaddedBytes(newCounter, 4) + restOfCommitment);
         require(tx.outputs[0].value == 1000);        // Preserve dust
     }
 }
@@ -1846,9 +1783,9 @@ require(voted == 0x00);                                      // Hasn't voted yet
 
 **State Transitions**:
 ```cashscript
-bytes4 currentCount = bytes4(commitment.split(4)[0]);       // Extract counter
-int newCount = int(currentCount) + 1;                       // Increment
-require(newCount <= 2147483647);                             // Max bytes4 (MSB safety)
+bytes4 currentCount = commitment.split(4)[0];                      // Extract counter
+int newCount = int(currentCount) + 1;                              // Increment
+require(newCount <= 2147483647);                                    // Max bytes4 (MSB safety)
 ```
 
 **Mathematical Operations**:

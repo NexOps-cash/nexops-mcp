@@ -95,11 +95,12 @@ Don't pass separate arguments. See cashscript.org/docs/sdk/transaction-builder#a
 ### Creating CashTokens with SDK
 **Q**: How do I create CashTokens using the SDK?
 
-**A**: Use the advanced transaction builder with the `token` parameter:
+**A**: Use the `TransactionBuilder` with the `token` parameter:
 ```javascript
-const txDetails = await contract.functions
-    .transfer(sigTemplate)
-    .to({
+const contractUtxos = await contract.getUtxos();
+const txDetails = await new TransactionBuilder({ provider })
+    .addInput(contractUtxos[0], contract.unlock.transfer(sigTemplate))
+    .addOutput({
         to: contract.tokenAddress,
         amount: 1000n,
         token: {
@@ -157,9 +158,9 @@ commitment.slice(0, 5)  // First 5 bytes, no tuple
 
 **A**: Use length-prefixed encoding:
 ```cashscript
-bytes1(data.length) + bytes(data) + bytes1(data2.length) + bytes(data2)
+toPaddedBytes(data.length, 1) + bytes(data) + toPaddedBytes(data2.length, 1) + bytes(data2)
 ```
-This is essentially "compiled OP_PUSH" - manually implementing what a push opcode does.
+This is essentially "compiled OP_PUSH" - manually implementing what a push opcode does. Note: `toPaddedBytes(int, N)` is the v0.13+ syntax for converting integers to fixed-length bytes.
 
 ---
 
@@ -175,7 +176,7 @@ This is essentially "compiled OP_PUSH" - manually implementing what a push opcod
 ### tx.time type
 **Q**: What is the type of `tx.time`?
 
-**A**: `tx.time` is an int (bigint). To convert to bytes for NFT commitment, use casting. Note: `tx.time` represents the locktime value set in the transaction via `txBuilder.setLocktime()`.
+**A**: `tx.time` is an int (bigint). To convert to bytes for NFT commitment, use `toPaddedBytes(tx.time, N)` where N is the desired byte length. Note: `tx.time` represents the locktime value set in the transaction via `txBuilder.setLocktime()`.
 
 ---
 
