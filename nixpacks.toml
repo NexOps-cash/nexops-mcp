@@ -1,0 +1,16 @@
+[phases.setup]
+nixPkgs = ["python311", "nodejs_22", "gcc"]
+
+[phases.install]
+dependsOn = ["setup"]
+cmds = [
+    "python -m venv /opt/venv && . /opt/venv/bin/activate && pip install -r requirements.txt",
+    "npm i"
+]
+
+[phases.build]
+dependsOn = ["install"]
+cmds = ["echo 'Build complete'"]
+
+[start]
+cmd = "uvicorn src.server:app --host 0.0.0.0 --port $PORT"
