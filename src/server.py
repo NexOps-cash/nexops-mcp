@@ -23,6 +23,12 @@ app = FastAPI(title="NexOps MCP")
 
 # Add CORS middleware
 origins = [
+    # ── NexOps Production Domains ──────────────────────────────────────────────
+    "https://hub.nexops.cash",
+    "https://app.nexops.cash",
+    "https://wiz.nexops.cash",
+    "https://docs.nexops.cash",
+    # ── Legacy / Dev Origins ────────────────────────────────────────────────────
     "https://www.hexecutioners.club",
     "https://hexecutioners.club",       # without www
     "http://www.hexecutioners.club",    # http fallback
