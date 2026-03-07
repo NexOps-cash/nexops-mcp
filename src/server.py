@@ -24,9 +24,12 @@ app = FastAPI(title="NexOps MCP")
 # Add CORS middleware
 origins = [
     "https://www.hexecutioners.club",
+    "https://hexecutioners.club",       # without www
+    "http://www.hexecutioners.club",    # http fallback
+    "http://hexecutioners.club",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "http://localhost:5173", # Common Vite port
+    "http://localhost:5173",
     "http://127.0.0.1:5173",
 ]
 
