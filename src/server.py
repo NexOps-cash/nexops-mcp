@@ -6,10 +6,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
 from .router import route_request
-from src.services.audit_agent import get_audit_agent
-from src.services.repair_agent import get_repair_agent
-from src.services.edit_agent import get_edit_agent
-from src.models import RepairRequest, EditRequest, AuditRequest
+from .services.audit_agent import get_audit_agent
+from .services.repair_agent import get_repair_agent
+from .services.edit_agent import get_edit_agent
+from .models import RepairRequest, EditRequest, AuditRequest
 import uvicorn
 import os
 import logging
@@ -150,7 +150,7 @@ async def mcp_ws(ws: WebSocket):
             
             # Handle the new "intent" format from the external IDE
             if msg.get("type") == "intent":
-                request_id = str(uuid.uuid4())[:8]
+                request_id = uuid.uuid4().hex[:8]
                 logger.info(f"Received intent: {msg.get('prompt')} (ID: {request_id})")
                 
                 # BYOK Extraction from intent message

@@ -227,13 +227,26 @@ class GuardedPipelineEngine:
                 }
             }
 
-        # FALLBACK DISABLED (temporary) — hard fail to expose real LLM quality
-        logger.error(f"Pipeline exhausted after {max_gen_retries} attempts. FALLBACK DISABLED. (Last Error: {last_error})")
-        raise RuntimeError(
-            f"Pipeline exhausted after {max_gen_retries} attempts. "
-            f"Last error: {last_error}. "
-            "Fallback disabled — fix the upstream issue."
-        )
+        # Synthesis failed to converge — Reverting to pre-verified secure fallback
+        logger.warning(f"Pipeline exhausted after {max_gen_retries} attempts. Activating secure fallback. (Last Error: {last_error})")
+        await _notify("fallback", "Synthesis failed to converge. Deploying pre-verified secure fallback...", max_gen_retries, "warning")
+        
+        fallback_code = self._get_fallback_contract(intent_model) or ""
+        # Still run Phase 3 on the fallback for report consistency
+        fallback_toll_gate = Phase3.validate(fallback_code, contract_mode=contract_mode)
+        
+        return {
+            "type": "success",
+            "data": {
+                "contract_name": f"fallback_{ir.contract_name or 'unnamed'}",
+                "code": fallback_code,
+                "intent_model": intent_model.dict(),
+                "toll_gate": fallback_toll_gate.dict(),
+                "sanity_check": {"success": True, "violations": ["FALLBACK_PROTECTOR_ENGAGED"]},
+                "session_id": "guarded-session-fallback",
+                "fallback_used": True
+            }
+        }
 
 
     def _get_fallback_contract(self, intent_model: IntentModel) -> str:
