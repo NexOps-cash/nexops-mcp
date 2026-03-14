@@ -1,0 +1,29 @@
+# regex: broad rules to capture CashScript variations
+features:
+  buyer_signature:
+    rule: 'checkSig\s*\(\s*.*buyer\b'
+    description: "Buyer signature check via checkSig"
+  seller_signature:
+    rule: 'checkSig\s*\(\s*.*seller\b'
+    description: "Seller signature check via checkSig"
+  arbitrator_signature:
+    rule: 'checkSig\s*\(\s*.*arbitrator\b'
+    description: "Arbitrator signature check via checkSig"
+  timelock_refund:
+    rule: 'tx\.(time|age)\b'
+    description: "Timelock using tx.time or tx.age"
+  multisig_2of2:
+    rule: 'require\s*\(\s*checkSig\s*\(.*?\)[\s\n]*&&[\s\n]*checkSig\s*\(.*?\)[\s\n]*\)'
+    description: "2-of-2 multisig requirement"
+  multisig_2of3:
+    rule: 'checkMultiSig\b'
+    description: "2-of-3 threshold multisig"
+  token_burn:
+    rule: 'tx\.outputs\[.*?\]\.tokenAmount\s*==\s*0\b'
+    description: "Explicit token burning"
+  covenant:
+    rule: 'this\.activeBytecode\b'
+    description: "Covenant self-continuity via this.activeBytecode"
+  hashlock:
+    rule: '(hash160|sha256)\s*\('
+    description: "Hash-based locking logic"

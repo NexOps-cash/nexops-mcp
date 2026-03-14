@@ -1,0 +1,209 @@
+{
+  "run_id": "bench_20260314_1530_7fe0",
+  "dataset_hash": "a4962fa1b5a3bb7e549a72b2554aecdc4004fe29ad85a9984d1c542a555ab9e9",
+  "suite_version": "1.0",
+  "total_cases": 4,
+  "start_time": "2026-03-14T15:30:48.892272",
+  "end_time": "2026-03-14T15:31:26.228275",
+  "elapsed_total_seconds": 37.336003,
+  "results": [
+    {
+      "id": "escrow_easy_1",
+      "pattern": "escrow",
+      "difficulty": "easy",
+      "compile_pass": true,
+      "lint_errors": 0,
+      "lint_warnings": 0,
+      "lint_factor": 1.0,
+      "structure_score": 1.0,
+      "adj_structure_score": 1.0,
+      "required_features": [
+        "buyer_signature",
+        "seller_signature"
+      ],
+      "detected_features": [
+        "buyer_signature",
+        "seller_signature"
+      ],
+      "missing_features": [],
+      "hallucinated_features": [],
+      "intent_coverage": 1.0,
+      "final_score": 1.0,
+      "latency_seconds": 7.135265588760376,
+      "tokens_prompt": 260,
+      "tokens_completion": 67,
+      "cost_usd": 0.0017850000000000001,
+      "first_pass_attempt": null,
+      "retries_used": 1,
+      "max_retries": 3,
+      "converged": true,
+      "failure_layer": null,
+      "elapsed_seconds": 7.135265588760376,
+      "code": "pragma cashscript ^0.13.0;\n\ncontract BuyerSellerMultisig(pubkey buyer, pubkey seller) {\n    function release(sig buyerSig, sig sellerSig) {\n        require(buyer != seller);\n        require(checkSig(buyerSig, buyer));\n        require(checkSig(sellerSig, seller));\n    }\n}",
+      "timestamp": "2026-03-14T15:30:56.028045"
+    },
+    {
+      "id": "escrow_medium_1",
+      "pattern": "escrow",
+      "difficulty": "medium",
+      "compile_pass": true,
+      "lint_errors": 0,
+      "lint_warnings": 0,
+      "lint_factor": 1.0,
+      "structure_score": 0.9473684210526315,
+      "adj_structure_score": 0.9473684210526315,
+      "required_features": [
+        "buyer_signature",
+        "seller_signature",
+        "arbitrator_signature",
+        "multisig_2of3"
+      ],
+      "detected_features": [
+        "multisig_2of3"
+      ],
+      "missing_features": [
+        "buyer_signature",
+        "seller_signature",
+        "arbitrator_signature"
+      ],
+      "hallucinated_features": [],
+      "intent_coverage": 0.25,
+      "final_score": 0.23684210526315788,
+      "latency_seconds": 7.733049392700195,
+      "tokens_prompt": 300,
+      "tokens_completion": 109,
+      "cost_usd": 0.002535,
+      "first_pass_attempt": null,
+      "retries_used": 1,
+      "max_retries": 3,
+      "converged": true,
+      "failure_layer": null,
+      "elapsed_seconds": 7.733049392700195,
+      "code": "pragma cashscript ^0.13.0;\n\ncontract Escrow(pubkey buyer, pubkey seller, pubkey arbiter) {\n    function release(sig sig1, sig sig2) {\n        require(buyer != seller);\n        require(buyer != arbiter);\n        require(seller != arbiter);\n        require(checkMultiSig([sig1, sig2], [buyer, seller, arbiter]));\n        require(tx.outputs.length == 1);\n        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);\n    }\n}",
+      "timestamp": "2026-03-14T15:31:03.761094"
+    },
+    {
+      "id": "escrow_hard_1",
+      "pattern": "escrow",
+      "difficulty": "hard",
+      "compile_pass": true,
+      "lint_errors": 0,
+      "lint_warnings": 0,
+      "lint_factor": 1.0,
+      "structure_score": 0.9473684210526315,
+      "adj_structure_score": 0.9473684210526315,
+      "required_features": [
+        "buyer_signature",
+        "seller_signature",
+        "timelock_refund"
+      ],
+      "detected_features": [
+        "buyer_signature",
+        "seller_signature",
+        "timelock_refund"
+      ],
+      "missing_features": [],
+      "hallucinated_features": [],
+      "intent_coverage": 1.0,
+      "final_score": 0.9473684210526315,
+      "latency_seconds": 9.249846935272217,
+      "tokens_prompt": 260,
+      "tokens_completion": 167,
+      "cost_usd": 0.0032849999999999997,
+      "first_pass_attempt": null,
+      "retries_used": 1,
+      "max_retries": 3,
+      "converged": true,
+      "failure_layer": null,
+      "elapsed_seconds": 9.249846935272217,
+      "code": "pragma cashscript ^0.13.0;\n\ncontract Escrow(\n    pubkey buyer,\n    pubkey seller,\n    int timeoutTimestamp\n) {\n    function release(sig buyerSig, sig sellerSig) {\n        require(buyer != seller);\n        require(checkSig(buyerSig, buyer));\n        require(checkSig(sellerSig, seller));\n        require(tx.outputs.length == 1);\n        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);\n    }\n\n    function reclaim(sig buyerSig) {\n        require(tx.time >= timeoutTimestamp);\n        require(checkSig(buyerSig, buyer));\n        require(tx.outputs.length == 1);\n        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);\n    }\n}",
+      "timestamp": "2026-03-14T15:31:13.012106"
+    },
+    {
+      "id": "escrow_extreme_1",
+      "pattern": "escrow",
+      "difficulty": "extreme",
+      "compile_pass": true,
+      "lint_errors": 0,
+      "lint_warnings": 0,
+      "lint_factor": 1.0,
+      "structure_score": 1.0,
+      "adj_structure_score": 1.0,
+      "required_features": [
+        "buyer_signature",
+        "seller_signature",
+        "arbitrator_signature",
+        "timelock_refund"
+      ],
+      "detected_features": [
+        "buyer_signature",
+        "seller_signature",
+        "arbitrator_signature",
+        "timelock_refund"
+      ],
+      "missing_features": [],
+      "hallucinated_features": [],
+      "intent_coverage": 1.0,
+      "final_score": 1.0,
+      "latency_seconds": 13.21564245223999,
+      "tokens_prompt": 320,
+      "tokens_completion": 630,
+      "cost_usd": 0.01041,
+      "first_pass_attempt": null,
+      "retries_used": 1,
+      "max_retries": 3,
+      "converged": true,
+      "failure_layer": null,
+      "elapsed_seconds": 13.21564245223999,
+      "code": "pragma cashscript ^0.13.0;\n\ncontract ProfessionalEscrow(\n    pubkey buyer,\n    pubkey seller,\n    pubkey arbitrator,\n    int timeoutTimestamp,\n    bytes sellerLockingBytecode,\n    bytes buyerLockingBytecode\n) {\n    function release(sig buyerSig, sig sellerSig) {\n        require(buyer != seller);\n        require(buyer != arbitrator);\n        require(seller != arbitrator);\n\n        require(checkSig(buyerSig, buyer));\n        require(checkSig(sellerSig, seller));\n\n        require(tx.outputs.length == 1);\n        require(tx.outputs[0].lockingBytecode == sellerLockingBytecode);\n        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);\n    }\n\n    function disputeFavorSeller(sig buyerSig, sig arbitratorSig) {\n        require(buyer != seller);\n        require(buyer != arbitrator);\n        require(seller != arbitrator);\n\n        require(checkSig(buyerSig, buyer));\n        require(checkSig(arbitratorSig, arbitrator));\n\n        require(tx.outputs.length == 1);\n        require(tx.outputs[0].lockingBytecode == sellerLockingBytecode);\n        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);\n    }\n\n    function disputeFavorBuyer(sig sellerSig, sig arbitratorSig) {\n        require(buyer != seller);\n        require(buyer != arbitrator);\n        require(seller != arbitrator);\n\n        require(checkSig(sellerSig, seller));\n        require(checkSig(arbitratorSig, arbitrator));\n\n        require(tx.outputs.length == 1);\n        require(tx.outputs[0].lockingBytecode == buyerLockingBytecode);\n        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);\n    }\n\n    function refund(sig buyerSig, sig sellerSig) {\n        require(buyer != seller);\n        require(buyer != arbitrator);\n        require(seller != arbitrator);\n\n        require(checkSig(buyerSig, buyer));\n        require(checkSig(sellerSig, seller));\n\n        require(tx.outputs.length == 1);\n        require(tx.outputs[0].lockingBytecode == buyerLockingBytecode);\n        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);\n    }\n\n    function timeout(sig buyerSig) {\n        require(buyer != seller);\n        require(buyer != arbitrator);\n        require(seller != arbitrator);\n\n        require(tx.time >= timeoutTimestamp);\n\n        require(checkSig(buyerSig, buyer));\n\n        require(tx.outputs.length == 1);\n        require(tx.outputs[0].lockingBytecode == buyerLockingBytecode);\n        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);\n    }\n}",
+      "timestamp": "2026-03-14T15:31:26.228275"
+    }
+  ],
+  "pattern_summaries": [
+    {
+      "pattern": "escrow",
+      "count": 4,
+      "compile_rate": 1.0,
+      "convergence_rate": 1.0,
+      "avg_intent_coverage": 0.8125,
+      "avg_final_score": 0.7960526315789473,
+      "avg_retries": 1.0
+    }
+  ],
+  "difficulty_summaries": [
+    {
+      "difficulty": "easy",
+      "count": 1,
+      "compile_rate": 1.0,
+      "avg_intent_coverage": 1.0,
+      "avg_final_score": 1.0
+    },
+    {
+      "difficulty": "medium",
+      "count": 1,
+      "compile_rate": 1.0,
+      "avg_intent_coverage": 0.25,
+      "avg_final_score": 0.23684210526315788
+    },
+    {
+      "difficulty": "hard",
+      "count": 1,
+      "compile_rate": 1.0,
+      "avg_intent_coverage": 1.0,
+      "avg_final_score": 0.9473684210526315
+    },
+    {
+      "difficulty": "extreme",
+      "count": 1,
+      "compile_rate": 1.0,
+      "avg_intent_coverage": 1.0,
+      "avg_final_score": 1.0
+    }
+  ],
+  "avg_latency": 9.333451092243195,
+  "total_tokens_prompt": 1140,
+  "total_tokens_completion": 973,
+  "total_cost_usd": 0.018015,
+  "model_name": null,
+  "model_version": null
+}

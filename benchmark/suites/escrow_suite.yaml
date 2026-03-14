@@ -1,0 +1,69 @@
+- id: escrow_easy_1
+  pattern: escrow
+  difficulty: easy
+  intent: "Create a simple contract where both the buyer and seller must sign to release funds."
+  required_features:
+    - buyer_signature
+    - seller_signature
+  critical_features:
+    - buyer_signature
+    - seller_signature
+  expected_structure:
+    require_count_min: 2
+  tags: ["multisig", "basic"]
+
+- id: escrow_medium_1
+  pattern: escrow
+  difficulty: medium
+  intent: "Escrow contract: funds can be released if 2 out of 3 parties (buyer, seller, arbiter) sign."
+  required_features:
+    - buyer_signature
+    - seller_signature
+    - arbitrator_signature
+    - multisig_2of3
+  critical_features:
+    - multisig_2of3
+  expected_structure:
+    require_count_min: 1
+  tags: ["multisig", "3party"]
+
+- id: escrow_hard_1
+  pattern: escrow
+  difficulty: hard
+  intent: |
+    Create an escrow contract for buyer and seller. 
+    1. Funds can be released if both buyer and seller sign.
+    2. If the seller doesn't sign, the buyer can reclaim funds after 30 days.
+  required_features:
+    - buyer_signature
+    - seller_signature
+    - timelock_refund
+  critical_features:
+    - buyer_signature
+    - timelock_refund
+  expected_structure:
+    require_count_min: 3
+  tags: ["multisig", "timelock"]
+
+- id: escrow_extreme_1
+  pattern: escrow
+  difficulty: extreme
+  intent: |
+    Professional Escrow Protocol:
+    - Normal Flow: Buyer and Seller sign to release.
+    - Dispute Flow: If they disagree, an Arbitrator can sign with either party to resolve.
+    - Safety Flow: After 90 days, the Buyer can reclaim funds alone if no resolution reached.
+    - Ensure code is efficient CashScript ^0.13.0.
+  required_features:
+    - buyer_signature
+    - seller_signature
+    - arbitrator_signature
+    - timelock_refund
+  critical_features:
+    - buyer_signature
+    - seller_signature
+    - arbitrator_signature
+    - timelock_refund
+  expected_structure:
+    require_count_min: 4
+  tags: ["complex", "multisig", "timelock"]
