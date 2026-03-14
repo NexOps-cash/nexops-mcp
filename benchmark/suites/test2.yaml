@@ -1,4 +1,4 @@
-# 1️⃣ Critical feature failure test
+# 1. Critical feature failure test
 - id: validator_critical_missing
   pattern: validator
   difficulty: easy
@@ -13,7 +13,7 @@
   tags: ["validator", "critical"]
 
 
-# 2️⃣ Multisig inference test
+# 2. Multisig inference test
 - id: validator_multisig_expansion
   pattern: validator
   difficulty: medium
@@ -32,7 +32,7 @@
   tags: ["validator", "multisig"]
 
 
-# 3️⃣ Hallucination detection test
+# 3. Hallucination detection test
 - id: validator_no_extra_features
   pattern: validator
   difficulty: easy
@@ -48,7 +48,7 @@
   tags: ["validator", "hallucination"]
 
 
-# 4️⃣ Require penalty stress
+# 4. Require penalty stress
 - id: validator_structure_penalty
   pattern: validator
   difficulty: medium
@@ -61,7 +61,7 @@
   tags: ["validator", "structure"]
 
 
-# 5️⃣ Timelock detection test
+# 5. Timelock detection test
 - id: validator_timelock_detection
   pattern: validator
   difficulty: medium
@@ -78,7 +78,7 @@
   tags: ["validator", "timelock"]
 
 
-# 6️⃣ Signature role confusion
+# 6. Signature role confusion
 - id: validator_role_confusion
   pattern: validator
   difficulty: medium
@@ -94,7 +94,7 @@
   tags: ["validator", "role"]
 
 
-# 7️⃣ Feature overlap test
+# 7. Feature overlap test
 - id: validator_feature_overlap
   pattern: validator
   difficulty: medium
@@ -110,7 +110,7 @@
   tags: ["validator", "overlap"]
 
 
-# 8️⃣ Complex multi-feature test
+# 8. Complex multi-feature test
 - id: validator_complex_contract
   pattern: validator
   difficulty: extreme
@@ -132,7 +132,7 @@
   tags: ["validator", "complex"]
 
 
-# 9️⃣ Feature detection edge case
+# 9. Feature detection edge case
 - id: validator_signature_spacing
   pattern: validator
   difficulty: medium
@@ -146,7 +146,7 @@
   tags: ["validator", "regex"]
 
 
-# 🔟 Intent coverage stress
+# 10. Intent coverage stress
 - id: validator_partial_coverage
   pattern: validator
   difficulty: medium

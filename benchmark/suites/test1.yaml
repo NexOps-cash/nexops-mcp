@@ -10,7 +10,7 @@
     require_count_min: 1
   tags: ["selftest", "minimal"]
 
-# 2️⃣ Require count stress
+# 2. Require count stress
 - id: bench_require_penalty
   pattern: benchmark
   difficulty: easy
@@ -25,7 +25,7 @@
     require_count_min: 5
   tags: ["selftest", "require_penalty"]
 
-# 3️⃣ Multisig inference test
+# 3. Multisig inference test
 - id: bench_multisig_inference
   pattern: benchmark
   difficulty: medium
@@ -43,7 +43,7 @@
     require_count_min: 1
   tags: ["selftest", "multisig"]
 
-# 4️⃣ Hallucination detection test
+# 4. Hallucination detection test
 - id: bench_no_arbitrator
   pattern: benchmark
   difficulty: easy
@@ -60,7 +60,7 @@
     require_count_min: 2
   tags: ["selftest", "hallucination"]
 
-# 5️⃣ Timelock detection test
+# 5. Timelock detection test
 - id: bench_timelock_feature
   pattern: benchmark
   difficulty: medium
@@ -76,7 +76,7 @@
     require_count_min: 2
   tags: ["selftest", "timelock"]
 
-# 6️⃣ Feature collision test
+# 6. Feature collision test
 - id: bench_signature_overlap
   pattern: benchmark
   difficulty: medium
@@ -91,7 +91,7 @@
     require_count_min: 2
   tags: ["selftest", "feature_overlap"]
 
-# 7️⃣ Structure edge case
+# 7. Structure edge case
 - id: bench_zero_structure
   pattern: benchmark
   difficulty: medium
@@ -105,7 +105,7 @@
     require_count_min: 10
   tags: ["selftest", "structure_edge"]
 
-# 8️⃣ Critical feature failure test
+# 8. Critical feature failure test
 - id: bench_critical_feature
   pattern: benchmark
   difficulty: medium
@@ -119,7 +119,7 @@
     require_count_min: 1
   tags: ["selftest", "critical"]
 
-# 9️⃣ Tag filtering test
+# 9. Tag filtering test
 - id: bench_tag_filter
   pattern: benchmark
   difficulty: easy
@@ -130,7 +130,7 @@
     require_count_min: 1
   tags: ["selftest", "tagtest"]
 
-# 🔟 Complex scoring test
+# 10. Complex scoring test
 - id: bench_complex_scoring
   pattern: benchmark
   difficulty: extreme

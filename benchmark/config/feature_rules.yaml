@@ -12,6 +12,9 @@ features:
   owner_signature:
     rule: 'checkSig\s*\(\s*.*(owner|admin|beneficiary|authority)\b'
     description: "Generic owner/authority signature check"
+  beneficiary_signature:
+    rule: 'checkSig\s*\(\s*.*beneficiary\b'
+    description: "Beneficiary signature check via checkSig"
   timelock_refund:
     rule: 'tx\.(time|age)\b'
     description: "Timelock using tx.time or tx.age"
