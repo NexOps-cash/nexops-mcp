@@ -40,10 +40,15 @@ class BenchmarkEvaluator:
         tokens_completion = 0
         
         try:
-            # We call the production engine
+            # We call the production engine with benchmark safety flags
             # Note: generate_guarded handles inner retry loops
             result = await asyncio.wait_for(
-                self.engine.generate_guarded(case.intent, security_level="high"),
+                self.engine.generate_guarded(
+                    case.intent, 
+                    security_level="high",
+                    disable_golden=True,
+                    disable_fallbacks=True
+                ),
                 timeout=120 # 2 minute timeout per case
             )
             

@@ -81,6 +81,8 @@ class ContractMetadata(BaseModel):
     retry_count: int = 0
     compile_fix_count: int = 0
     kb_categories_used: List[str] = Field(default_factory=list)
+    disable_golden: bool = False
+    disable_fallbacks: bool = False
     timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
 
 

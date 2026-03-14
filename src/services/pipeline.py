@@ -410,7 +410,9 @@ class Phase2:
         contract_type = intent_model.contract_type if intent_model else ""
 
         # ─── Routing Bridge ────────────────────────────────────────────
-        if contract_type in _GOLDEN_TYPE_MAP:
+        disable_golden = ir.metadata.disable_golden if ir.metadata else False
+        
+        if contract_type in _GOLDEN_TYPE_MAP and not disable_golden:
             logger.info(f"[Phase 2] Routing: GOLDEN_ADAPTATION (type={contract_type})")
             code = await _golden_phase2(
                 ir=ir,

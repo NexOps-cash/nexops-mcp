@@ -38,7 +38,9 @@ class GuardedPipelineEngine:
         api_key: Optional[str] = None,
         provider: Optional[str] = None,
         groq_key: Optional[str] = None,
-        openrouter_key: Optional[str] = None
+        openrouter_key: Optional[str] = None,
+        disable_golden: bool = False,
+        disable_fallbacks: bool = False
     ) -> Dict[str, Any]:
         """
         Execute the full 4-stage guarded pipeline.
@@ -64,6 +66,8 @@ class GuardedPipelineEngine:
             groq_key=groq_key,
             openrouter_key=openrouter_key
         )
+        ir.metadata.disable_golden = disable_golden
+        ir.metadata.disable_fallbacks = disable_fallbacks
         intent_model = ir.metadata.intent_model
         contract_mode = intent_model.contract_type if intent_model else ""
         
@@ -233,7 +237,19 @@ class GuardedPipelineEngine:
                 }
             }
 
-        # Synthesis failed to converge — Reverting to pre-verified secure fallback
+        # Synthesis failed to converge -- Reverting to pre-verified secure fallback
+        if ir.metadata.disable_fallbacks:
+            logger.warning(f"Pipeline exhausted after {max_gen_retries} attempts. Fallbacks DISABLED for benchmark.")
+            await _notify("fallback_disabled", "Synthesis failed and fallbacks are disabled. Returning last generated code.", max_gen_retries, "error")
+            return {
+                "type": "error",
+                "error": {
+                    "code": "synthesis_failed_no_fallback",
+                    "message": "Pipeline failed to converge and fallbacks are disabled.",
+                    "last_code": code
+                }
+            }
+        
         logger.warning(f"Pipeline exhausted after {max_gen_retries} attempts. Activating secure fallback. (Last Error: {last_error})")
         await _notify("fallback", "Synthesis failed to converge. Deploying pre-verified secure fallback...", max_gen_retries, "warning")
         
