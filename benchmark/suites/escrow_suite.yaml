@@ -1,7 +1,9 @@
-- id: escrow_easy_1
+- id: escrow_basic_multisig
   pattern: escrow
   difficulty: easy
-  intent: "Create a simple contract where both the buyer and seller must sign to release funds."
+  intent: |
+    Create a CashScript escrow contract where both buyer and seller must sign
+    to release the funds.
   required_features:
     - buyer_signature
     - seller_signature
@@ -10,30 +12,15 @@
     - seller_signature
   expected_structure:
     require_count_min: 2
-  tags: ["multisig", "basic"]
+  tags: ["escrow", "multisig"]
 
-- id: escrow_medium_1
+- id: escrow_timeout_refund
   pattern: escrow
   difficulty: medium
-  intent: "Escrow contract: funds can be released if 2 out of 3 parties (buyer, seller, arbiter) sign."
-  required_features:
-    - buyer_signature
-    - seller_signature
-    - arbitrator_signature
-    - multisig_2of3
-  critical_features:
-    - multisig_2of3
-  expected_structure:
-    require_count_min: 1
-  tags: ["multisig", "3party"]
-
-- id: escrow_hard_1
-  pattern: escrow
-  difficulty: hard
   intent: |
-    Create an escrow contract for buyer and seller. 
-    1. Funds can be released if both buyer and seller sign.
-    2. If the seller doesn't sign, the buyer can reclaim funds after 30 days.
+    Escrow contract:
+    - Buyer and seller can release funds together
+    - Buyer can reclaim funds after a timeout of 7 days
   required_features:
     - buyer_signature
     - seller_signature
@@ -43,27 +30,148 @@
     - timelock_refund
   expected_structure:
     require_count_min: 3
-  tags: ["multisig", "timelock"]
+  tags: ["escrow", "timelock"]
 
-- id: escrow_extreme_1
+- id: escrow_arbiter_resolution
   pattern: escrow
-  difficulty: extreme
+  difficulty: medium
   intent: |
-    Professional Escrow Protocol:
-    - Normal Flow: Buyer and Seller sign to release.
-    - Dispute Flow: If they disagree, an Arbitrator can sign with either party to resolve.
-    - Safety Flow: After 90 days, the Buyer can reclaim funds alone if no resolution reached.
-    - Ensure code is efficient CashScript ^0.13.0.
+    Create an escrow contract where:
+    - buyer + seller release funds normally
+    - if they disagree, an arbitrator can resolve the dispute with either party
+  required_features:
+    - buyer_signature
+    - seller_signature
+    - arbitrator_signature
+  critical_features:
+    - arbitrator_signature
+  expected_structure:
+    require_count_min: 3
+  tags: ["escrow", "arbitration"]
+
+- id: escrow_2of3_release
+  pattern: escrow
+  difficulty: medium
+  intent: |
+    Funds can be released when any two of the three parties sign:
+    buyer, seller, arbitrator.
+  required_features:
+    - buyer_signature
+    - seller_signature
+    - arbitrator_signature
+    - multisig_2of3
+  critical_features:
+    - multisig_2of3
+  expected_structure:
+    require_count_min: 1
+  tags: ["escrow", "multisig"]
+
+- id: escrow_timeout_with_arbiter
+  pattern: escrow
+  difficulty: hard
+  intent: |
+    Professional escrow logic:
+    - buyer + seller release funds normally
+    - arbitrator can resolve disputes
+    - buyer can reclaim funds after 30 days if no resolution occurs
   required_features:
     - buyer_signature
     - seller_signature
     - arbitrator_signature
     - timelock_refund
   critical_features:
-    - buyer_signature
-    - seller_signature
     - arbitrator_signature
     - timelock_refund
   expected_structure:
     require_count_min: 4
-  tags: ["complex", "multisig", "timelock"]
+  tags: ["escrow", "timelock", "arbitration"]
+
+- id: escrow_value_preservation
+  pattern: escrow
+  difficulty: hard
+  intent: |
+    Escrow contract where buyer and seller release funds together.
+    The contract must enforce that the full input value is preserved
+    in the output.
+  required_features:
+    - buyer_signature
+    - seller_signature
+  expected_structure:
+    require_count_min: 4
+    must_contain:
+      - tx.outputs
+      - tx.inputs
+  tags: ["escrow", "covenant"]
+
+- id: escrow_single_output_rule
+  pattern: escrow
+  difficulty: hard
+  intent: |
+    Escrow contract requiring buyer and seller signatures.
+    Ensure that the transaction produces exactly one output.
+  required_features:
+    - buyer_signature
+    - seller_signature
+  expected_structure:
+    require_count_min: 3
+    must_contain:
+      - tx.outputs.length
+  tags: ["escrow", "covenant"]
+
+- id: escrow_dual_resolution
+  pattern: escrow
+  difficulty: extreme
+  intent: |
+    Complex escrow contract:
+    - buyer + seller release funds
+    - arbitrator + buyer resolves dispute in buyer favor
+    - arbitrator + seller resolves dispute in seller favor
+    - buyer reclaim after 90 days
+  required_features:
+    - buyer_signature
+    - seller_signature
+    - arbitrator_signature
+    - timelock_refund
+  critical_features:
+    - arbitrator_signature
+    - timelock_refund
+  expected_structure:
+    require_count_min: 6
+  tags: ["escrow", "complex"]
+
+- id: escrow_role_separation
+  pattern: escrow
+  difficulty: medium
+  intent: |
+    Escrow contract where buyer and seller must sign.
+    Ensure buyer and seller are different public keys.
+  required_features:
+    - buyer_signature
+    - seller_signature
+  expected_structure:
+    require_count_min: 3
+    must_contain:
+      - buyer != seller
+  tags: ["escrow", "safety"]
+
+- id: escrow_extreme_protocol
+  pattern: escrow
+  difficulty: extreme
+  intent: |
+    Professional escrow protocol:
+    - buyer + seller release
+    - buyer + arbitrator resolve
+    - seller + arbitrator resolve
+    - buyer reclaim after timeout
+    - enforce output locking bytecode
+  required_features:
+    - buyer_signature
+    - seller_signature
+    - arbitrator_signature
+    - timelock_refund
+  critical_features:
+    - arbitrator_signature
+    - timelock_refund
+  expected_structure:
+    require_count_min: 7
+  tags: ["escrow", "extreme"]

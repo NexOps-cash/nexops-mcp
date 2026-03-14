@@ -1,0 +1,162 @@
+# 1️⃣ Critical feature failure test
+- id: validator_critical_missing
+  pattern: validator
+  difficulty: easy
+  intent: |
+    Contract where ONLY the buyer can release funds.
+  required_features:
+    - buyer_signature
+  critical_features:
+    - buyer_signature
+  expected_structure:
+    require_count_min: 1
+  tags: ["validator", "critical"]
+
+
+# 2️⃣ Multisig inference test
+- id: validator_multisig_expansion
+  pattern: validator
+  difficulty: medium
+  intent: |
+    Create a 2-of-3 multisig contract with buyer, seller, and arbitrator.
+    Any two signatures release funds.
+  required_features:
+    - buyer_signature
+    - seller_signature
+    - arbitrator_signature
+    - multisig_2of3
+  critical_features:
+    - multisig_2of3
+  expected_structure:
+    require_count_min: 1
+  tags: ["validator", "multisig"]
+
+
+# 3️⃣ Hallucination detection test
+- id: validator_no_extra_features
+  pattern: validator
+  difficulty: easy
+  intent: |
+    Buyer alone can release funds.
+    No seller or arbitrator is involved.
+  required_features:
+    - buyer_signature
+  critical_features:
+    - buyer_signature
+  expected_structure:
+    require_count_min: 1
+  tags: ["validator", "hallucination"]
+
+
+# 4️⃣ Require penalty stress
+- id: validator_structure_penalty
+  pattern: validator
+  difficulty: medium
+  intent: |
+    Buyer must sign to release funds.
+  required_features:
+    - buyer_signature
+  expected_structure:
+    require_count_min: 12
+  tags: ["validator", "structure"]
+
+
+# 5️⃣ Timelock detection test
+- id: validator_timelock_detection
+  pattern: validator
+  difficulty: medium
+  intent: |
+    Funds are locked until a timestamp.
+    After the timestamp the buyer can claim them.
+  required_features:
+    - buyer_signature
+    - timelock_refund
+  critical_features:
+    - timelock_refund
+  expected_structure:
+    require_count_min: 2
+  tags: ["validator", "timelock"]
+
+
+# 6️⃣ Signature role confusion
+- id: validator_role_confusion
+  pattern: validator
+  difficulty: medium
+  intent: |
+    Only the seller can release funds.
+    Buyer must not be required.
+  required_features:
+    - seller_signature
+  critical_features:
+    - seller_signature
+  expected_structure:
+    require_count_min: 1
+  tags: ["validator", "role"]
+
+
+# 7️⃣ Feature overlap test
+- id: validator_feature_overlap
+  pattern: validator
+  difficulty: medium
+  intent: |
+    Buyer and arbitrator must both sign.
+  required_features:
+    - buyer_signature
+    - arbitrator_signature
+  critical_features:
+    - buyer_signature
+  expected_structure:
+    require_count_min: 2
+  tags: ["validator", "overlap"]
+
+
+# 8️⃣ Complex multi-feature test
+- id: validator_complex_contract
+  pattern: validator
+  difficulty: extreme
+  intent: |
+    Escrow system:
+    - Buyer and seller sign normally.
+    - Arbitrator resolves disputes.
+    - Buyer refund after timeout.
+  required_features:
+    - buyer_signature
+    - seller_signature
+    - arbitrator_signature
+    - timelock_refund
+  critical_features:
+    - buyer_signature
+    - seller_signature
+  expected_structure:
+    require_count_min: 4
+  tags: ["validator", "complex"]
+
+
+# 9️⃣ Feature detection edge case
+- id: validator_signature_spacing
+  pattern: validator
+  difficulty: medium
+  intent: |
+    Buyer must sign to release funds.
+    Ensure the signature check is present.
+  required_features:
+    - buyer_signature
+  expected_structure:
+    require_count_min: 1
+  tags: ["validator", "regex"]
+
+
+# 🔟 Intent coverage stress
+- id: validator_partial_coverage
+  pattern: validator
+  difficulty: medium
+  intent: |
+    Buyer and seller sign normally.
+    Arbitrator resolves disputes.
+  required_features:
+    - buyer_signature
+    - seller_signature
+    - arbitrator_signature
+  expected_structure:
+    require_count_min: 2
+  tags: ["validator", "coverage"]

@@ -1,0 +1,152 @@
+- id: bench_minimal_require
+  pattern: benchmark
+  difficulty: easy
+  intent: "Create a contract where the buyer must sign."
+  required_features:
+    - buyer_signature
+  critical_features:
+    - buyer_signature
+  expected_structure:
+    require_count_min: 1
+  tags: ["selftest", "minimal"]
+
+# 2️⃣ Require count stress
+- id: bench_require_penalty
+  pattern: benchmark
+  difficulty: easy
+  intent: "Contract where buyer AND seller must sign."
+  required_features:
+    - buyer_signature
+    - seller_signature
+  critical_features:
+    - buyer_signature
+    - seller_signature
+  expected_structure:
+    require_count_min: 5
+  tags: ["selftest", "require_penalty"]
+
+# 3️⃣ Multisig inference test
+- id: bench_multisig_inference
+  pattern: benchmark
+  difficulty: medium
+  intent: |
+    Create a 2-of-3 multisig contract with buyer, seller, and arbitrator.
+    Any two of them can release funds.
+  required_features:
+    - buyer_signature
+    - seller_signature
+    - arbitrator_signature
+    - multisig_2of3
+  critical_features:
+    - multisig_2of3
+  expected_structure:
+    require_count_min: 1
+  tags: ["selftest", "multisig"]
+
+# 4️⃣ Hallucination detection test
+- id: bench_no_arbitrator
+  pattern: benchmark
+  difficulty: easy
+  intent: |
+    Create a simple contract where buyer and seller both sign to release funds.
+    There is no arbitrator.
+  required_features:
+    - buyer_signature
+    - seller_signature
+  critical_features:
+    - buyer_signature
+    - seller_signature
+  expected_structure:
+    require_count_min: 2
+  tags: ["selftest", "hallucination"]
+
+# 5️⃣ Timelock detection test
+- id: bench_timelock_feature
+  pattern: benchmark
+  difficulty: medium
+  intent: |
+    Funds are locked until a timestamp.
+    After the timestamp the buyer can claim them.
+  required_features:
+    - buyer_signature
+    - timelock_refund
+  critical_features:
+    - timelock_refund
+  expected_structure:
+    require_count_min: 2
+  tags: ["selftest", "timelock"]
+
+# 6️⃣ Feature collision test
+- id: bench_signature_overlap
+  pattern: benchmark
+  difficulty: medium
+  intent: |
+    Contract where buyer and arbitrator must both sign to release funds.
+  required_features:
+    - buyer_signature
+    - arbitrator_signature
+  critical_features:
+    - buyer_signature
+  expected_structure:
+    require_count_min: 2
+  tags: ["selftest", "feature_overlap"]
+
+# 7️⃣ Structure edge case
+- id: bench_zero_structure
+  pattern: benchmark
+  difficulty: medium
+  intent: |
+    Create a contract where buyer signs to release funds.
+  required_features:
+    - buyer_signature
+  critical_features:
+    - buyer_signature
+  expected_structure:
+    require_count_min: 10
+  tags: ["selftest", "structure_edge"]
+
+# 8️⃣ Critical feature failure test
+- id: bench_critical_feature
+  pattern: benchmark
+  difficulty: medium
+  intent: |
+    Seller alone can release funds.
+  required_features:
+    - seller_signature
+  critical_features:
+    - seller_signature
+  expected_structure:
+    require_count_min: 1
+  tags: ["selftest", "critical"]
+
+# 9️⃣ Tag filtering test
+- id: bench_tag_filter
+  pattern: benchmark
+  difficulty: easy
+  intent: "Buyer signs."
+  required_features:
+    - buyer_signature
+  expected_structure:
+    require_count_min: 1
+  tags: ["selftest", "tagtest"]
+
+# 🔟 Complex scoring test
+- id: bench_complex_scoring
+  pattern: benchmark
+  difficulty: extreme
+  intent: |
+    Escrow contract:
+    - Buyer and seller sign normally.
+    - Arbitrator resolves disputes.
+    - Buyer refund after timeout.
+  required_features:
+    - buyer_signature
+    - seller_signature
+    - arbitrator_signature
+    - timelock_refund
+  critical_features:
+    - buyer_signature
+    - seller_signature
+  expected_structure:
+    require_count_min: 4
+  tags: ["selftest", "complex"]
