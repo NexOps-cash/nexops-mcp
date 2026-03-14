@@ -9,9 +9,15 @@ features:
   arbitrator_signature:
     rule: 'checkSig\s*\(\s*.*arbitrator\b'
     description: "Arbitrator signature check via checkSig"
+  owner_signature:
+    rule: 'checkSig\s*\(\s*.*(owner|admin|beneficiary|authority)\b'
+    description: "Generic owner/authority signature check"
   timelock_refund:
     rule: 'tx\.(time|age)\b'
     description: "Timelock using tx.time or tx.age"
+  stateful:
+    rule: 'this\.activeBytecode\b'
+    description: "Stateful contract behavior via this.activeBytecode"
   multisig_2of2:
     rule: 'require\s*\(\s*checkSig\s*\(.*?\)[\s\n]*&&[\s\n]*checkSig\s*\(.*?\)[\s\n]*\)'
     description: "2-of-2 multisig requirement"
