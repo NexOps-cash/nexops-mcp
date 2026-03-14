@@ -14,7 +14,7 @@ class BenchmarkReporter:
         
         # Load cost config
         self.costs = {}
-        with open("benchmark/config/scoring_weights.yaml", "r") as f:
+        with open("benchmark/config/scoring_weights.yaml", "r", encoding="utf-8") as f:
             weights = yaml.safe_load(f)
             self.costs = weights.get("costs", {})
 
@@ -112,7 +112,7 @@ class BenchmarkReporter:
 
     def save_report(self, report: BenchmarkReport):
         path = self.results_dir / f"{report.run_id}.json"
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write(report.model_dump_json(indent=2))
         print(f"\n[Reporter] Result saved to {path}")
 
