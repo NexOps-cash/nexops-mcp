@@ -20,20 +20,63 @@ class FeatureExtractor:
 
     def extract(self, code: str) -> List[str]:
         """Detect features in the provided code using regex rules."""
-        detected = []
+        detected = set()
+        
+        # 1. Base Regex Detection (from config)
         for feature_name, config in self.rules.items():
             pattern = config.get("rule")
             if not pattern:
                 continue
             
-            # Using re.DOTALL and re.IGNORECASE for maximum flexibility
+            # Skip static multisig rules if we're going to do dynamic expansion 
+            # (avoid multisig_2of3 regex catching 2of2 logic incorrectly)
+            if "multisig" in feature_name:
+                continue
+
             if re.search(pattern, code, re.DOTALL | re.IGNORECASE):
-                detected.append(feature_name)
+                detected.add(feature_name)
         
-        return detected
+        # 2. Multisig Feature Expansion (Dynamic)
+        # Pattern: checkMultiSig([sig1, sig2], [buyer, seller, arbitrator])
+        # Using [^)]* instead of [^\]]* to better handle nested structures or weird spacing
+        msig_pattern = r'checkMultiSig\s*\(\s*\[(.*?)\]\s*,\s*\[(.*?)\]\s*\)'
+        matches = list(re.finditer(msig_pattern, code, re.DOTALL | re.IGNORECASE))
+        
+        for match in matches:
+            sig_array_str = match.group(1)
+            pubkey_array_str = match.group(2)
+            
+            pubkeys = [r.strip() for r in pubkey_array_str.split(",") if r.strip()]
+            for pk in pubkeys:
+                detected.add(f"{pk}_signature")
+                
+            detected.add("multisig")
+            
+            sigs = [s.strip() for s in sig_array_str.split(",") if s.strip()]
+            m = len(sigs)
+            n = len(pubkeys)
+            if n > 0:
+                detected.add(f"multisig_{m}of{n}")
+
+        # If no checkMultiSig found, fallback to static multisig regexes
+        if not matches:
+            for feature_name, config in self.rules.items():
+                if "multisig" in feature_name:
+                    pattern = config.get("rule")
+                    if pattern and re.search(pattern, code, re.DOTALL | re.IGNORECASE):
+                        detected.add(feature_name)
+        
+        return list(detected)
 
     def get_missing(self, required: List[str], detected: List[str]) -> List[str]:
         return list(set(required) - set(detected))
 
     def get_hallucinated(self, required: List[str], detected: List[str]) -> List[str]:
-        return list(set(detected) - set(required))
+        hallucinated = set(detected) - set(required)
+        
+        # Suppress 'multisig' hallucination if any multisig threshold is required
+        if "multisig" in hallucinated:
+            if any(f.startswith("multisig_") for f in required):
+                hallucinated.remove("multisig")
+                
+        return list(hallucinated)

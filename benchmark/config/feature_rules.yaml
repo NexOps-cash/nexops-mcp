@@ -16,7 +16,7 @@ features:
     rule: 'require\s*\(\s*checkSig\s*\(.*?\)[\s\n]*&&[\s\n]*checkSig\s*\(.*?\)[\s\n]*\)'
     description: "2-of-2 multisig requirement"
   multisig_2of3:
-    rule: 'checkMultiSig\b'
+    rule: 'checkMultiSig\s*\(\s*\[[^\]]+,[^\]]+\],\s*\[[^\]]+,[^\]]+,[^\]]+\]\)'
     description: "2-of-3 threshold multisig"
   token_burn:
     rule: 'tx\.outputs\[.*?\]\.tokenAmount\s*==\s*0\b'

@@ -52,18 +52,14 @@ class BenchmarkEvaluator:
             if result["type"] == "success":
                 data = result["data"]
                 code = data["code"]
-                compile_pass = True # If success, it compiled at some point
+                compile_pass = True 
                 converged = not data.get("fallback_used", False)
                 
-                # Extract lint info if possible (though pipeline doesn't explicitly return counts)
-                # We'll rely on the fact that if it passed, errors are 0.
-                lint_errors = 0
-                lint_warnings = 0 # Placeholder
+                # Metadata from engine
+                attempt_number = data.get("attempt_number", 1)
+                gen_seconds = data.get("generation_seconds", time.time() - start_time)
                 
-                # Toll Gate structure score
-                structure_score = data.get("toll_gate", {}).get("structural_score", 0.0)
-                
-                # Feature Extraction
+                # Extraction
                 detected = self.extractor.extract(code)
                 missing = self.extractor.get_missing(case.required_features, detected)
                 hallucinated = self.extractor.get_hallucinated(case.required_features, detected)
@@ -74,7 +70,10 @@ class BenchmarkEvaluator:
                 else:
                     intent_coverage = 1.0
                 
-                # Structural Penalty for Missing Requires
+                # Structural Score from production
+                structure_score = data.get("toll_gate", {}).get("structural_score", 0.0)
+                
+                # Penalties
                 require_count_min = case.expected_structure.get("require_count_min", 0)
                 actual_require_count = code.count("require(")
                 adj_structure_score = structure_score
@@ -82,30 +81,21 @@ class BenchmarkEvaluator:
                     penalty_factor = min(1.0, actual_require_count / require_count_min)
                     adj_structure_score *= penalty_factor
 
-                # Critical Feature Guard
                 critical_missing = [f for f in case.critical_features if f not in detected]
                 
-                # Final Scoring
                 lint_factor = self.weights.get("factors", {}).get("lint_no_error", 1.0)
                 final_score = (1.0 if compile_pass else 0.0) * lint_factor * adj_structure_score * intent_coverage
                 
                 if critical_missing:
                     final_score = 0.0
                 
-                # Retries/Attempts
-                # Looking at pipeline_engine.py, it uses gen_attempt loop
-                # We can't easily get the exact attempt from the current result dict reliably 
-                # without modifying pipeline_engine.py, but we can assume converged = success within retries.
-                retries_used = 1 # Placeholder
-                first_pass_attempt = 1 # Placeholder
-                
                 return CaseResult(
                     id=case.id,
                     pattern=case.pattern,
                     difficulty=case.difficulty,
                     compile_pass=compile_pass,
-                    lint_errors=lint_errors,
-                    lint_warnings=lint_warnings,
+                    lint_errors=0,
+                    lint_warnings=0,
                     lint_factor=lint_factor,
                     structure_score=structure_score,
                     adj_structure_score=adj_structure_score,
@@ -115,12 +105,13 @@ class BenchmarkEvaluator:
                     hallucinated_features=hallucinated,
                     intent_coverage=intent_coverage,
                     final_score=final_score,
-                    latency_seconds=latency,
-                    retries_used=retries_used,
+                    latency_seconds=gen_seconds,
+                    retries_used=attempt_number,
+                    first_pass_attempt=attempt_number if compile_pass else None,
                     max_retries=case.max_retries,
                     converged=converged,
                     failure_layer=None,
-                    elapsed_seconds=latency,
+                    elapsed_seconds=time.time() - start_time,
                     code=code
                 )
             else:
