@@ -14,6 +14,7 @@ from src.services.compiler import get_compiler_service
 from src.services.sanity_checker import get_sanity_checker
 from src.services.dsl_lint import get_dsl_linter
 from pathlib import Path
+from datetime import datetime
 
 logger = logging.getLogger("nexops.pipeline_engine")
 
@@ -42,6 +43,7 @@ class GuardedPipelineEngine:
         """
         Execute the full 4-stage guarded pipeline.
         """
+        start_time_full = datetime.now()
         async def _notify(stage: str, message: str, attempt: int = 1, status: str = "processing"):
             if on_update:
                 await on_update({
@@ -213,6 +215,7 @@ class GuardedPipelineEngine:
                 continue
 
             # SUCCESS !
+            generation_seconds = (datetime.now() - start_time_full).total_seconds()
             await _notify("complete", "Synthesis complete. Verified and secured.", gen_attempt + 1, "success")
             return {
                 "type": "success",
@@ -223,7 +226,10 @@ class GuardedPipelineEngine:
                     "toll_gate": toll_gate.dict(),
                     "sanity_check": sanity_result,
                     "session_id": "guarded-session",
-                    "fallback_used": False
+                    "fallback_used": False,
+                    "attempt_number": gen_attempt + 1,
+                    "compile_fix_count": getattr(ir.metadata, "compile_fix_count", 0),
+                    "generation_seconds": generation_seconds
                 }
             }
 
