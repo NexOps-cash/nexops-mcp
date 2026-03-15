@@ -82,23 +82,29 @@ async def execute_benchmark(yaml_path: str, tags: List[str], model: str):
 async def list_results():
     results = []
     for f in RESULTS_DIR.glob("*.json"):
-        with open(f, "r", encoding="utf-8") as r:
-            data = json.load(r)
-            results.append({
-                "id": data.get("run_id"),
-                "suite": f.name,
-                "timestamp": data.get("start_time"),
-                "score": data.get("avg_final_score") if data.get("avg_final_score") is not None else 0
-            })
-    return sorted(results, key=lambda x: x["timestamp"], reverse=True)
+        try:
+            with open(f, "r", encoding="utf-8") as r:
+                data = json.load(r)
+                results.append({
+                    "id": data.get("run_id"),
+                    "suite": f.name,
+                    "timestamp": data.get("start_time"),
+                    "score": data.get("avg_final_score") if data.get("avg_final_score") is not None else 0
+                })
+        except (json.JSONDecodeError, FileNotFoundError):
+            continue
+    return sorted(results, key=lambda x: x.get("timestamp", ""), reverse=True)
 
 @app.get("/results/{run_id}")
 async def get_result(run_id: str):
     # Search for file starting with run_id
     for f in RESULTS_DIR.glob(f"{run_id}*.json"):
-        with open(f, "r", encoding="utf-8") as r:
-            return json.load(r)
-    raise HTTPException(status_code=404, detail="Result not found")
+        try:
+            with open(f, "r", encoding="utf-8") as r:
+                return json.load(r)
+        except (json.JSONDecodeError, FileNotFoundError):
+            continue
+    raise HTTPException(status_code=404, detail="Result not found or invalid")
 
 # Serve UI if exists
 UI_DIR = Path("benchmark/ui")
