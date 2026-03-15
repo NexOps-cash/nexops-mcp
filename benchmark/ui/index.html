@@ -7,7 +7,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
     <div class="app-container">
@@ -136,10 +137,14 @@
             <div class="modal-body">
                 <div class="inspector-tabs">
                     <button class="tab-btn active" data-tab="code">Generated Code</button>
+                    <button class="tab-btn" data-tab="stats">Statistics</button>
                     <button class="tab-btn" data-tab="json">Raw Metrics</button>
                 </div>
                 <div id="tab-code" class="tab-content">
                     <pre><code id="code-preview" class="language-cashscript"></code></pre>
+                </div>
+                <div id="tab-stats" class="tab-content hidden">
+                    <div id="stats-preview" class="stats-grid"></div>
                 </div>
                 <div id="tab-json" class="tab-content hidden">
                     <pre><code id="json-preview"></code></pre>
@@ -148,6 +153,6 @@
         </div>
     </div>
 
-    <script src="main.js"></script>
+    <script src="main.js?v=3"></script>
 </body>
 </html>

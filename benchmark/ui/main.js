@@ -32,6 +32,7 @@ const elements = {
     modal: document.getElementById('modal'),
     modalTitle: document.getElementById('modal-title'),
     codePreview: document.getElementById('code-preview'),
+    statsPreview: document.getElementById('stats-preview'),
     jsonPreview: document.getElementById('json-preview'),
     copyAiBtn: document.getElementById('copy-ai-btn')
 };
@@ -163,6 +164,30 @@ window.inspectResult = (id) => {
 
     elements.modalTitle.textContent = `Inspection: ${id}`;
     elements.codePreview.textContent = res.code || '// No code generated';
+    
+    // Build stats HTML
+    elements.statsPreview.innerHTML = `
+        <div class="stat-item"><span class="stat-label">Difficulty</span><span class="stat-value">${res.difficulty}</span></div>
+        <div class="stat-item"><span class="stat-label">Compile Pass</span><span class="stat-value ${res.compile_pass ? 'badge-pass' : 'badge-fail'}">${res.compile_pass ? 'Yes' : 'No'}</span></div>
+        <div class="stat-item"><span class="stat-label">Lint Warnings / Errors</span><span class="stat-value">${res.lint_warnings || 0} / ${res.lint_errors || 0}</span></div>
+        <div class="stat-item"><span class="stat-label">Structure / Adj. Score</span><span class="stat-value">${(res.structure_score || 0).toFixed(2)} / ${(res.adj_structure_score || 0).toFixed(2)}</span></div>
+        <div class="stat-item"><span class="stat-label">Intent Coverage</span><span class="stat-value">${((res.intent_coverage || 0) * 100).toFixed(0)}%</span></div>
+        <div class="stat-item"><span class="stat-label">Latency</span><span class="stat-value">${(res.latency_seconds || 0).toFixed(2)}s</span></div>
+        <div class="stat-item"><span class="stat-label">Tokens (Prompt / Comp)</span><span class="stat-value">${res.tokens_prompt || 0} / ${res.tokens_completion || 0}</span></div>
+        <div class="stat-item"><span class="stat-label">Estimated Cost</span><span class="stat-value">$${(res.cost_usd || 0).toFixed(4)}</span></div>
+        <div class="stat-item"><span class="stat-label">Retries Used / Max</span><span class="stat-value">${res.retries_used || 0} / ${res.max_retries || 0}</span></div>
+        <div class="stat-item"><span class="stat-label">Converged</span><span class="stat-value ${res.converged ? 'badge-pass' : 'badge-fail'}">${res.converged ? 'Yes' : 'No'}</span></div>
+        <div class="stat-item" style="grid-column: 1 / -1; display:flex; flex-direction:row; flex-wrap:wrap; gap:16px;">
+            <div style="flex:1;"><span class="stat-label">Required Features</span><span class="stat-value" style="font-size:0.9rem;">${res.required_features ? res.required_features.join(', ') || 'None' : 'None'}</span></div>
+            <div style="flex:1;"><span class="stat-label">Detected Features</span><span class="stat-value" style="font-size:0.9rem; color:var(--success);">${res.detected_features ? res.detected_features.join(', ') || 'None' : 'None'}</span></div>
+        </div>
+        <div class="stat-item" style="grid-column: 1 / -1; display:flex; flex-direction:row; flex-wrap:wrap; gap:16px;">
+            <div style="flex:1;"><span class="stat-label">Missing Features</span><span class="stat-value" style="font-size:0.9rem; color:var(--error);">${res.missing_features && res.missing_features.length > 0 ? res.missing_features.join(', ') : 'None'}</span></div>
+            <div style="flex:1;"><span class="stat-label">Hallucinated Features</span><span class="stat-value" style="font-size:0.9rem; color:var(--warning);">${res.hallucinated_features && res.hallucinated_features.length > 0 ? res.hallucinated_features.join(', ') : 'None'}</span></div>
+        </div>
+        ${res.failure_layer ? `<div class="stat-item" style="grid-column: 1 / -1;"><span class="stat-label">Failure Layer</span><span class="stat-value badge-fail">${res.failure_layer}</span></div>` : ''}
+    `;
+
     elements.jsonPreview.textContent = JSON.stringify(res, null, 2);
     elements.modal.classList.remove('hidden');
 };
