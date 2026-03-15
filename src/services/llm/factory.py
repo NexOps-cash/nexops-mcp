@@ -106,13 +106,21 @@ class LLMFactory:
 
         # 1. Specialist Chains
         if task_type == "phase1":
-            # Groq Llama 3.3 is reliable enough for JSON intent parsing
-            configs.append(LLMConfig(
-                GroqProvider(model="llama-3.3-70b-versatile"),
-                temperature=0.1,
-                label="Groq-Llama-3.3-Phase1-Primary",
-                max_tokens=_MAX_TOKENS["phase1"],
-            ))
+            # OpenRouter Llama 3.3 is cheap and reliable enough for JSON intent parsing
+            if has_openrouter:
+                configs.append(LLMConfig(
+                    OpenRouterProvider(model="meta-llama/llama-3.3-70b-instruct:free"),
+                    temperature=0.1,
+                    label="OpenRouter-Llama-3.3-Phase1-Primary",
+                    max_tokens=_MAX_TOKENS["phase1"],
+                ))
+            else:
+                configs.append(LLMConfig(
+                    GroqProvider(model="llama-3.3-70b-versatile"),
+                    temperature=0.1,
+                    label="Groq-Llama-3.3-Phase1-Primary",
+                    max_tokens=_MAX_TOKENS["phase1"],
+                ))
 
         elif task_type == "phase2":
             # Claude 4.6 Sonnet via OpenRouter — The latest SOTA (Released Feb 2026)
@@ -158,6 +166,12 @@ class LLMFactory:
                     OpenRouterProvider(model="anthropic/claude-haiku-4.5"),
                     temperature=0.0,
                     label="Claude-4.5-Haiku-Fix-Primary",
+                    max_tokens=_MAX_TOKENS["fix"],
+                ))
+                configs.append(LLMConfig(
+                    OpenRouterProvider(model="openai/gpt-4o-mini"),
+                    temperature=0.0,
+                    label="GPT-4o-mini-Fix-Secondary",
                     max_tokens=_MAX_TOKENS["fix"],
                 ))
                 configs.append(LLMConfig(
