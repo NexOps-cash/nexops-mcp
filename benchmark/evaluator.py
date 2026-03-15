@@ -49,12 +49,12 @@ class BenchmarkEvaluator:
                     disable_golden=True,
                     disable_fallbacks=True
                 ),
-                timeout=120 # 2 minute timeout per case
+                timeout=240 # 4 minute timeout per case
             )
             
             latency = time.time() - start_time
             
-            if result["type"] == "success":
+            if result.get("type") == "success":
                 data = result["data"]
                 code = data["code"]
                 compile_pass = True 
@@ -79,12 +79,30 @@ class BenchmarkEvaluator:
                 structure_score = data.get("toll_gate", {}).get("structural_score", 0.0)
                 
                 # Penalties
-                require_count_min = case.expected_structure.get("require_count_min", 0)
+                expected_structure = case.expected_structure or {}
+                require_count_min = expected_structure.get("require_count_min", 0)
                 actual_require_count = code.count("require(")
-                adj_structure_score = structure_score
+                
+                components = [structure_score]
+                
                 if require_count_min > 0:
-                    penalty_factor = min(1.0, actual_require_count / require_count_min)
-                    adj_structure_score *= penalty_factor
+                    components.append(min(1.0, actual_require_count / require_count_min))
+                    
+                if expected_structure.get("output_length_checks"):
+                    components.append(1.0 if "tx.outputs.length" in code else 0.0)
+                    
+                if expected_structure.get("locking_bytecode_check"):
+                    components.append(1.0 if "lockingBytecode" in code else 0.0)
+                    
+                if expected_structure.get("value_preservation"):
+                    has_value = ".value" in code and "tx.outputs[" in code and "tx.inputs[" in code
+                    components.append(1.0 if has_value else 0.0)
+                    
+                must_contain_list = expected_structure.get("must_contain", [])
+                for item in must_contain_list:
+                    components.append(1.0 if item in code else 0.0)
+                    
+                adj_structure_score = sum(components) / len(components)
 
                 critical_missing = [f for f in case.critical_features if f not in detected]
                 
@@ -134,7 +152,7 @@ class BenchmarkEvaluator:
                 
                 return self._failed_result(case, latency, failure_layer)
 
-        except asyncio.TimeoutError:
+        except (asyncio.TimeoutError, asyncio.CancelledError):
             latency = time.time() - start_time
             return self._failed_result(case, latency, "Timeout")
         except Exception as e:

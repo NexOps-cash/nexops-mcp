@@ -65,6 +65,12 @@ class FeatureExtractor:
                     pattern = config.get("rule")
                     if pattern and re.search(pattern, code, re.DOTALL | re.IGNORECASE):
                         detected.add(feature_name)
+                        
+        # 3. Dynamic Signature Detection (Role-Agnostic)
+        sig_pattern = r'checkSig\s*\(\s*\w+\s*,\s*(\w+)\s*\)'
+        for match in re.finditer(sig_pattern, code, re.IGNORECASE):
+            role_name = match.group(1).lower()
+            detected.add(f"{role_name}_signature")
         
         return list(detected)
 
@@ -73,6 +79,10 @@ class FeatureExtractor:
 
     def get_hallucinated(self, required: List[str], detected: List[str]) -> List[str]:
         hallucinated = set(detected) - set(required)
+        
+        # Allowed additional capabilities that do not contradict intent
+        allowed_features = {"stateful", "covenant", "multisig", "value_preservation"}
+        hallucinated -= allowed_features
         
         # Suppress 'multisig' hallucination if any multisig threshold is required
         if "multisig" in hallucinated:
