@@ -64,7 +64,9 @@ class GuardedPipelineEngine:
             api_key=api_key, 
             provider=provider,
             groq_key=groq_key,
-            openrouter_key=openrouter_key
+            openrouter_key=openrouter_key,
+            disable_golden=disable_golden,
+            disable_fallbacks=disable_fallbacks
         )
         ir.metadata.disable_golden = disable_golden
         ir.metadata.disable_fallbacks = disable_fallbacks

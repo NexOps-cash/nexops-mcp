@@ -267,7 +267,9 @@ class Phase1:
         api_key: Optional[str] = None,
         provider: Optional[str] = None,
         groq_key: Optional[str] = None,
-        openrouter_key: Optional[str] = None
+        openrouter_key: Optional[str] = None,
+        disable_golden: bool = False,
+        disable_fallbacks: bool = False
     ) -> ContractIR:
         """Call LLM to parse raw text into an IntentModel."""
 
@@ -285,6 +287,8 @@ class Phase1:
         # Parse LLM JSON response into IntentModel and wrap in ContractIR
         ir = _parse_phase1_response(raw_response, intent, security_level)
         ir.metadata.generation_phase = 1
+        ir.metadata.disable_golden = disable_golden
+        ir.metadata.disable_fallbacks = disable_fallbacks
 
         # ─── Feature Enrichment Layer (Deterministic) ───────────────────
         # LLM classifies. Engine enforces structure.
