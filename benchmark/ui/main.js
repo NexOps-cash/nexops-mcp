@@ -34,7 +34,8 @@ const elements = {
     codePreview: document.getElementById('code-preview'),
     statsPreview: document.getElementById('stats-preview'),
     jsonPreview: document.getElementById('json-preview'),
-    copyAiBtn: document.getElementById('copy-ai-btn')
+    copyAiBtn: document.getElementById('copy-ai-btn'),
+    rawJsonBtn: document.getElementById('raw-json-btn')
 };
 
 // Initialization
@@ -224,6 +225,14 @@ function attachEventListeners() {
         navigator.clipboard.writeText(markdown);
         elements.copyAiBtn.textContent = 'Copied!';
         setTimeout(() => elements.copyAiBtn.textContent = 'Copy Profile for AI', 2000);
+    };
+
+    elements.rawJsonBtn.onclick = () => {
+        if (!currentResults) return;
+        const rawJson = JSON.stringify(currentResults, null, 2);
+        navigator.clipboard.writeText(rawJson);
+        elements.rawJsonBtn.textContent = 'Copied!';
+        setTimeout(() => elements.rawJsonBtn.textContent = 'Raw JSON', 2000);
     };
 
     document.getElementById('close-modal').onclick = () => {
