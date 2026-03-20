@@ -67,6 +67,7 @@ class BenchmarkEvaluator:
                 # Extraction
                 detected = self.extractor.extract(code)
                 missing = self.extractor.get_missing(case.required_features, detected)
+                extraneous = self.extractor.get_extraneous(case.required_features, detected)
                 hallucinated = self.extractor.get_hallucinated(case.required_features, detected)
                 
                 # Intent Coverage
@@ -125,6 +126,7 @@ class BenchmarkEvaluator:
                     required_features=case.required_features,
                     detected_features=detected,
                     missing_features=missing,
+                    extraneous_features=extraneous,
                     hallucinated_features=hallucinated,
                     intent_coverage=intent_coverage,
                     final_score=final_score,
@@ -173,6 +175,7 @@ class BenchmarkEvaluator:
             required_features=case.required_features,
             detected_features=[],
             missing_features=case.required_features,
+            extraneous_features=[],
             hallucinated_features=[],
             intent_coverage=0.0,
             final_score=0.0,

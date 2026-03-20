@@ -30,6 +30,7 @@ class CaseResult(BaseModel):
     required_features: List[str]
     detected_features: List[str]
     missing_features: List[str]
+    extraneous_features: List[str] = []
     hallucinated_features: List[str]
     intent_coverage: float
     final_score: float
@@ -87,6 +88,7 @@ class BenchmarkReport(BaseModel):
     total_tokens_prompt: int
     total_tokens_completion: int
     total_cost_usd: float
+    avg_final_score: float = 0.0
     
     # Configuration Used
     model_name: Optional[str] = None

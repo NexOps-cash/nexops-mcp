@@ -85,11 +85,21 @@ async def list_results():
         try:
             with open(f, "r", encoding="utf-8") as r:
                 data = json.load(r)
+                
+                score = data.get("avg_final_score")
+                if score is None:
+                    # Legacy fallback
+                    case_results = data.get("results", [])
+                    if case_results:
+                        score = sum(r.get("final_score", 0) for r in case_results) / len(case_results)
+                    else:
+                        score = 0
+                
                 results.append({
                     "id": data.get("run_id"),
                     "suite": f.name,
                     "timestamp": data.get("start_time"),
-                    "score": data.get("avg_final_score") if data.get("avg_final_score") is not None else 0
+                    "score": score
                 })
         except (json.JSONDecodeError, FileNotFoundError):
             continue
@@ -101,7 +111,14 @@ async def get_result(run_id: str):
     for f in RESULTS_DIR.glob(f"{run_id}*.json"):
         try:
             with open(f, "r", encoding="utf-8") as r:
-                return json.load(r)
+                data = json.load(r)
+                if "avg_final_score" not in data:
+                    case_results = data.get("results", [])
+                    if case_results:
+                        data["avg_final_score"] = sum(r.get("final_score", 0) for r in case_results) / len(case_results)
+                    else:
+                        data["avg_final_score"] = 0.0
+                return data
         except (json.JSONDecodeError, FileNotFoundError):
             continue
     raise HTTPException(status_code=404, detail="Result not found or invalid")

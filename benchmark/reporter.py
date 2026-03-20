@@ -35,6 +35,7 @@ class BenchmarkReporter:
         total_tokens_p = 0
         total_tokens_c = 0
         total_cost = 0.0
+        total_score = 0.0
         
         for r in results:
             # Pattern aggregation
@@ -64,6 +65,7 @@ class BenchmarkReporter:
             case_cost = (t_p / 1000 * self.costs.get("prompt_1k", 0)) + \
                         (t_c / 1000 * self.costs.get("completion_1k", 0))
             total_cost += case_cost
+            total_score += r.final_score
             r.tokens_prompt = t_p
             r.tokens_completion = t_c
             r.cost_usd = case_cost
@@ -104,7 +106,8 @@ class BenchmarkReporter:
             avg_latency=total_latency / len(results) if results else 0,
             total_tokens_prompt=total_tokens_p,
             total_tokens_completion=total_tokens_c,
-            total_cost_usd=total_cost
+            total_cost_usd=total_cost,
+            avg_final_score=total_score / len(results) if results else 0.0
         )
         
         self.save_report(report)
