@@ -4,8 +4,8 @@ features:
     rule: 'tx\.(time|age)\b'
     description: "Timelock using tx.time or tx.age"
   multisig_2of2:
-    rule: '(checkSig\s*\([^)]*\).*){2}'
-    description: "Two signature checks present"
+    rule: 'checkSig\([^)]+\)\s*&&\s*checkSig\([^)]+\)'
+    description: "Two signature checks present in the same require statement"
   multisig_2of3:
     rule: 'checkMultiSig\s*\(\s*\[[^\]]+,[^\]]+\]\s*,\s*\[[^\]]+,[^\]]+,[^\]]+\]\s*\)'
     description: "2-of-3 threshold multisig"

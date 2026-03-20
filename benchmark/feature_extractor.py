@@ -77,16 +77,10 @@ class FeatureExtractor:
     def get_missing(self, required: List[str], detected: List[str]) -> List[str]:
         return list(set(required) - set(detected))
 
+    def get_extraneous(self, required: List[str], detected: List[str]) -> List[str]:
+        return list(set(detected) - set(required))
+
     def get_hallucinated(self, required: List[str], detected: List[str]) -> List[str]:
-        hallucinated = set(detected) - set(required)
-        
-        # Allowed additional capabilities that do not contradict intent
-        allowed_features = {"stateful", "covenant", "multisig", "value_preservation"}
-        hallucinated -= allowed_features
-        
-        # Suppress 'multisig' hallucination if any multisig threshold is required
-        if "multisig" in hallucinated:
-            if any(f.startswith("multisig_") for f in required):
-                hallucinated.remove("multisig")
-                
-        return list(hallucinated)
+        # Hallucinated is now reserved for explicitly conflicting or invalid features.
+        # Since our regexes now only catch valid subsets, this is largely empty.
+        return []

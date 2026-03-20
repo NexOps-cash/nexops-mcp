@@ -27,7 +27,7 @@ class SanityChecker:
             "escrow": [r"tx\.outputs", r"lockingBytecode"],
             "tokens": [r"tokenCategory", r"tokenAmount"],
             "minting": [r"tokenAmount"],
-            "stateful": [r"this\.lockingBytecode", r"activeInputIndex"],
+            "stateful": [r"this\.activeBytecode", r"activeInputIndex"],
         }
 
         # 1. Feature -> Pattern Evidence
