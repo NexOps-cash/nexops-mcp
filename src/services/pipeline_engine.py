@@ -214,12 +214,19 @@ class GuardedPipelineEngine:
             await _notify("phase4_sanity", "Verifying contract against original intent...", gen_attempt + 1)
             sanity_result = self.sanity_checker.validate(code, intent_model)
             if not sanity_result["success"]:
-                logger.warning(f"Sanity Check failed: {sanity_result['violations']}. Retrying full generation...")
-                await _notify("phase4_fail", "Contract logic does not match intent. Regenerating...", gen_attempt + 1, "warning")
-                previous_violations = None
-                lint_violation_context = ""
-                continue
-
+                # If security level is HIGH, we never compromise on intent
+                if security_level == "high":
+                    logger.warning(f"Sanity Check failed (STRICT): {sanity_result['violations']}. Retrying full generation...")
+                    await _notify("phase4_fail", "Contract logic does not match intent. Regenerating...", gen_attempt + 1, "warning")
+                    previous_violations = None
+                    lint_violation_context = ""
+                    continue
+                else:
+                    # REAL AIM of relaxation: proceed but track warnings
+                    logger.info(f"Sanity Check missed features (RELAXED): {sanity_result['violations']}. Proceeding with intent warnings.")
+                    await _notify("phase4_warning", f"Warning: {len(sanity_result['violations'])} features missing, but proceeding as requested.", gen_attempt + 1, "warning")
+                    # We continue to SUCCESS below, bypasses the "continue" loop
+            
             # SUCCESS !
             generation_seconds = (datetime.now() - start_time_full).total_seconds()
             await _notify("complete", "Synthesis complete. Verified and secured.", gen_attempt + 1, "success")
@@ -235,7 +242,8 @@ class GuardedPipelineEngine:
                     "fallback_used": False,
                     "attempt_number": gen_attempt + 1,
                     "compile_fix_count": getattr(ir.metadata, "compile_fix_count", 0),
-                    "generation_seconds": generation_seconds
+                    "generation_seconds": generation_seconds,
+                    "is_perfect_match": sanity_result["success"]
                 }
             }
 

@@ -109,7 +109,7 @@ class LLMFactory:
             # OpenRouter Llama 3.3 is cheap and reliable enough for JSON intent parsing
             if has_openrouter:
                 configs.append(LLMConfig(
-                    OpenRouterProvider(model="meta-llama/llama-3.3-70b-instruct:free"),
+                    OpenRouterProvider(model="meta-llama/llama-3.3-70b-instruct"),
                     temperature=0.1,
                     label="OpenRouter-Llama-3.3-Phase1-Primary",
                     max_tokens=_MAX_TOKENS["phase1"],
