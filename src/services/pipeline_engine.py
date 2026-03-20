@@ -372,10 +372,33 @@ class GuardedPipelineEngine:
             fixed = code.replace("?", "")
             logger.info("[Fix] Deterministic: stripped unsupported ternary '?' token")
             return fixed.strip()
+        # ── Deterministic: 'Token recognition error at .a' ──────────────────────
+        # AI confuses this.activeBytecode (self-reference) with tx.outputs[N].activeBytecode
+        # (which doesn't exist). The correct output field is .lockingBytecode.
+        if "Token recognition error" in error_raw and ".a" in error_raw:
+            # Fix 1: tx.outputs[N].activeBytecode → tx.outputs[N].lockingBytecode
+            fixed = _re.sub(
+                r"(tx\.outputs\[.*?\])\.activeBytecode",
+                r"\1.lockingBytecode",
+                code,
+            )
+            # Fix 2: output.activeBytecode → this.activeBytecode (rare but seen)
+            fixed = _re.sub(
+                r"\boutput\.activeBytecode\b",
+                "this.activeBytecode",
+                fixed,
+            )
+            if fixed != code:
+                logger.info("[Fix] Deterministic: replaced .activeBytecode on outputs with .lockingBytecode")
+                return fixed.strip()
         # ── LLM fallback for non-deterministic errors ────────────────────────────
         from src.services.llm.factory import LLMFactory
         import json
-        unified_rules = build_unified_dsl_rules()
+        from src.services.pipeline import build_pattern_rails
+        tags = ir.metadata.intent_model.features if ir.metadata.intent_model else []
+        contract_type = ir.metadata.intent_model.contract_type if ir.metadata.intent_model else ""
+        pattern_rails = build_pattern_rails(tags, contract_type=contract_type)
+
         system = f"""You are performing CashScript syntax repair ONLY.
 You MUST preserve ALL structural invariants below.
 You MUST NOT weaken value anchoring.
@@ -383,7 +406,11 @@ You MUST NOT introduce hardcoded indices.
 You MUST NOT remove output length guards.
 You MUST NOT change business logic, thresholds, or signatures.
 Fix ONLY token-level grammar errors shown in the compiler error.
+
 {unified_rules}
+
+{pattern_rails}
+
 Return ONLY the complete fixed .cash source. No markdown. No explanation."""
         error_payload = json.dumps(error_obj, indent=2)
         user = f"""STRUCTURED COMPILER ERROR (JSON):
