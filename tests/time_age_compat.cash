@@ -1,0 +1,9 @@
+pragma cashscript ^0.13.0;
+contract TimeTest() {
+    function testTime(int lock) {
+        require(tx.time >= lock);
+    }
+    function testAge(int age) {
+        require(this.age >= age);
+    }
+}
