@@ -1,0 +1,75 @@
+# =========================
+# Pattern: timelock
+# =========================
+- id: tl_001
+  pattern: timelock
+  difficulty: easy
+  intent: |
+    Create a contract where funds can only be spent after block height 800000.
+  required_features:
+    - time_validation
+    - signature_verification
+  critical_features:
+    - locktime_check
+  expected_structure:
+    require_count_min: 3
+  tags: ["timelock", "basic"]
+
+- id: tl_002
+  pattern: timelock
+  difficulty: medium
+  intent: |
+    Lock funds until timestamp 1735689600 (Jan 1, 2025), then allow owner to spend with signature.
+  required_features:
+    - time_validation
+    - signature_verification
+    - timestamp_based
+  critical_features:
+    - locktime_check
+    - valid_signature_check
+  expected_structure:
+    require_count_min: 3
+  tags: ["timelock", "timestamp"]
+
+- id: tl_003
+  pattern: timelock
+  difficulty: medium
+  intent: |
+    Create a savings contract that locks funds for 52560 blocks (approximately 1 year) before allowing withdrawal.
+  required_features:
+    - time_validation
+    - signature_verification
+    - block_height_based
+  critical_features:
+    - locktime_check
+  expected_structure:
+    require_count_min: 3
+  tags: ["timelock", "savings"]
+
+- id: tl_004
+  pattern: timelock
+  difficulty: hard
+  intent: |
+    FAILURE CASE: Contract uses tx.timestamp instead of tx.locktime for timelock validation.
+  required_features:
+    - time_validation
+  critical_features:
+    - must_fail_wrong_time_field
+  expected_structure:
+    require_count_min: 2
+  tags: ["timelock", "failure", "vulnerability"]
+
+- id: tl_005
+  pattern: timelock
+  difficulty: hard
+  intent: |
+    Create a contract with relative timelock that requires waiting 144 blocks after funding before spending.
+  required_features:
+    - time_validation
+    - signature_verification
+    - relative_timelock
+  critical_features:
+    - sequence_check
+  expected_structure:
+    require_count_min: 3
+  tags: ["timelock", "relative"]

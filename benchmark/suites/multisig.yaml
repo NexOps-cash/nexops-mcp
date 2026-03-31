@@ -1,0 +1,95 @@
+# =========================
+# Pattern: multisig
+# =========================
+- id: ms_001
+  pattern: multisig
+  difficulty: medium
+  intent: |
+    Create a 2-of-2 multisig contract requiring both Alice and Bob to sign for spending.
+  required_features:
+    - signature_verification
+    - multisig
+    - token_validation
+  critical_features:
+    - valid_signature_check
+    - both_signatures_required
+  expected_structure:
+    require_count_min: 4
+  tags: ["multisig", "2of2"]
+
+- id: ms_002
+  pattern: multisig
+  difficulty: hard
+  intent: |
+    Create a 2-of-3 multisig contract where any 2 signatures from Alice, Bob, or Carol are sufficient.
+  required_features:
+    - signature_verification
+    - multisig
+    - token_validation
+  critical_features:
+    - valid_signature_check
+    - two_of_three_logic
+  expected_structure:
+    require_count_min: 4
+  tags: ["multisig", "2of3"]
+
+- id: ms_003
+  pattern: multisig
+  difficulty: hard
+  intent: |
+    Create a 3-of-5 multisig contract requiring any 3 valid signatures from a group of 5 parties.
+  required_features:
+    - signature_verification
+    - multisig
+    - token_validation
+  critical_features:
+    - valid_signature_check
+    - three_of_five_logic
+  expected_structure:
+    require_count_min: 4
+  tags: ["multisig", "3of5"]
+
+- id: ms_004
+  pattern: multisig
+  difficulty: hard
+  intent: |
+    FAILURE CASE: 2-of-3 multisig that accepts pubkey parameters, allowing signature substitution attack.
+  required_features:
+    - signature_verification
+    - multisig
+  critical_features:
+    - must_fail_pubkey_substitution
+  expected_structure:
+    require_count_min: 2
+  tags: ["multisig", "failure", "vulnerability"]
+
+- id: ms_005
+  pattern: multisig
+  difficulty: hard
+  intent: |
+    FAILURE CASE: Multisig contract that doesn't prevent duplicate signatures from same signer.
+  required_features:
+    - signature_verification
+    - multisig
+  critical_features:
+    - must_fail_duplicate_signer
+  expected_structure:
+    require_count_min: 2
+  tags: ["multisig", "failure", "vulnerability"]
+
+- id: ms_006
+  pattern: multisig
+  difficulty: medium
+  intent: |
+    Create a 2-of-2 multisig with emergency backup: requires Alice+Bob normally, or Alice+Carol after 90 days.
+  required_features:
+    - signature_verification
+    - multisig
+    - time_validation
+    - multiple_paths
+  critical_features:
+    - valid_signature_check
+    - locktime_check
+  expected_structure:
+    require_count_min: 5
+  tags: ["multisig", "backup", "timelock"]

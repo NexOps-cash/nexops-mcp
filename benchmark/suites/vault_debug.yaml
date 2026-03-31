@@ -1,0 +1,36 @@
+
+- id: v_001
+  pattern: vault
+  difficulty: hard
+  intent: |
+    Create a vault with 2-step withdrawal: announce withdrawal to staging, then claim after 24 hour delay.
+  required_features:
+    - signature_verification
+    - covenant_continuation
+    - time_validation
+    - output_destination_validation
+    - token_validation
+  critical_features:
+    - valid_signature_check
+    - covenant_self_reference
+    - locktime_check
+  expected_structure:
+    require_count_min: 6
+  tags: ["vault", "delayed_withdrawal"]
+
+- id: v_002
+  pattern: vault
+  difficulty: hard
+  intent: |
+    Create a vault with hot wallet spending limit: can withdraw up to 1000000 sats immediately, larger amounts need delay.
+  required_features:
+    - signature_verification
+    - output_value_validation
+    - covenant_continuation
+    - multiple_paths
+  critical_features:
+    - output_amount_check
+    - amount_threshold_logic
+  expected_structure:
+    require_count_min: 6
+  tags: ["vault", "spending_limit"]

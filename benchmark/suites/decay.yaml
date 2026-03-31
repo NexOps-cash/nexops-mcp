@@ -1,0 +1,47 @@
+- id: dec_001
+  pattern: decay
+  difficulty: medium
+  intent: |
+    Create a linear price decay contract where payout decreases over time from startPrice to endPrice.
+  required_features:
+    - time_validation
+    - output_value_validation
+    - multiple_paths
+  critical_features:
+    - locktime_check
+    - output_amount_check
+  expected_structure:
+    require_count_min: 4
+  tags: ["decay", "linear_decay", "time_based"]
+
+- id: dec_002
+  pattern: decay
+  difficulty: hard
+  intent: |
+    Create a streaming-like decay payout where withdrawable amount is proportional to elapsed time,
+    with strict bounds so claimed value never exceeds total deposited value.
+  required_features:
+    - time_validation
+    - output_value_validation
+    - stateful
+  critical_features:
+    - locktime_check
+    - output_amount_check
+  expected_structure:
+    require_count_min: 5
+  tags: ["decay", "streaming", "stateful"]
+
+- id: dec_003
+  pattern: decay
+  difficulty: hard
+  intent: |
+    FAILURE CASE: decay contract that uses a made-up unsupported formula and does not validate
+    bounds on elapsed time and resulting payout.
+  required_features:
+    - time_validation
+    - output_value_validation
+  critical_features:
+    - must_fail_missing_total_validation
+  expected_structure:
+    require_count_min: 3
+  tags: ["decay", "failure", "vulnerability"]
