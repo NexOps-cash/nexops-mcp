@@ -1,0 +1,12 @@
+- id: batch4_linear_vesting
+  pattern: vesting
+  difficulty: medium
+  intent: "linear token vesting releasing proportionally over time"
+  required_features:
+    - owner_signature
+    - timelock_refund
+  critical_features:
+    - timelock_refund
+  expected_structure:
+    require_count_min: 3
+  tags: ["batch4", "vesting", "linear"]

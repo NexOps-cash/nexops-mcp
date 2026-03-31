@@ -60,7 +60,7 @@ def print_table(headers, data):
     print("-" * (sum(col_widths) + 3 * (len(headers) - 1)) + "\n")
 
 async def run_test(test_case: Dict[str, str], engine) -> Dict[str, Any]:
-    print(f"\n{BLUE}🚀 Running: {test_case['name']}{RESET}")
+    print(f"\n{BLUE}[RUNNING] {test_case['name']}{RESET}")
     start_time = time.time()
     metrics = {"id": test_case["id"], "name": test_case["name"], "mode": "N/A", "dsl_lint": "Unknown", "compile": "Fail", "tg_viol": "0", "score": "0.00", "converged": "NO", "failure_layer": "Unknown", "code": ""}
     try:
@@ -68,7 +68,7 @@ async def run_test(test_case: Dict[str, str], engine) -> Dict[str, Any]:
         if result["type"] == "success":
             data = result["data"]
             metrics.update({"mode": data["intent_model"].get("contract_type", "unknown"), "dsl_lint": "PASS", "compile": "PASS", "tg_viol": str(len(data["toll_gate"]["violations"])), "score": f"{data['toll_gate']['structural_score']:.2f}", "converged": "YES" if len(data["toll_gate"]["violations"]) == 0 else "PARTIAL", "failure_layer": "-", "code": data["code"]})
-            print(f"\n{GREEN}✅ CONVERGED RESULT:{RESET}\n{CYAN}{data['code']}{RESET}")
+            print(f"\n{GREEN}[SUCCESS] CONVERGED RESULT:{RESET}\n{CYAN}{data['code']}{RESET}")
         else:
             error = result.get("error", {}); msg = error.get("message", ""); last_err = error.get("last_compiler_error", "")
             metrics["converged"] = "NO"
@@ -77,9 +77,9 @@ async def run_test(test_case: Dict[str, str], engine) -> Dict[str, Any]:
             elif "exhausted" in str(msg).lower(): metrics["failure_layer"] = "Compile/Fix"
             else: metrics["failure_layer"] = "Unknown"
             metrics["compile"] = f"ERR: {last_err[:30]}..." if last_err else "Fail"
-            print(f"\n{RED}❌ FAILED: {metrics['failure_layer']} - {metrics['compile']}{RESET}")
+            print(f"\n{RED}[FAILED] {metrics['failure_layer']} - {metrics['compile']}{RESET}")
     except Exception as e:
-        print(f"\n{RED}💥 CRASH: {str(e)}{RESET}"); metrics["converged"] = "CRASH"; metrics["failure_layer"] = f"Exception: {str(e)[:30]}"
+        print(f"\n{RED}[CRASH] {str(e)}{RESET}"); metrics["converged"] = "CRASH"; metrics["failure_layer"] = f"Exception: {str(e)[:30]}"
     return metrics
 
 async def main():

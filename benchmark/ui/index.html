@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NexOps | Evaluation Console</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=8">
+</head>
+<body>
+    <div class="app-wrapper" style="display: flex; gap: 32px; max-width: 1400px; margin: 0 auto; padding: 32px 24px; align-items: flex-start;">
+        <!-- History Sidebar -->
+        <aside class="sidebar">
+            <h3 class="sidebar-title">Run History</h3>
+            <div id="history-list" class="history-list">
+                <div style="font-size: 0.875rem; color: var(--text-muted);">Loading...</div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Input section -->
+        <section id="input-view" class="view active">
+            <div class="input-card">
+                <h2>New Evaluation Run</h2>
+                <textarea id="yaml-input" placeholder="- id: test_case_1\n  pattern: vesting..."></textarea>
+                <div style="display: flex; gap: 16px;">
+                    <button id="run-btn" class="btn-primary">Start Execution</button>
+                    <button id="load-last-btn" class="btn-secondary">Load Latest Result</button>
+                </div>
+                <!-- Live Execution Console moved here -->
+                <div id="log-console" class="log-console" style="margin-top: 24px; display: none;">
+                    <div class="log-placeholder">Waiting for benchmark start...</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Evaluation Report View -->
+        <section id="result-view" class="view">
+            <header class="app-header">
+                <div style="display: flex; justify-content: space-between; align-items: flex-end;">
+                    <div>
+                        <h1>NexOps Contract Generation Benchmark</h1>
+                        <p>Deterministic AI Pipeline Evaluation for CashScript</p>
+                    </div>
+                    <div>
+                        <button id="new-btn" class="btn-secondary">New Run</button>
+                    </div>
+                </div>
+            </header>
+
+            <div class="run-metadata">
+                <div class="meta-item">
+                    <span class="meta-label">RUN ID</span>
+                    <span class="meta-value" id="meta-run-id">--</span>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-label">DATASET HASH</span>
+                    <span class="meta-value" id="meta-dataset-hash">--</span>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-label">MODEL VERSION</span>
+                    <span class="meta-value" id="meta-model-version">claude-sonnet-4.6</span>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-label">TOTAL CASES</span>
+                    <span class="meta-value" id="meta-total-cases">--</span>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-label">ELAPSED TIME</span>
+                    <span class="meta-value" id="meta-elapsed">--</span>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-label">API COST</span>
+                    <span class="meta-value" id="meta-cost">--</span>
+                </div>
+            </div>
+
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <span class="label">Compile Rate</span>
+                    <span class="value" id="metric-compile">--</span>
+                </div>
+                <div class="metric-card">
+                    <span class="label">Convergence Rate</span>
+                    <span class="value" id="metric-convergence">--</span>
+                </div>
+                <div class="metric-card">
+                    <span class="label">Intent Coverage</span>
+                    <span class="value" id="metric-intent">--</span>
+                </div>
+                <div class="metric-card">
+                    <span class="label">Avg Score</span>
+                    <span class="value" id="metric-score">--</span>
+                </div>
+            </div>
+
+            <div class="charts-section">
+                <!-- Difficulty chart -->
+                <div class="chart-card">
+                    <h3>Difficulty Distribution</h3>
+                    <div id="diff-chart-container"></div>
+                </div>
+                <!-- Latency chart -->
+                <div class="chart-card">
+                    <h3>Latency Histogram</h3>
+                    <div id="lat-chart-container"></div>
+                </div>
+            </div>
+
+            <div class="section-header">
+                <h3>Analytical Grid</h3>
+            </div>
+            <div class="table-container">
+                <table id="results-table">
+                    <thead>
+                        <tr>
+                            <th>Test Case ID</th>
+                            <th>Difficulty</th>
+                            <th>Compile</th>
+                            <th>Intent Coverage</th>
+                            <th>Latency</th>
+                            <th>Score</th>
+                        </tr>
+                    </thead>
+                    <tbody id="results-body">
+                        <!-- Injected via JS -->
+                    </tbody>
+                </table>
+            </div>
+        </section>
+        </div>
+    </div>
+
+    <!-- Forensic Inspection Modal -->
+    <div id="modal" class="modal-overlay">
+        <div class="modal-panel">
+            <div class="modal-header">
+                <h2 id="modal-title">Inspection</h2>
+                <button id="close-modal" class="btn-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                
+                <div class="forensic-section">
+                    <h3>Test Metadata</h3>
+                    <div class="forensic-kv"><span class="k">Difficulty:</span><span class="v" id="f-difficulty">--</span></div>
+                    <div class="forensic-kv"><span class="k">Compile Pass:</span><span class="v" id="f-compile">--</span></div>
+                    <div class="forensic-kv"><span class="k">Converged:</span><span class="v" id="f-converged">--</span></div>
+                    <div class="forensic-kv"><span class="k">Retries Used:</span><span class="v" id="f-retries">--</span></div>
+                    <div class="forensic-kv"><span class="k">Latency:</span><span class="v" id="f-latency">--</span></div>
+                    <div class="forensic-kv"><span class="k">Tokens (P/C):</span><span class="v" id="f-tokens">--</span></div>
+                </div>
+
+                <div class="forensic-section">
+                    <h3>Intent Requirements</h3>
+                    <ul class="feature-list" id="f-req-features"></ul>
+                </div>
+
+                <div class="forensic-section">
+                    <h3>Detected Features</h3>
+                    <ul class="feature-list" id="f-det-features"></ul>
+                </div>
+
+                <div class="forensic-section" id="f-analysis-section">
+                    <h3>Analysis</h3>
+                    <div class="forensic-kv" style="display:block; margin-bottom: 8px;">
+                        <span class="k" style="display:block; margin-bottom: 4px;">Missing Features:</span>
+                        <ul class="feature-list" id="f-mis-features"></ul>
+                    </div>
+                    <div class="forensic-kv" style="display:block; margin-bottom: 8px;">
+                        <span class="k" style="display:block; margin-bottom: 4px;">Extraneous Features:</span>
+                        <ul class="feature-list" id="f-ext-features"></ul>
+                    </div>
+                    <div class="forensic-kv" style="display:block; margin-bottom: 8px;">
+                        <span class="k" style="display:block; margin-bottom: 4px;">Hallucinated Features:</span>
+                        <ul class="feature-list" id="f-hal-features"></ul>
+                    </div>
+                    <div class="forensic-kv" id="f-failure-layer-container" style="display:block; margin-top: 12px;">
+                        <span class="k" style="display:block; margin-bottom: 4px; color: var(--error);">Failure Layer:</span>
+                        <div class="v" id="f-failure-layer" style="color: var(--error); word-wrap: break-word;"></div>
+                    </div>
+                </div>
+
+                <div class="forensic-section">
+                    <h3>Execution Trace (Generated Code)</h3>
+                    <div class="code-block" id="f-code"></div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script src="main.js?v=10"></script>
+</body>
+</html>

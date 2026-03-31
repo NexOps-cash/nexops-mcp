@@ -201,12 +201,44 @@ _SWAP_RAIL = """
 - Timeout branch: require(tx.time >= timeout); require(checkSig(refundSig, refundPubkey));
 """
 
-def build_pattern_rails(tags: List[str]) -> str:
+_VAULT_RAIL = """
+[RAIL: EXCLUSIVE VAULT RULES — NON-NEGOTIABLE ORDER]
+
+CRITICAL: Before accessing ANY tx.outputs[i], you MUST write the length guard FIRST:
+  require(tx.outputs.length == N);   ← THIS MUST BE LINE 1 of every function that touches outputs
+
+INTERMEDIATE STATE (Announcement / Start):
+  Step 1: require(tx.outputs.length == 2);
+  Step 2: require(tx.outputs[0].lockingBytecode == this.activeBytecode);   ← re-anchor
+  Step 3: require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value - withdrawAmount);
+  Step 4: require(checkSig(sig, owner));
+
+DELAYED CLAIM (Finalize / Claim):
+  Step 1: require(tx.outputs.length == 1);
+  Step 2: require(tx.age >= delaySeconds);
+  Step 3: require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+  Step 4: require(checkSig(sig, owner));
+  NOTE: Do NOT use this.activeBytecode in finalize — funds exit the contract.
+
+EMERGENCY / CANCEL:
+  Step 1: require(tx.outputs.length == 1);
+  Step 2: require(checkSig(sig, backupOwner));
+  Step 3: require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+  NOTE: MAY re-anchor if cancel (keep funds in vault), or exit if emergency.
+
+FORBIDDEN (causes compile or security failure):
+  - NEVER access tx.outputs[i] without a preceding require(tx.outputs.length >= i+1)
+  - NEVER use this.activeBytecode in a terminal payout (finalize/claim/emergency-exit)
+  - NEVER subtract fees from value inline (use named constructor param instead)
+"""
+
+def build_pattern_rails(tags: List[str], contract_type: str = "") -> str:
     rails = []
     if "split" in tags: rails.append(_SPLIT_RAIL)
     if "tokens" in tags or "nft" in tags: rails.append(_NFT_RAIL)
     if "escrow" in tags: rails.append(_ESCROW_RAIL)
     if "swap" in tags or "htlc" in tags: rails.append(_SWAP_RAIL)
+    if contract_type == "vault": rails.append(_VAULT_RAIL)
     return "\n".join(rails)
 
 # ─── Structured Knowledge Loader ─────────────────────────────────────
@@ -267,7 +299,9 @@ class Phase1:
         api_key: Optional[str] = None,
         provider: Optional[str] = None,
         groq_key: Optional[str] = None,
-        openrouter_key: Optional[str] = None
+        openrouter_key: Optional[str] = None,
+        disable_golden: bool = False,
+        disable_fallbacks: bool = False
     ) -> ContractIR:
         """Call LLM to parse raw text into an IntentModel."""
 
@@ -285,6 +319,8 @@ class Phase1:
         # Parse LLM JSON response into IntentModel and wrap in ContractIR
         ir = _parse_phase1_response(raw_response, intent, security_level)
         ir.metadata.generation_phase = 1
+        ir.metadata.disable_golden = disable_golden
+        ir.metadata.disable_fallbacks = disable_fallbacks
 
         # ─── Feature Enrichment Layer (Deterministic) ───────────────────
         # LLM classifies. Engine enforces structure.
@@ -410,7 +446,9 @@ class Phase2:
         contract_type = intent_model.contract_type if intent_model else ""
 
         # ─── Routing Bridge ────────────────────────────────────────────
-        if contract_type in _GOLDEN_TYPE_MAP:
+        disable_golden = ir.metadata.disable_golden if ir.metadata else False
+        
+        if contract_type in _GOLDEN_TYPE_MAP and not disable_golden:
             logger.info(f"[Phase 2] Routing: GOLDEN_ADAPTATION (type={contract_type})")
             code = await _golden_phase2(
                 ir=ir,
@@ -604,7 +642,18 @@ async def _free_phase2(
     raw_response = await llm.complete(user_prompt, system=system_prompt, temperature=temperature)
 
     # Extract .cash code from response
-    return _extract_cash_code(raw_response)
+    code = _extract_cash_code(raw_response)
+    
+    # ── Deterministic Post-Gen Sanitizer ─────────────────────────────────────────
+    # Fix AI confusing this.activeBytecode (self-reference) with tx.outputs[N].activeBytecode
+    # (which doesn't exist in CashScript — causes "Token recognition error at: '.a'")
+    import re as _re
+    sanitized = _re.sub(r"(tx\.outputs\[.*?\])\.activeBytecode", r"\1.lockingBytecode", code)
+    if sanitized != code:
+        logger.warning("[Phase2][Sanitizer] Fixed tx.outputs[N].activeBytecode -> .lockingBytecode (AI field confusion)")
+        code = sanitized
+    
+    return code
 
 
 # ─── Phase 3: Structural Toll Gate ───────────────────────────────────
@@ -730,9 +779,11 @@ def _build_phase2_prompt(
     # ── SYSTEM PROMPT (static, cacheable) ──────────────────────────────
     if effective_mode == "vault":
         covenant_rule = (
-            "VAULT MODE: require(tx.outputs.length <= 2); "
-            "require(tx.outputs[0].lockingBytecode == this.activeBytecode); "
-            "require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value - tx.outputs[1].value); "
+            "VAULT MODE: Each function MUST start with require(tx.outputs.length == N) "
+            "BEFORE accessing ANY tx.outputs[i]. N=2 for announcement (re-anchor + change), "
+            "N=1 for finalize/emergency (payout only). "
+            "Announcement: re-anchor output[0] with lockingBytecode == this.activeBytecode. "
+            "Finalize/Emergency: DO NOT use this.activeBytecode (terminal exit)."
         )
     elif needs_covenant:
         covenant_rule = (
@@ -764,7 +815,10 @@ def _build_phase2_prompt(
         )
 
     unified_rules = build_unified_dsl_rules()
-    pattern_rails = build_pattern_rails(intent_model.features if intent_model else [])
+    pattern_rails = build_pattern_rails(
+        intent_model.features if intent_model else [],
+        contract_type=intent_model.contract_type if intent_model else ""
+    )
 
     system_prompt = f"""You are a Secure CashScript Code Generator. Output ONLY compilable CashScript ^0.13.0 code.
 

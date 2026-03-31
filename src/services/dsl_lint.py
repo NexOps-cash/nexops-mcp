@@ -200,7 +200,14 @@ def _check_value_anchoring(code: str, contract_mode: str = "") -> list[dict]:
             body, re.DOTALL
         ))
 
-        has_value_anchor = direct_anchor or sum_anchor
+        # Accept partial anchor: value == inputValue - withdrawalAmount (valid for multi-output vaults)
+        # require(tx.outputs[N].value == tx.inputs[this.activeInputIndex].value - amount)
+        partial_anchor = bool(re.search(
+            r"require\s*\(\s*tx\.outputs\[\d+\]\.value\s*==\s*" + input_pattern + r"\s*-\s*[\w\d]+\s*\)",
+            body, re.DOTALL
+        ))
+
+        has_value_anchor = direct_anchor or sum_anchor or partial_anchor
         if not has_value_anchor:
             violations.append({
                 "rule_id": "LNC-003",
@@ -290,8 +297,12 @@ def _check_fee_arithmetic(code: str, contract_mode: str = "") -> list[dict]:
 
 def _check_wrong_self_reference(code: str) -> list[dict]:
     """
-    LNC-006: Detect use of this.lockingBytecode which does NOT exist in CashScript ^0.13.0.
-    The correct field is this.activeBytecode.
+    LNC-006: Detect invalid self-reference and field confusion.
+    
+    Two cases:
+    a) this.lockingBytecode — does NOT exist in CashScript ^0.13.0 (use this.activeBytecode)
+    b) tx.outputs[N].activeBytecode — does NOT exist on outputs (use tx.outputs[N].lockingBytecode)
+       Note: this.activeBytecode IS valid for self-reference, but NOT on tx.outputs[N]
     """
     violations = []
     for lineno, line in _lines(code):
@@ -301,6 +312,19 @@ def _check_wrong_self_reference(code: str) -> list[dict]:
                 "message": (
                     "this.lockingBytecode does NOT exist in CashScript ^0.13.0. "
                     "Use this.activeBytecode instead."
+                ),
+                "line_hint": lineno,
+            })
+        # Catch AI confusion: tx.outputs[N].activeBytecode is invalid
+        # The correct field on outputs is .lockingBytecode
+        # this.activeBytecode (self-reference) is a different concept
+        if re.search(r"tx\.outputs\[.*?\]\.activeBytecode", line):
+            violations.append({
+                "rule_id": "LNC-006",
+                "message": (
+                    "tx.outputs[N].activeBytecode does NOT exist. "
+                    "Use tx.outputs[N].lockingBytecode for output locking script comparison. "
+                    "Note: this.activeBytecode is only valid for self-reference (NOT on tx.outputs)."
                 ),
                 "line_hint": lineno,
             })
@@ -460,8 +484,17 @@ def _check_covenant_self_anchor(code: str, contract_mode: str = "") -> list[dict
     violations = []
     for func_name, body, start_lineno in _function_bodies(code):
         # EXCEPTION: Terminal / exit functions that intentionally do NOT perpetuate the contract.
-        # burn, refund, claim, withdraw, drain, close, liquidate, sweep functions explicitly end the contract lifecycle.
-        TERMINAL_FUNC_NAMES = re.compile(r"\b(burn|refund|claim|withdraw|exit|drain|close|liquidate|sweep)\w*\b", re.IGNORECASE)
+        # These explicitly end the contract lifecycle — no self-anchor is correct here.
+        # Vault-specific: finalize*, claim*, full*, recover*, emergency*, guardian*, guardian*, cancel* (when exiting)
+        TERMINAL_FUNC_NAMES = re.compile(
+            r"\b("
+            r"burn|refund|claim|withdraw|exit|drain|close|liquidate|sweep"
+            r"|finalize|finalise|release|payout|pay|redeem|execute|settle"
+            r"|emergency|recover|recovery|guardian|guardianRecovery"
+            r"|fullWithdraw|fullSpend|finalWithdraw|complete"
+            r")\w*\b",
+            re.IGNORECASE
+        )
         if TERMINAL_FUNC_NAMES.search(func_name):
             continue
 
@@ -471,8 +504,8 @@ def _check_covenant_self_anchor(code: str, contract_mode: str = "") -> list[dict
         if not (touches_outputs or touches_tokens):
             continue
 
-        # Must have a lockingBytecode self-anchor
-        # Matches: tx.outputs[...].lockingBytecode == this.activeBytecode
+        # Must include a self-anchor in at least one output
+        # Matches: tx.outputs[ANY_INDEX].lockingBytecode == this.activeBytecode
         has_self_anchor = bool(re.search(
             r"tx\.outputs\[.*?\]\.lockingBytecode\s*==\s*this\.activeBytecode",
             body,
@@ -484,13 +517,17 @@ def _check_covenant_self_anchor(code: str, contract_mode: str = "") -> list[dict
         ))
 
         if not (has_self_anchor or has_input_self_anchor):
+            msg = (
+                f"Covenant function '{func_name}' (mode={mode}) has no self-anchor: "
+                "require(tx.outputs[N].lockingBytecode == this.activeBytecode). "
+                "Stateful/token contracts must perpetuate themselves."
+            )
+            if mode == "vault":
+                msg += " Hint: Vault intermediate states (like announce/start) MUST re-anchor the contract logic."
+
             violations.append({
                 "rule_id": "LNC-008",
-                "message": (
-                    f"Covenant function '{func_name}' (mode={mode}) has no self-anchor: "
-                    "require(tx.outputs[N].lockingBytecode == this.activeBytecode). "
-                    "Stateful/token contracts must perpetuate themselves."
-                ),
+                "message": msg,
                 "line_hint": start_lineno,
             })
 
@@ -756,6 +793,45 @@ def _check_locking_bytecode_constructor(code: str) -> list[dict]:
 
     return violations
 
+def _check_value_preservation(code: str, contract_mode: str = "") -> list[dict]:
+    """
+    LNC-016: Value Preservation Guard.
+    Ensures that if a covenant re-anchors itself (Self-Continuation), it also 
+    constrains the value of the continuation output.
+    
+    If it re-anchors WITHOUT a value guard, the funds are 'leaked' (e.g., spent as fees).
+    """
+    violations = []
+    for func_name, body, start_lineno in _function_bodies(code):
+        # 1. Detect self-anchor
+        m_anchor = re.search(r"tx\.outputs\[(\d+)\]\.lockingBytecode\s*==\s*this\.activeBytecode", body)
+        if not m_anchor:
+            continue
+            
+        idx = m_anchor.group(1)
+        
+        # 2. Check for value constraint on the SAME index
+        # Must be either equality (tx.outputs[idx].value == ...) or sum preservation
+        has_value_guard = bool(re.search(
+            rf"tx\.outputs\[{idx}\]\.value\s*==\s*", body
+        )) or bool(re.search(
+            rf"tx\.outputs\[{idx}\]\.value\s*\+", body
+        ))
+        
+        if not has_value_guard:
+            lineno = start_lineno + body[: m_anchor.start()].count("\n")
+            violations.append({
+                "rule_id": "LNC-016",
+                "message": (
+                    f"Self-anchor detected at tx.outputs[{idx}] in '{func_name}' but NO "
+                    "value preservation guard found. The contract may lose funds "
+                    "during state transition."
+                ),
+                "line_hint": lineno,
+            })
+            
+    return violations
+
 # ── Main DSLLinter class ──────────────────────────────────────────────────────
 
 class DSLLinter:
@@ -781,6 +857,7 @@ class DSLLinter:
         _check_mint_authority,           # LNC-013  (token/minting mode only)
         _check_token_pair_completeness,  # LNC-014  (any code touching tokens)
         _check_locking_bytecode_constructor,  # LNC-015  (P2PKH/P2SH constructor safety)
+        _check_value_preservation,       # LNC-016  (Self-anchor + Value continuity)
         _check_forbidden_syntax,         # LNC-009  (ternary, loops, etc.)
     ]
 

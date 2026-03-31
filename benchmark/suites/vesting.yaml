@@ -1,0 +1,159 @@
+- id: vesting_cliff_basic
+  pattern: vesting
+  difficulty: easy
+  intent: |
+    Create a vesting contract where the beneficiary can claim funds
+    only after a cliff timestamp has passed.
+  required_features:
+    - beneficiary_signature
+    - timelock_refund
+  critical_features:
+    - beneficiary_signature
+  expected_structure:
+    require_count_min: 2
+  tags: ["vesting", "cliff"]
+
+- id: vesting_single_beneficiary
+  pattern: vesting
+  difficulty: easy
+  intent: |
+    A contract where only the beneficiary can unlock funds after
+    a vesting timestamp.
+  required_features:
+    - beneficiary_signature
+    - timelock_refund
+  critical_features:
+    - beneficiary_signature
+  expected_structure:
+    require_count_min: 2
+  tags: ["vesting"]
+
+- id: vesting_with_owner_cancel
+  pattern: vesting
+  difficulty: medium
+  intent: |
+    Create a vesting contract where:
+    - beneficiary can claim funds after the vesting timestamp
+    - owner can cancel the vesting before the timestamp
+  required_features:
+    - beneficiary_signature
+    - owner_signature
+    - timelock_refund
+  critical_features:
+    - owner_signature
+  expected_structure:
+    require_count_min: 3
+  tags: ["vesting", "admin"]
+
+- id: vesting_delayed_claim
+  pattern: vesting
+  difficulty: medium
+  intent: |
+    A vesting contract where the beneficiary can claim funds
+    after a specific timestamp.
+  required_features:
+    - beneficiary_signature
+    - timelock_refund
+  expected_structure:
+    require_count_min: 3
+  tags: ["vesting"]
+
+- id: vesting_role_separation
+  pattern: vesting
+  difficulty: medium
+  intent: |
+    Create a vesting contract where the beneficiary unlocks funds
+    after a timestamp and ensure the owner and beneficiary are
+    different public keys.
+  required_features:
+    - beneficiary_signature
+    - timelock_refund
+  expected_structure:
+    require_count_min: 3
+    must_contain:
+      - beneficiary != owner
+  tags: ["vesting", "safety"]
+
+- id: vesting_value_preservation
+  pattern: vesting
+  difficulty: hard
+  intent: |
+    Vesting contract where beneficiary unlocks funds after
+    the vesting timestamp and the transaction must preserve
+    the full input value.
+  required_features:
+    - beneficiary_signature
+    - timelock_refund
+  expected_structure:
+    require_count_min: 4
+    must_contain:
+      - tx.outputs
+      - tx.inputs
+  tags: ["vesting", "covenant"]
+
+- id: vesting_single_output_rule
+  pattern: vesting
+  difficulty: hard
+  intent: |
+    Vesting contract where beneficiary unlocks funds after
+    the vesting timestamp and the transaction must produce
+    exactly one output.
+  required_features:
+    - beneficiary_signature
+    - timelock_refund
+  expected_structure:
+    require_count_min: 4
+    must_contain:
+      - tx.outputs.length
+  tags: ["vesting", "covenant"]
+
+- id: vesting_multisig_unlock
+  pattern: vesting
+  difficulty: hard
+  intent: |
+    Create a vesting contract where the beneficiary can claim
+    funds after the vesting timestamp but requires a cosigner
+    approval.
+  required_features:
+    - beneficiary_signature
+    - cosigner_signature
+    - timelock_refund
+  critical_features:
+    - cosigner_signature
+  expected_structure:
+    require_count_min: 4
+  tags: ["vesting", "multisig"]
+
+- id: vesting_complex_protocol
+  pattern: vesting
+  difficulty: extreme
+  intent: |
+    Advanced vesting protocol:
+    - beneficiary unlocks funds after vesting time
+    - owner can cancel before vesting
+    - transaction must preserve output value
+  required_features:
+    - beneficiary_signature
+    - owner_signature
+    - timelock_refund
+  expected_structure:
+    require_count_min: 5
+  tags: ["vesting", "complex"]
+
+- id: vesting_enterprise_schedule
+  pattern: vesting
+  difficulty: extreme
+  intent: |
+    Professional vesting protocol:
+    - beneficiary unlocks funds after vesting time
+    - owner can cancel early
+    - enforce output locking bytecode
+  required_features:
+    - beneficiary_signature
+    - owner_signature
+    - timelock_refund
+  critical_features:
+    - beneficiary_signature
+  expected_structure:
+    require_count_min: 6
+  tags: ["vesting", "protocol"]

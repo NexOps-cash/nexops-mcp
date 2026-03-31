@@ -1,0 +1,11 @@
+# Scoring penalties and factors
+factors:
+  lint_no_error: 1.0
+  lint_warning: 0.85
+  lint_error: 0.50
+  missing_critical_feature: 0.0
+
+costs:
+  # Approximate USD per 1k tokens for Claude 4.6 Sonnet (placeholders)
+  prompt_1k: 0.003
+  completion_1k: 0.015

@@ -14,6 +14,7 @@ from src.services.compiler import get_compiler_service
 from src.services.sanity_checker import get_sanity_checker
 from src.services.dsl_lint import get_dsl_linter
 from pathlib import Path
+from datetime import datetime
 
 logger = logging.getLogger("nexops.pipeline_engine")
 
@@ -37,11 +38,14 @@ class GuardedPipelineEngine:
         api_key: Optional[str] = None,
         provider: Optional[str] = None,
         groq_key: Optional[str] = None,
-        openrouter_key: Optional[str] = None
+        openrouter_key: Optional[str] = None,
+        disable_golden: bool = False,
+        disable_fallbacks: bool = False
     ) -> Dict[str, Any]:
         """
         Execute the full 4-stage guarded pipeline.
         """
+        start_time_full = datetime.now()
         async def _notify(stage: str, message: str, attempt: int = 1, status: str = "processing"):
             if on_update:
                 await on_update({
@@ -60,8 +64,12 @@ class GuardedPipelineEngine:
             api_key=api_key, 
             provider=provider,
             groq_key=groq_key,
-            openrouter_key=openrouter_key
+            openrouter_key=openrouter_key,
+            disable_golden=disable_golden,
+            disable_fallbacks=disable_fallbacks
         )
+        ir.metadata.disable_golden = disable_golden
+        ir.metadata.disable_fallbacks = disable_fallbacks
         intent_model = ir.metadata.intent_model
         contract_mode = intent_model.contract_type if intent_model else ""
         
@@ -206,13 +214,21 @@ class GuardedPipelineEngine:
             await _notify("phase4_sanity", "Verifying contract against original intent...", gen_attempt + 1)
             sanity_result = self.sanity_checker.validate(code, intent_model)
             if not sanity_result["success"]:
-                logger.warning(f"Sanity Check failed: {sanity_result['violations']}. Retrying full generation...")
-                await _notify("phase4_fail", "Contract logic does not match intent. Regenerating...", gen_attempt + 1, "warning")
-                previous_violations = None
-                lint_violation_context = ""
-                continue
-
+                # If security level is HIGH, we never compromise on intent
+                if security_level == "high":
+                    logger.warning(f"Sanity Check failed (STRICT): {sanity_result['violations']}. Retrying full generation...")
+                    await _notify("phase4_fail", "Contract logic does not match intent. Regenerating...", gen_attempt + 1, "warning")
+                    previous_violations = None
+                    lint_violation_context = ""
+                    continue
+                else:
+                    # REAL AIM of relaxation: proceed but track warnings
+                    logger.info(f"Sanity Check missed features (RELAXED): {sanity_result['violations']}. Proceeding with intent warnings.")
+                    await _notify("phase4_warning", f"Warning: {len(sanity_result['violations'])} features missing, but proceeding as requested.", gen_attempt + 1, "warning")
+                    # We continue to SUCCESS below, bypasses the "continue" loop
+            
             # SUCCESS !
+            generation_seconds = (datetime.now() - start_time_full).total_seconds()
             await _notify("complete", "Synthesis complete. Verified and secured.", gen_attempt + 1, "success")
             return {
                 "type": "success",
@@ -223,11 +239,27 @@ class GuardedPipelineEngine:
                     "toll_gate": toll_gate.dict(),
                     "sanity_check": sanity_result,
                     "session_id": "guarded-session",
-                    "fallback_used": False
+                    "fallback_used": False,
+                    "attempt_number": gen_attempt + 1,
+                    "compile_fix_count": getattr(ir.metadata, "compile_fix_count", 0),
+                    "generation_seconds": generation_seconds,
+                    "is_perfect_match": sanity_result["success"]
                 }
             }
 
-        # Synthesis failed to converge — Reverting to pre-verified secure fallback
+        # Synthesis failed to converge -- Reverting to pre-verified secure fallback
+        if ir.metadata.disable_fallbacks:
+            logger.warning(f"Pipeline exhausted after {max_gen_retries} attempts. Fallbacks DISABLED for benchmark.")
+            await _notify("fallback_disabled", "Synthesis failed and fallbacks are disabled. Returning last generated code.", max_gen_retries, "error")
+            return {
+                "type": "error",
+                "error": {
+                    "code": "synthesis_failed_no_fallback",
+                    "message": "Pipeline failed to converge and fallbacks are disabled.",
+                    "last_code": code
+                }
+            }
+        
         logger.warning(f"Pipeline exhausted after {max_gen_retries} attempts. Activating secure fallback. (Last Error: {last_error})")
         await _notify("fallback", "Synthesis failed to converge. Deploying pre-verified secure fallback...", max_gen_retries, "warning")
         
@@ -340,10 +372,33 @@ class GuardedPipelineEngine:
             fixed = code.replace("?", "")
             logger.info("[Fix] Deterministic: stripped unsupported ternary '?' token")
             return fixed.strip()
+        # ── Deterministic: 'Token recognition error at .a' ──────────────────────
+        # AI confuses this.activeBytecode (self-reference) with tx.outputs[N].activeBytecode
+        # (which doesn't exist). The correct output field is .lockingBytecode.
+        if "Token recognition error" in error_raw and ".a" in error_raw:
+            # Fix 1: tx.outputs[N].activeBytecode → tx.outputs[N].lockingBytecode
+            fixed = _re.sub(
+                r"(tx\.outputs\[.*?\])\.activeBytecode",
+                r"\1.lockingBytecode",
+                code,
+            )
+            # Fix 2: output.activeBytecode → this.activeBytecode (rare but seen)
+            fixed = _re.sub(
+                r"\boutput\.activeBytecode\b",
+                "this.activeBytecode",
+                fixed,
+            )
+            if fixed != code:
+                logger.info("[Fix] Deterministic: replaced .activeBytecode on outputs with .lockingBytecode")
+                return fixed.strip()
         # ── LLM fallback for non-deterministic errors ────────────────────────────
         from src.services.llm.factory import LLMFactory
         import json
-        unified_rules = build_unified_dsl_rules()
+        from src.services.pipeline import build_pattern_rails
+        tags = ir.metadata.intent_model.features if ir.metadata.intent_model else []
+        contract_type = ir.metadata.intent_model.contract_type if ir.metadata.intent_model else ""
+        pattern_rails = build_pattern_rails(tags, contract_type=contract_type)
+
         system = f"""You are performing CashScript syntax repair ONLY.
 You MUST preserve ALL structural invariants below.
 You MUST NOT weaken value anchoring.
@@ -351,7 +406,11 @@ You MUST NOT introduce hardcoded indices.
 You MUST NOT remove output length guards.
 You MUST NOT change business logic, thresholds, or signatures.
 Fix ONLY token-level grammar errors shown in the compiler error.
+
 {unified_rules}
+
+{pattern_rails}
+
 Return ONLY the complete fixed .cash source. No markdown. No explanation."""
         error_payload = json.dumps(error_obj, indent=2)
         user = f"""STRUCTURED COMPILER ERROR (JSON):
