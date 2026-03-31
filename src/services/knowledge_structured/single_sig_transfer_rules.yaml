@@ -1,0 +1,10 @@
+family: single_sig_transfer
+description: "Single-owner spend pattern with no covenant continuation."
+must:
+  - id: SST-AUTH
+    rule: "require(checkSig(ownerSig, owner));"
+  - id: SST-OUTPUT-LIMIT
+    rule: "require(tx.outputs.length == 1);"
+forbidden:
+  - id: SST-NO-SELF-ANCHOR
+    rule: "Do not use this.activeBytecode in simple transfer contracts."

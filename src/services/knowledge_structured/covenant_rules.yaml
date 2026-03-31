@@ -1,0 +1,9 @@
+family: covenant
+description: "State-continuing contracts with output anchoring and value continuity."
+must:
+  - id: COV-LIMIT
+    rule: "require(tx.outputs.length == 1); // unless multi-output design explicitly bounded"
+  - id: COV-ANCHOR
+    rule: "require(tx.outputs[0].lockingBytecode == this.activeBytecode);"
+  - id: COV-VALUE
+    rule: "require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);"

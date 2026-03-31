@@ -1,0 +1,12 @@
+family: decay
+description: "Time-based linear/exponential-like payout decay with bounded arithmetic."
+formula_must:
+  - id: DECAY-ELAPSED
+    rule: "Compute elapsed = currentTime - startTime and clamp to [0, duration]."
+  - id: DECAY-BOUNDS
+    rule: "require(currentTime >= startTime); require(duration > 0);"
+  - id: DECAY-PAYOUT
+    rule: "Derive payout deterministically from elapsed with explicit min/max constraints."
+forbidden:
+  - id: DECAY-HALLUCINATED-FORMULA
+    rule: "Do not invent unsupported formula variables without validating bounds and units."

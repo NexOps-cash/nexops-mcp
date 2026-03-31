@@ -1,0 +1,10 @@
+family: multisig
+description: "Threshold signature authorization with distinct signer keys."
+must:
+  - id: MS-THRESHOLD
+    rule: "Use checkMultiSig for threshold logic or explicit require(checkSig(...)) per signer."
+  - id: MS-DISTINCT
+    rule: "require(pk1 != pk2); // enforce signer distinctness"
+forbidden:
+  - id: MS-SIG-REUSE
+    rule: "Do not reuse same signature variable across different pubkeys."

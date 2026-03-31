@@ -1,0 +1,10 @@
+family: conditional_spend
+description: "Multiple isolated spend paths with explicit branch constraints."
+must:
+  - id: CS-PATH-ISOLATION
+    rule: "Each path must independently satisfy auth/time conditions via require()."
+  - id: CS-OUTPUT-BOUNDS
+    rule: "All touched outputs must be bounded by tx.outputs.length checks."
+forbidden:
+  - id: CS-MIXED-BRANCH
+    rule: "Avoid mixed branch logic where partial conditions from different paths can combine."

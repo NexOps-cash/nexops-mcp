@@ -1,0 +1,10 @@
+family: timelock
+description: "Time-gated spend with explicit CLTV/CSV checks."
+must:
+  - id: TL-TIME
+    rule: "require(tx.time >= unlockTime); // or require(this.age >= delay)"
+  - id: TL-AUTH
+    rule: "require(checkSig(ownerSig, owner));"
+forbidden:
+  - id: TL-WRONG-FIELD
+    rule: "Never use tx.inputs[i].time or block.timestamp."
