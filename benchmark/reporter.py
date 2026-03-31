@@ -28,7 +28,7 @@ class BenchmarkReporter:
         elapsed = (end_time - start_time).total_seconds()
         
         # Aggregates
-        patterns = defaultdict(lambda: {"total": 0, "compile": 0, "conv": 0, "intent": 0.0, "score": 0.0, "retries": 0})
+        patterns = defaultdict(lambda: {"total": 0, "compile": 0, "conv": 0, "fallback": 0, "intent": 0.0, "score": 0.0, "retries": 0})
         difficulties = defaultdict(lambda: {"total": 0, "compile": 0, "intent": 0.0, "score": 0.0})
         
         total_latency = 0.0
@@ -43,6 +43,7 @@ class BenchmarkReporter:
             p["total"] += 1
             if r.compile_pass: p["compile"] += 1
             if r.converged: p["conv"] += 1
+            if getattr(r, "fallback_used", False): p["fallback"] += 1
             p["intent"] += r.intent_coverage
             p["score"] += r.final_score
             p["retries"] += r.retries_used

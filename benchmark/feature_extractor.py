@@ -18,8 +18,8 @@ class FeatureExtractor:
             data = yaml.safe_load(f)
             self.rules = data.get("features", {})
 
-    def extract(self, code: str) -> List[str]:
-        """Detect features in the provided code using regex rules."""
+    def extract(self, code: str) -> Dict[str, Any]:
+        """Detect features and function roles in the provided code."""
         detected = set()
         
         # 1. Base Regex Detection (from config)
@@ -28,51 +28,51 @@ class FeatureExtractor:
             if not pattern:
                 continue
             
-            # Skip static multisig rules if we're going to do dynamic expansion 
-            # (avoid multisig_2of3 regex catching 2of2 logic incorrectly)
-            if "multisig" in feature_name:
-                continue
-
             if re.search(pattern, code, re.DOTALL | re.IGNORECASE):
                 detected.add(feature_name)
         
-        # 2. Multisig Feature Expansion (Dynamic)
-        # Pattern: checkMultiSig([sig1, sig2], [buyer, seller, arbitrator])
-        # Using [^)]* instead of [^\]]* to better handle nested structures or weird spacing
+        # 2. Multisig & Signature Expansion
         msig_pattern = r'checkMultiSig\s*\(\s*\[(.*?)\]\s*,\s*\[(.*?)\]\s*\)'
-        matches = list(re.finditer(msig_pattern, code, re.DOTALL | re.IGNORECASE))
-        
-        for match in matches:
-            sig_array_str = match.group(1)
+        for match in re.finditer(msig_pattern, code, re.DOTALL | re.IGNORECASE):
             pubkey_array_str = match.group(2)
-            
             pubkeys = [r.strip() for r in pubkey_array_str.split(",") if r.strip()]
             for pk in pubkeys:
-                detected.add(f"{pk}_signature")
-                
+                detected.add(f"{pk.lower()}_signature")
             detected.add("multisig")
             
-            sigs = [s.strip() for s in sig_array_str.split(",") if s.strip()]
-            m = len(sigs)
-            n = len(pubkeys)
-            if n > 0:
-                detected.add(f"multisig_{m}of{n}")
-
-        # If no checkMultiSig found, fallback to static multisig regexes
-        if not matches:
-            for feature_name, config in self.rules.items():
-                if "multisig" in feature_name:
-                    pattern = config.get("rule")
-                    if pattern and re.search(pattern, code, re.DOTALL | re.IGNORECASE):
-                        detected.add(feature_name)
-                        
-        # 3. Dynamic Signature Detection (Role-Agnostic)
         sig_pattern = r'checkSig\s*\(\s*\w+\s*,\s*(\w+)\s*\)'
         for match in re.finditer(sig_pattern, code, re.IGNORECASE):
             role_name = match.group(1).lower()
             detected.add(f"{role_name}_signature")
-        
-        return list(detected)
+
+        # 3. Function Role Analysis
+        functions = []
+        # Basic function block extractor: matches 'function name(args) { body }'
+        # Note: This regex is simple and might miss nested braces, but usually sufficient for CashScript.
+        func_blocks = re.finditer(r'function\s+(\w+)\s*\((.*?)\)\s*\{([^}]*)\}', code, re.DOTALL)
+        for fb in func_blocks:
+            name = fb.group(1).lower()
+            body = fb.group(3)
+            
+            role = "GENERIC"
+            if any(kw in name for kw in ["announce", "start", "initiate", "prepare"]):
+                role = "INTERMEDIATE"
+            elif any(kw in name for kw in ["claim", "finalize", "withdraw", "execute"]):
+                role = "TERMINAL"
+            elif any(kw in name for kw in ["cancel", "emergency", "recover"]):
+                role = "RECOVERY"
+            
+            functions.append({
+                "name": name,
+                "role": role,
+                "has_anchor": "this.activeBytecode" in body or "lockingBytecode" in body,
+                "has_value_check": (".value" in body or "tokenAmount" in body) and "tx.inputs" in body
+            })
+
+        return {
+            "features": list(detected),
+            "functions": functions
+        }
 
     def get_missing(self, required: List[str], detected: List[str]) -> List[str]:
         return list(set(required) - set(detected))
