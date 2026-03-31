@@ -1,8 +1,10 @@
-# regex: broad rules to capture CashScript variations
 features:
+  timelock_unlock:
+    rule: 'tx\.(time|age)\s*>=\s*\w+'
+    description: "Delayed execution using tx.time or tx.age"
   timelock_refund:
-    rule: 'tx\.(time|age)\b'
-    description: "Timelock using tx.time or tx.age"
+    rule: 'require\s*\(\s*tx\.(time|age)\s*>=\s*\w+\s*\)'
+    description: "Timelock using tx.time or tx.age in a require"
   multisig_2of2:
     rule: 'checkSig\([^)]+\)\s*&&\s*checkSig\([^)]+\)'
     description: "Two signature checks present in the same require statement"
@@ -15,3 +17,12 @@ features:
   hashlock:
     rule: 'require\s*\(\s*(hash160|sha256|hash256|ripemd160)\s*\(\s*\w+\s*\)\s*==\s*\w+\s*\)'
     description: "Hashlock preimage verification"
+  token_amount:
+    rule: '\.tokenAmount\s*==\s*\w+'
+    description: "Token amount equality check"
+  locking_bytecode:
+    rule: '\.lockingBytecode\s*==\s*\w+'
+    description: "Output destination validation"
+  value_check:
+    rule: '\.value\s*==\s*tx\.inputs\['
+    description: "Output value equality check"

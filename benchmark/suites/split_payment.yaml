@@ -1,0 +1,102 @@
+# =========================
+# Pattern: split_payment
+# =========================
+- id: sp_001
+  pattern: split_payment
+  difficulty: medium
+  intent: |
+    Create a contract that splits payment 50/50 between Alice and Bob when either one signs.
+  required_features:
+    - signature_verification
+    - output_value_validation
+    - multiple_outputs
+    - token_validation
+  critical_features:
+    - valid_signature_check
+    - output_amount_check
+  expected_structure:
+    require_count_min: 5
+  tags: ["split_payment", "equal_split"]
+
+- id: sp_002
+  pattern: split_payment
+  difficulty: hard
+  intent: |
+    Create a revenue sharing contract that splits funds 60% to Alice, 30% to Bob, 10% to Carol.
+  required_features:
+    - signature_verification
+    - output_value_validation
+    - multiple_outputs
+    - token_validation
+  critical_features:
+    - valid_signature_check
+    - output_amount_check
+    - three_way_split
+  expected_structure:
+    require_count_min: 6
+  tags: ["split_payment", "proportional"]
+
+- id: sp_003
+  pattern: split_payment
+  difficulty: hard
+  intent: |
+    Create a payment splitter with minimum amounts: Alice gets at least 1000 sats, Bob gets remainder.
+  required_features:
+    - signature_verification
+    - output_value_validation
+    - multiple_outputs
+    - token_validation
+  critical_features:
+    - output_amount_check
+    - minimum_amount_validation
+  expected_structure:
+    require_count_min: 5
+  tags: ["split_payment", "minimum_threshold"]
+
+- id: sp_004
+  pattern: split_payment
+  difficulty: hard
+  intent: |
+    Create a split payment with fee deduction: split 90% between parties, 10% goes to specified fee address.
+  required_features:
+    - signature_verification
+    - output_value_validation
+    - output_destination_validation
+    - multiple_outputs
+  critical_features:
+    - output_amount_check
+    - output_lockingbytecode_check
+  expected_structure:
+    require_count_min: 6
+  tags: ["split_payment", "fee_deduction"]
+
+- id: sp_005
+  pattern: split_payment
+  difficulty: hard
+  intent: |
+    FAILURE CASE: Split payment that doesn't validate total output amounts match input.
+  required_features:
+    - signature_verification
+    - output_value_validation
+  critical_features:
+    - must_fail_missing_total_validation
+  expected_structure:
+    require_count_min: 2
+  tags: ["split_payment", "failure", "vulnerability"]
+
+- id: sp_006
+  pattern: split_payment
+  difficulty: hard
+  intent: |
+    Create a dynamic split where Alice gets 80% if claimed within 24 hours, otherwise 50/50 split with Bob.
+  required_features:
+    - signature_verification
+    - time_validation
+    - output_value_validation
+    - multiple_paths
+  critical_features:
+    - locktime_check
+    - output_amount_check
+  expected_structure:
+    require_count_min: 6
+  tags: ["split_payment", "time_based"]

@@ -1,0 +1,59 @@
+# =========================
+# Pattern: single_sig_transfer
+# =========================
+- id: sst_001
+  pattern: single_sig_transfer
+  difficulty: easy
+  intent: |
+    Create a basic Pay-to-Public-Key-Hash contract where only the owner can spend funds with their signature.
+  required_features:
+    - signature_verification
+    - token_validation
+  critical_features:
+    - valid_signature_check
+  expected_structure:
+    require_count_min: 2
+  tags: ["single_sig_transfer", "basic"]
+
+- id: sst_002
+  pattern: single_sig_transfer
+  difficulty: easy
+  intent: |
+    Allow Alice to spend her funds to any address she chooses by providing her signature.
+  required_features:
+    - signature_verification
+    - no_covenant_lock
+  critical_features:
+    - valid_signature_check
+  expected_structure:
+    require_count_min: 2
+  tags: ["single_sig_transfer", "basic"]
+
+- id: sst_003
+  pattern: single_sig_transfer
+  difficulty: medium
+  intent: |
+    Create a wallet contract that prevents token outputs while allowing normal BCH spending with signature.
+  required_features:
+    - signature_verification
+    - token_validation
+    - output_token_check
+  critical_features:
+    - valid_signature_check
+    - no_token_outputs
+  expected_structure:
+    require_count_min: 3
+  tags: ["single_sig_transfer", "token_aware"]
+
+- id: sst_004
+  pattern: single_sig_transfer
+  difficulty: medium
+  intent: |
+    FAILURE CASE: Contract that accepts any signature without validating against the owner's pubkey.
+  required_features:
+    - signature_verification
+  critical_features:
+    - must_fail_on_wrong_pubkey
+  expected_structure:
+    require_count_min: 1
+  tags: ["single_sig_transfer", "failure", "vulnerability"]

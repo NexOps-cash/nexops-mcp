@@ -1,0 +1,74 @@
+# =========================
+# Pattern: hashlock
+# =========================
+- id: hl_001
+  pattern: hashlock
+  difficulty: easy
+  intent: |
+    Create a contract that can only be spent by revealing a secret that hashes to a specific SHA256 value.
+  required_features:
+    - hash_verification
+    - preimage_validation
+  critical_features:
+    - sha256_check
+  expected_structure:
+    require_count_min: 2
+  tags: ["hashlock", "basic"]
+
+- id: hl_002
+  pattern: hashlock
+  difficulty: medium
+  intent: |
+    Create an HTLC (Hash Time Locked Contract) where funds can be claimed with hash preimage OR refunded after timeout.
+  required_features:
+    - hash_verification
+    - time_validation
+    - multiple_paths
+  critical_features:
+    - sha256_check
+    - locktime_check
+  expected_structure:
+    require_count_min: 3
+  tags: ["hashlock", "htlc"]
+
+- id: hl_003
+  pattern: hashlock
+  difficulty: medium
+  intent: |
+    Create a contract using RIPEMD160 hash for secret verification instead of SHA256.
+  required_features:
+    - hash_verification
+    - preimage_validation
+  critical_features:
+    - ripemd160_check
+  expected_structure:
+    require_count_min: 2
+  tags: ["hashlock", "ripemd160"]
+
+- id: hl_004
+  pattern: hashlock
+  difficulty: hard
+  intent: |
+    Create a multi-secret hashlock requiring 2 different preimages to be revealed simultaneously.
+  required_features:
+    - hash_verification
+    - multiple_preimages
+  critical_features:
+    - sha256_check
+    - multiple_hash_validation
+  expected_structure:
+    require_count_min: 3
+  tags: ["hashlock", "multi_secret"]
+
+- id: hl_005
+  pattern: hashlock
+  difficulty: hard
+  intent: |
+    FAILURE CASE: Contract that validates hash but doesn't prevent token mixing in outputs.
+  required_features:
+    - hash_verification
+  critical_features:
+    - must_fail_missing_token_validation
+  expected_structure:
+    require_count_min: 2
+  tags: ["hashlock", "failure", "vulnerability"]

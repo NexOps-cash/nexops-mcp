@@ -1,0 +1,97 @@
+# =========================
+# Pattern: escrow
+# =========================
+- id: esc_001
+  pattern: escrow
+  difficulty: medium
+  intent: |
+    Create a 2-of-2 escrow where buyer and seller must both agree to release funds.
+  required_features:
+    - signature_verification
+    - multisig
+    - token_validation
+  critical_features:
+    - valid_signature_check
+    - both_signatures_required
+  expected_structure:
+    require_count_min: 4
+  tags: ["escrow", "2of2"]
+
+- id: esc_002
+  pattern: escrow
+  difficulty: hard
+  intent: |
+    Create a 2-of-3 escrow with buyer, seller, and arbiter where any 2 can release funds.
+  required_features:
+    - signature_verification
+    - multisig
+    - token_validation
+  critical_features:
+    - valid_signature_check
+    - two_of_three_logic
+  expected_structure:
+    require_count_min: 4
+  tags: ["escrow", "arbiter"]
+
+- id: esc_003
+  pattern: escrow
+  difficulty: hard
+  intent: |
+    Create an escrow with timeout: buyer+seller release normally, or buyer reclaims after 30 days if seller doesn't cooperate.
+  required_features:
+    - signature_verification
+    - multisig
+    - time_validation
+    - multiple_paths
+    - token_validation
+  critical_features:
+    - valid_signature_check
+    - locktime_check
+  expected_structure:
+    require_count_min: 5
+  tags: ["escrow", "timeout", "refundable"]
+
+- id: esc_004
+  pattern: escrow
+  difficulty: hard
+  intent: |
+    Create an escrow where funds can go to seller with buyer+seller signatures, or to buyer with buyer+arbiter signatures.
+  required_features:
+    - signature_verification
+    - multisig
+    - output_destination_validation
+    - token_validation
+  critical_features:
+    - valid_signature_check
+    - output_lockingbytecode_check
+  expected_structure:
+    require_count_min: 5
+  tags: ["escrow", "conditional_destination"]
+
+- id: esc_005
+  pattern: escrow
+  difficulty: hard
+  intent: |
+    FAILURE CASE: Escrow that doesn't validate output destination, allowing funds to be sent anywhere.
+  required_features:
+    - signature_verification
+    - multisig
+  critical_features:
+    - must_fail_missing_destination_check
+  expected_structure:
+    require_count_min: 2
+  tags: ["escrow", "failure", "vulnerability"]
+
+- id: esc_006
+  pattern: escrow
+  difficulty: hard
+  intent: |
+    FAILURE CASE: Escrow with permanent covenant lock preventing funds from ever leaving the contract.
+  required_features:
+    - signature_verification
+    - multisig
+  critical_features:
+    - must_fail_permanent_covenant
+  expected_structure:
+    require_count_min: 3
+  tags: ["escrow", "failure", "vulnerability"]

@@ -1,0 +1,132 @@
+- id: v_001
+  pattern: vault
+  difficulty: hard
+  intent: |
+    Create a vault with 2-step withdrawal: announce withdrawal to staging, then claim after 24 hour delay.
+  required_features:
+    - signature_verification
+    - covenant_continuation
+    - time_validation
+    - output_destination_validation
+    - token_validation
+  critical_features:
+    - valid_signature_check
+    - covenant_self_reference
+    - locktime_check
+  expected_structure:
+    require_count_min: 6
+  tags: ["vault", "delayed_withdrawal"]
+
+- id: v_002
+  pattern: vault
+  difficulty: hard
+  intent: |
+    Create a vault with hot wallet spending limit: can withdraw up to 1000000 sats immediately, larger amounts need delay.
+  required_features:
+    - signature_verification
+    - output_value_validation
+    - covenant_continuation
+    - multiple_paths
+  critical_features:
+    - output_amount_check
+    - amount_threshold_logic
+  expected_structure:
+    require_count_min: 6
+  tags: ["vault", "spending_limit"]
+
+- id: v_003
+  pattern: vault
+  difficulty: hard
+  intent: |
+    Create a vault with emergency recovery: normal withdrawal has 7-day delay, but cold key can withdraw immediately.
+  required_features:
+    - signature_verification
+    - time_validation
+    - covenant_continuation
+    - multiple_paths
+    - token_validation
+  critical_features:
+    - valid_signature_check
+    - locktime_check
+    - emergency_path
+  expected_structure:
+    require_count_min: 7
+  tags: ["vault", "emergency_recovery"]
+
+- id: v_004
+  pattern: vault
+  difficulty: hard
+  intent: |
+    Create a vault with cancellation feature: announce withdrawal, wait 48 hours to claim, or cancel anytime during delay.
+  required_features:
+    - signature_verification
+    - time_validation
+    - covenant_continuation
+    - multiple_paths
+  critical_features:
+    - locktime_check
+    - cancellation_path
+  expected_structure:
+    require_count_min: 7
+  tags: ["vault", "cancellable"]
+
+- id: v_005
+  pattern: vault
+  difficulty: hard
+  intent: |
+    Create a multi-tier vault: instant withdrawals up to 0.01 BCH, 24h delay for 0.01-0.1 BCH, 7-day delay for larger amounts.
+  required_features:
+    - signature_verification
+    - time_validation
+    - output_value_validation
+    - covenant_continuation
+    - multiple_paths
+  critical_features:
+    - output_amount_check
+    - tiered_delay_logic
+  expected_structure:
+    require_count_min: 8
+  tags: ["vault", "tiered_limits"]
+
+- id: v_006
+  pattern: vault
+  difficulty: hard
+  intent: |
+    FAILURE CASE: Vault with covenant that locks funds permanently by always requiring output to same contract.
+  required_features:
+    - covenant_continuation
+  critical_features:
+    - must_fail_permanent_covenant
+  expected_structure:
+    require_count_min: 3
+  tags: ["vault", "failure", "vulnerability"]
+
+- id: v_007
+  pattern: vault
+  difficulty: hard
+  intent: |
+    Create a vault with recovery path: normal withdrawal needs announcement, but 2-of-3 multisig can withdraw immediately for recovery.
+  required_features:
+    - signature_verification
+    - multisig
+    - covenant_continuation
+    - multiple_paths
+  critical_features:
+    - valid_signature_check
+    - two_of_three_logic
+  expected_structure:
+    require_count_min: 7
+  tags: ["vault", "multisig_recovery"]
+
+- id: v_008
+  pattern: vault
+  difficulty: hard
+  intent: |
+    FAILURE CASE: Vault that doesn't validate output amounts, allowing value to be drained through announcement.
+  required_features:
+    - covenant_continuation
+  critical_features:
+    - must_fail_missing_amount_validation
+  expected_structure:
+    require_count_min: 3
+  tags: ["vault", "failure", "vulnerability"]

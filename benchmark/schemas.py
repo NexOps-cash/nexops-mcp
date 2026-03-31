@@ -46,6 +46,7 @@ class CaseResult(BaseModel):
     retries_used: int
     max_retries: int
     converged: bool
+    fallback_used: bool = False
     failure_layer: Optional[str] = None
     elapsed_seconds: float
     code: Optional[str] = None

@@ -1,0 +1,102 @@
+# =========================
+# Pattern: refundable_payment
+# =========================
+- id: rp_001
+  pattern: refundable_payment
+  difficulty: medium
+  intent: |
+    Create a payment to seller that can be refunded to buyer if seller doesn't claim within 7 days.
+  required_features:
+    - signature_verification
+    - time_validation
+    - multiple_paths
+    - token_validation
+  critical_features:
+    - valid_signature_check
+    - locktime_check
+  expected_structure:
+    require_count_min: 4
+  tags: ["refundable_payment", "basic"]
+
+- id: rp_002
+  pattern: refundable_payment
+  difficulty: hard
+  intent: |
+    Create a conditional payment where seller can claim with preimage, or buyer gets refund after timeout.
+  required_features:
+    - signature_verification
+    - hash_verification
+    - time_validation
+    - multiple_paths
+    - token_validation
+  critical_features:
+    - sha256_check
+    - locktime_check
+  expected_structure:
+    require_count_min: 5
+  tags: ["refundable_payment", "htlc"]
+
+- id: rp_003
+  pattern: refundable_payment
+  difficulty: hard
+  intent: |
+    Create a subscription payment where service can claim monthly, or subscriber can cancel and reclaim remainder.
+  required_features:
+    - signature_verification
+    - time_validation
+    - output_value_validation
+    - multiple_paths
+  critical_features:
+    - valid_signature_check
+    - output_amount_check
+  expected_structure:
+    require_count_min: 5
+  tags: ["refundable_payment", "subscription"]
+
+- id: rp_004
+  pattern: refundable_payment
+  difficulty: hard
+  intent: |
+    Create a gradual release payment where recipient gets 25% every 7 days, or sender reclaims if inactive for 30 days.
+  required_features:
+    - signature_verification
+    - time_validation
+    - output_value_validation
+    - multiple_paths
+  critical_features:
+    - locktime_check
+    - output_amount_check
+  expected_structure:
+    require_count_min: 5
+  tags: ["refundable_payment", "vesting"]
+
+- id: rp_005
+  pattern: refundable_payment
+  difficulty: hard
+  intent: |
+    FAILURE CASE: Refundable payment that uses wrong time field for timeout validation.
+  required_features:
+    - signature_verification
+    - time_validation
+  critical_features:
+    - must_fail_wrong_time_field
+  expected_structure:
+    require_count_min: 2
+  tags: ["refundable_payment", "failure", "vulnerability"]
+
+- id: rp_006
+  pattern: refundable_payment
+  difficulty: hard
+  intent: |
+    Create a crowdfunding payment that locks until goal reached, then recipient claims, otherwise contributors get refunds.
+  required_features:
+    - signature_verification
+    - time_validation
+    - output_value_validation
+    - multiple_paths
+  critical_features:
+    - valid_signature_check
+    - output_amount_check
+  expected_structure:
+    require_count_min: 5
+  tags: ["refundable_payment", "crowdfund"]

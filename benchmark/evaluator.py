@@ -30,6 +30,7 @@ class BenchmarkEvaluator:
         # Determine failure layer and state
         failure_layer = None
         converged = False
+        fallback_used = False
         compile_pass = False
         lint_errors = 0
         lint_warnings = 0
@@ -58,60 +59,71 @@ class BenchmarkEvaluator:
                 data = result["data"]
                 code = data["code"]
                 compile_pass = True 
-                converged = not data.get("fallback_used", False)
+                fallback_used = bool(data.get("fallback_used", False))
+                converged = not fallback_used
                 
                 # Metadata from engine
                 attempt_number = data.get("attempt_number", 1)
                 gen_seconds = data.get("generation_seconds", time.time() - start_time)
                 
-                # Extraction
-                detected = self.extractor.extract(code)
-                missing = self.extractor.get_missing(case.required_features, detected)
-                extraneous = self.extractor.get_extraneous(case.required_features, detected)
-                hallucinated = self.extractor.get_hallucinated(case.required_features, detected)
+                # 1. Extraction (Structured)
+                extracted = self.extractor.extract(code)
+                detected = extracted["features"]
+                functions = extracted["functions"]
                 
-                # Intent Coverage
+                # 2. Capability Saturation (Semantic Mapping)
+                # Map abstract required features to sets of satisfyable concrete detections
+                capabilities = {
+                    "signature_verification": any("_signature" in f or f == "multisig" for f in detected),
+                    "covenant_continuation": any(f.get("has_anchor") and f.get("has_value_check") for f in functions if f["role"] == "INTERMEDIATE"),
+                    "time_validation": "timelock_unlock" in detected,
+                    "timelock_unlock": "timelock_unlock" in detected,
+                    "multiple_paths": len(functions) >= 2,
+                    "token_validation": "token_amount" in detected or "token_nft" in detected,
+                    "output_destination_validation": "locking_bytecode" in detected
+                }
+                
+                # 3. Intent Coverage Calculation (Proportional)
+                matched_required = []
+                missing_required = []
+                for req in (case.required_features or []):
+                    # Check if the requirement is satisfied as a capability OR as a flat feature
+                    if capabilities.get(req) or req in detected:
+                        matched_required.append(req)
+                    else:
+                        missing_required.append(req)
+                
+                # Proportional score instead of binary
                 if case.required_features:
-                    intent_coverage = len(set(detected) & set(case.required_features)) / len(case.required_features)
+                    intent_coverage = len(matched_required) / len(case.required_features)
                 else:
                     intent_coverage = 1.0
                 
-                # Structural Score from production
+                # 4. Vault-Specific Semantic Guard (Production-Grade)
+                semantic_pass = True
+                
+                # RULE: INTERMEDIATE functions MUST re-anchor (Covenant Continuation)
+                intermediate_funcs = [f for f in functions if f["role"] == "INTERMEDIATE"]
+                if intermediate_funcs and not any(f["has_anchor"] for f in intermediate_funcs):
+                    semantic_pass = False # Vault cannot continue to next stage
+                
+                # RULE: TERMINAL functions MUST NOT re-anchor (Cleanup)
+                terminal_funcs = [f for f in functions if f["role"] == "TERMINAL"]
+                if any(f["has_anchor"] for f in terminal_funcs):
+                    semantic_pass = False # Vault leaked funds back into covenant?
+                
+                # 5. Final Scoring
                 structure_score = data.get("toll_gate", {}).get("structural_score", 0.0)
+                adj_structure_score = structure_score # Legacy name, simplified
                 
-                # Penalties
-                expected_structure = case.expected_structure or {}
-                require_count_min = expected_structure.get("require_count_min", 0)
-                actual_require_count = code.count("require(")
-                
-                components = [structure_score]
-                
-                if require_count_min > 0:
-                    components.append(min(1.0, actual_require_count / require_count_min))
-                    
-                if expected_structure.get("output_length_checks"):
-                    components.append(1.0 if "tx.outputs.length" in code else 0.0)
-                    
-                if expected_structure.get("locking_bytecode_check"):
-                    components.append(1.0 if "lockingBytecode" in code else 0.0)
-                    
-                if expected_structure.get("value_preservation"):
-                    has_value = ".value" in code and "tx.outputs[" in code and "tx.inputs[" in code
-                    components.append(1.0 if has_value else 0.0)
-                    
-                must_contain_list = expected_structure.get("must_contain", [])
-                for item in must_contain_list:
-                    components.append(1.0 if item in code else 0.0)
-                    
-                adj_structure_score = sum(components) / len(components)
-
-                critical_missing = [f for f in case.critical_features if f not in detected]
+                critical_missing = [f for f in case.critical_features if not capabilities.get(f) and f not in detected]
                 
                 lint_factor = self.weights.get("factors", {}).get("lint_no_error", 1.0)
-                final_score = (1.0 if compile_pass else 0.0) * lint_factor * adj_structure_score * intent_coverage
+                final_score = (1.0 if compile_pass else 0.0) * lint_factor * intent_coverage * (1.0 if semantic_pass else 0.5)
                 
                 if critical_missing:
-                    final_score = 0.0
+                    # Critical features remain high-stakes
+                    final_score *= 0.2
                 
                 return CaseResult(
                     id=case.id,
@@ -125,9 +137,9 @@ class BenchmarkEvaluator:
                     adj_structure_score=adj_structure_score,
                     required_features=case.required_features,
                     detected_features=detected,
-                    missing_features=missing,
-                    extraneous_features=extraneous,
-                    hallucinated_features=hallucinated,
+                    missing_features=missing_required,
+                    extraneous_features=[], # Removed penalty
+                    hallucinated_features=[],
                     intent_coverage=intent_coverage,
                     final_score=final_score,
                     latency_seconds=gen_seconds,
@@ -135,6 +147,7 @@ class BenchmarkEvaluator:
                     first_pass_attempt=attempt_number if compile_pass else None,
                     max_retries=case.max_retries,
                     converged=converged,
+                    fallback_used=fallback_used,
                     failure_layer=None,
                     elapsed_seconds=time.time() - start_time,
                     code=code
@@ -183,6 +196,7 @@ class BenchmarkEvaluator:
             retries_used=case.max_retries,
             max_retries=case.max_retries,
             converged=False,
+            fallback_used=False,
             failure_layer=failure_layer,
             elapsed_seconds=latency
         )

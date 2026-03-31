@@ -1,0 +1,80 @@
+# =========================
+# Pattern: conditional_spend
+# =========================
+- id: cs_001
+  pattern: conditional_spend
+  difficulty: easy
+  intent: |
+    Create a contract where Alice can spend immediately with signature, OR Bob can spend after 30 days.
+  required_features:
+    - signature_verification
+    - time_validation
+    - multiple_paths
+  critical_features:
+    - valid_signature_check
+    - locktime_check
+  expected_structure:
+    require_count_min: 3
+  tags: ["conditional_spend", "basic"]
+
+- id: cs_002
+  pattern: conditional_spend
+  difficulty: medium
+  intent: |
+    Create a will contract where beneficiary can claim after owner's inactivity timeout, or owner can spend anytime.
+  required_features:
+    - signature_verification
+    - time_validation
+    - multiple_paths
+  critical_features:
+    - valid_signature_check
+    - locktime_check
+  expected_structure:
+    require_count_min: 3
+  tags: ["conditional_spend", "inheritance"]
+
+- id: cs_003
+  pattern: conditional_spend
+  difficulty: medium
+  intent: |
+    Create a contract with 3 spending paths: Alice alone, Bob alone after timeout, or Alice+Bob together anytime.
+  required_features:
+    - signature_verification
+    - time_validation
+    - multiple_paths
+    - multisig
+  critical_features:
+    - valid_signature_check
+  expected_structure:
+    require_count_min: 4
+  tags: ["conditional_spend", "multi_path"]
+
+- id: cs_004
+  pattern: conditional_spend
+  difficulty: hard
+  intent: |
+    Create a conditional spend based on output amount: Alice gets full amount if spent within 7 days, otherwise only 50%.
+  required_features:
+    - signature_verification
+    - time_validation
+    - output_value_validation
+  critical_features:
+    - valid_signature_check
+    - output_amount_check
+  expected_structure:
+    require_count_min: 4
+  tags: ["conditional_spend", "amount_based"]
+
+- id: cs_005
+  pattern: conditional_spend
+  difficulty: hard
+  intent: |
+    FAILURE CASE: Conditional contract that doesn't properly isolate spending paths, allowing mixed conditions.
+  required_features:
+    - signature_verification
+    - multiple_paths
+  critical_features:
+    - must_fail_path_isolation
+  expected_structure:
+    require_count_min: 2
+  tags: ["conditional_spend", "failure", "vulnerability"]

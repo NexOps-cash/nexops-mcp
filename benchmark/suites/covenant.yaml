@@ -1,0 +1,47 @@
+- id: cov_001
+  pattern: covenant
+  difficulty: medium
+  intent: |
+    Create a covenant contract that preserves state by continuing to the same contract bytecode
+    and enforces a single deterministic continuation output.
+  required_features:
+    - covenant_continuation
+    - output_destination_validation
+    - output_value_validation
+  critical_features:
+    - covenant_self_reference
+    - output_lockingbytecode_check
+  expected_structure:
+    require_count_min: 4
+  tags: ["covenant", "stateful"]
+
+- id: cov_002
+  pattern: covenant
+  difficulty: hard
+  intent: |
+    Create a covenant with two paths: continue state when valid, or allow a controlled terminal payout
+    that preserves value constraints.
+  required_features:
+    - covenant_continuation
+    - multiple_paths
+    - output_value_validation
+  critical_features:
+    - covenant_self_reference
+    - output_amount_check
+  expected_structure:
+    require_count_min: 5
+  tags: ["covenant", "multi_path"]
+
+- id: cov_003
+  pattern: covenant
+  difficulty: hard
+  intent: |
+    FAILURE CASE: covenant that validates value but does not validate lockingBytecode
+    on continuation outputs.
+  required_features:
+    - covenant_continuation
+  critical_features:
+    - must_fail_missing_destination_check
+  expected_structure:
+    require_count_min: 2
+  tags: ["covenant", "failure", "vulnerability"]
