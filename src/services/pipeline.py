@@ -22,6 +22,7 @@ from src.models import (
 from src.services.llm.factory import LLMFactory
 from src.services.anti_pattern_enforcer import get_anti_pattern_enforcer
 from src.services.rule_engine import get_rule_engine
+from src.services.pattern_profiles import get_pattern_profile, canonical_pattern
 from knowledge.golden.registry import GoldenRegistry
 from knowledge.golden.golden_adaptation import verify_anchor_integrity
 from knowledge.golden.golden_prompt import (
@@ -266,9 +267,12 @@ def _load_yaml(filename: str) -> dict:
 
 
 def build_structured_knowledge(ir: ContractIR) -> str:
-    """Build a compact YAML knowledge string, conditionally injecting covenant rules."""
+    """Build YAML knowledge with pattern-specific overlays for generation."""
     intent_model = ir.metadata.intent_model if ir.metadata else None
     tags = set(intent_model.features if intent_model else [])
+    contract_mode = intent_model.contract_type if intent_model else ""
+    pattern_name = canonical_pattern(contract_mode)
+    pattern_profile = get_pattern_profile(contract_mode)
 
     knowledge = {
         "core": _load_yaml("core_language.yaml"),
@@ -280,8 +284,19 @@ def build_structured_knowledge(ir: ContractIR) -> str:
     if needs_covenant:
         knowledge["security"] = _load_yaml("covenant_security.yaml")
 
+    # Inject pattern-specific YAML overlays for generation control.
+    pattern_layers = {}
+    for filename in pattern_profile.get("knowledge_files", []):
+        layer_name = f"pattern_{filename.replace('.yaml', '')}"
+        pattern_layers[layer_name] = _load_yaml(filename)
+    if pattern_layers:
+        knowledge["pattern_overlays"] = pattern_layers
+
     injected_layers = list(knowledge.keys())
-    logger.info(f"[Phase2] Injected knowledge layers: {injected_layers} (tags={sorted(tags)})")
+    logger.info(
+        f"[Phase2] Injected knowledge layers: {injected_layers} "
+        f"(pattern={pattern_name}, mode={contract_mode}, tags={sorted(tags)})"
+    )
 
     # Emit as YAML string — preserves hierarchy better than JSON for LLM comprehension
     return yaml.dump(knowledge, sort_keys=False, allow_unicode=True, default_flow_style=False)
@@ -644,14 +659,18 @@ async def _free_phase2(
     # Extract .cash code from response
     code = _extract_cash_code(raw_response)
     
-    # ── Deterministic Post-Gen Sanitizer ─────────────────────────────────────────
-    # Fix AI confusing this.activeBytecode (self-reference) with tx.outputs[N].activeBytecode
-    # (which doesn't exist in CashScript — causes "Token recognition error at: '.a'")
+    # ── Deterministic Post-Gen Sanitizers ────────────────────────────────────────
     import re as _re
-    sanitized = _re.sub(r"(tx\.outputs\[.*?\])\.activeBytecode", r"\1.lockingBytecode", code)
-    if sanitized != code:
-        logger.warning("[Phase2][Sanitizer] Fixed tx.outputs[N].activeBytecode -> .lockingBytecode (AI field confusion)")
-        code = sanitized
+    
+    # Bug 1: .activeBytecode misuse on tx objects (Confusion with this.activeBytecode)
+    # The '.a' token error often starts here. Inputs/Outputs use .lockingBytecode.
+    code = _re.sub(r"(\btx\.(?:outputs|inputs)\[[^\]]*\])\s*\.\s*activeBytecode", r"\1.lockingBytecode", code)
+    
+    # Bug 2: tx.age is NOT supported in cashc 0.13.0-next.3 (Token recognition error at: '.a')
+    # Correct mapping is to 'this.age' (global) to maintain relative timelock semantics.
+    if "age" in code:
+        logger.warning("[Phase2][Sanitizer] Environment fix: Mapping tx.age -> this.age (CSV compatibility for 0.13.0-next.3)")
+        code = _re.sub(r"\btx\s*\.\s*age\b", "this.age", code)
     
     return code
 

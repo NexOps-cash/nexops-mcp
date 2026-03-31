@@ -21,6 +21,7 @@ from typing import List, Dict, Any, Optional
 
 from src.utils.cashscript_ast import CashScriptAST
 from src.services.anti_pattern_detectors import DETECTOR_REGISTRY, Violation
+from src.services.pattern_profiles import get_pattern_profile
 
 logger = logging.getLogger(__name__)
 
@@ -194,8 +195,13 @@ class AntiPatternEnforcer:
                 "stage": stage
             }
         
-        # Run all semantic detectors
+        profile = get_pattern_profile(contract_mode)
+        disabled_detectors = set(profile.get("disable_detectors", []))
+
+        # Run semantic detectors with pattern-scoped filtering
         for detector in self.detectors:
+            if detector.id in disabled_detectors:
+                continue
             try:
                 violation = detector.detect(ast)
                 if violation:
