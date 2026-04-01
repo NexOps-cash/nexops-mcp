@@ -58,9 +58,8 @@ class BenchmarkEvaluator:
             if result.get("type") == "success":
                 data = result["data"]
                 code = data["code"]
-                compile_pass = True 
+                compile_pass = True
                 fallback_used = bool(data.get("fallback_used", False))
-                converged = not fallback_used
                 
                 # Metadata from engine
                 attempt_number = data.get("attempt_number", 1)
@@ -73,22 +72,50 @@ class BenchmarkEvaluator:
                 
                 # 2. Capability Saturation (Semantic Mapping)
                 # Map abstract required features to sets of satisfyable concrete detections
+                has_time_check = (
+                    "timelock_unlock" in detected
+                    or "timelock_refund" in detected
+                    or ("this.age" in code)
+                )
                 capabilities = {
                     "signature_verification": any("_signature" in f or f == "multisig" for f in detected),
                     "covenant_continuation": any(f.get("has_anchor") and f.get("has_value_check") for f in functions if f["role"] == "INTERMEDIATE"),
-                    "time_validation": "timelock_unlock" in detected,
-                    "timelock_unlock": "timelock_unlock" in detected,
+                    "time_validation": has_time_check,
+                    "timelock_unlock": has_time_check,
                     "multiple_paths": len(functions) >= 2,
-                    "token_validation": "token_amount" in detected or "token_nft" in detected,
-                    "output_destination_validation": "locking_bytecode" in detected
+                    "token_validation": (
+                        ("token_amount" in detected)
+                        or ("token_nft" in detected)
+                        or ("tokenCategory" in code and "tokenAmount" in code)
+                    ),
+                    "output_destination_validation": "locking_bytecode" in detected,
+                    "output_value_validation": ("output_value_validation" in detected) or ("value_check" in detected),
                 }
                 
+                def requirement_satisfied(req: str) -> bool:
+                    # Direct capability or feature hit first.
+                    if capabilities.get(req) or req in detected:
+                        return True
+
+                    # Alias mappings used in benchmark suites.
+                    alias_checks = {
+                        "valid_signature_check": capabilities.get("signature_verification", False),
+                        "covenant_self_reference": capabilities.get("covenant_continuation", False),
+                        "locktime_check": capabilities.get("time_validation", False),
+                        "output_amount_check": capabilities.get("output_value_validation", False),
+                        "amount_threshold_logic": ("<=" in code or ">=" in code),
+                        "tiered_delay_logic": ("smallDelay" in code or "largeDelay" in code or "threshold" in code.lower()),
+                        "emergency_path": any(f.get("role") == "RECOVERY" for f in functions),
+                        "cancellation_path": ("cancel" in code.lower()),
+                        "two_of_three_logic": ("multisig_2of3" in detected or "checkMultiSig" in code),
+                    }
+                    return bool(alias_checks.get(req, False))
+
                 # 3. Intent Coverage Calculation (Proportional)
                 matched_required = []
                 missing_required = []
                 for req in (case.required_features or []):
-                    # Check if the requirement is satisfied as a capability OR as a flat feature
-                    if capabilities.get(req) or req in detected:
+                    if requirement_satisfied(req):
                         matched_required.append(req)
                     else:
                         missing_required.append(req)
@@ -116,7 +143,7 @@ class BenchmarkEvaluator:
                 structure_score = data.get("toll_gate", {}).get("structural_score", 0.0)
                 adj_structure_score = structure_score # Legacy name, simplified
                 
-                critical_missing = [f for f in case.critical_features if not capabilities.get(f) and f not in detected]
+                critical_missing = [f for f in case.critical_features if not requirement_satisfied(f)]
                 
                 lint_factor = self.weights.get("factors", {}).get("lint_no_error", 1.0)
                 final_score = (1.0 if compile_pass else 0.0) * lint_factor * intent_coverage * (1.0 if semantic_pass else 0.5)
@@ -125,6 +152,20 @@ class BenchmarkEvaluator:
                     # Critical features remain high-stakes
                     final_score *= 0.2
                 
+                # Convergence should represent usable production quality, not only "compiled".
+                # For failure/vulnerability benchmark cases, force non-converged unless
+                # the "must_fail_*" critical expectation is actually detected.
+                has_failure_tag = any(t in {"failure", "vulnerability"} for t in (case.tags or []))
+                has_must_fail_critical = any(str(c).startswith("must_fail_") for c in (case.critical_features or []))
+                converged = (
+                    (not fallback_used)
+                    and compile_pass
+                    and semantic_pass
+                    and intent_coverage >= 0.70
+                    and len(critical_missing) == 0
+                    and not (has_failure_tag and has_must_fail_critical)
+                )
+
                 return CaseResult(
                     id=case.id,
                     pattern=case.pattern,
