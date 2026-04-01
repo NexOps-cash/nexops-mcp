@@ -1,0 +1,380 @@
+- id: vr_001
+  pattern: vault
+  difficulty: medium
+  intent: |
+    Make a simple safety vault where I have to wait 24 hours before withdrawing after I announce it.
+  required_features:
+    - signature_verification
+    - time_validation
+    - covenant_continuation
+  critical_features:
+    - valid_signature_check
+    - locktime_check
+  expected_structure:
+    require_count_min: 5
+  tags: ["vault", "realworld", "simple_delay"]
+
+- id: vr_002
+  pattern: vault
+  difficulty: medium
+  intent: |
+    I want a wallet where I can spend small amounts instantly, but anything big should be delayed for one day.
+  required_features:
+    - signature_verification
+    - output_value_validation
+    - multiple_paths
+  critical_features:
+    - output_amount_check
+    - amount_threshold_logic
+  expected_structure:
+    require_count_min: 6
+  tags: ["vault", "realworld", "spending_limit"]
+
+- id: vr_003
+  pattern: vault
+  difficulty: medium
+  intent: |
+    Create a vault where my main key needs a delay to withdraw, but my cold backup key can recover funds immediately.
+  required_features:
+    - signature_verification
+    - time_validation
+    - multiple_paths
+  critical_features:
+    - locktime_check
+    - emergency_path
+  expected_structure:
+    require_count_min: 6
+  tags: ["vault", "realworld", "emergency_recovery"]
+
+- id: vr_004
+  pattern: vault
+  difficulty: medium
+  intent: |
+    Build a vault where I can announce a withdrawal, then either claim it after 2 days or cancel it before that.
+  required_features:
+    - signature_verification
+    - time_validation
+    - multiple_paths
+    - covenant_continuation
+  critical_features:
+    - locktime_check
+    - cancellation_path
+  expected_structure:
+    require_count_min: 7
+  tags: ["vault", "realworld", "cancellable"]
+
+- id: vr_005
+  pattern: vault
+  difficulty: hard
+  intent: |
+    I want a treasury vault where withdrawals under 0.01 BCH are instant, medium withdrawals wait 1 day, and large withdrawals wait 7 days.
+  required_features:
+    - signature_verification
+    - time_validation
+    - output_value_validation
+    - multiple_paths
+  critical_features:
+    - tiered_delay_logic
+    - output_amount_check
+  expected_structure:
+    require_count_min: 8
+  tags: ["vault", "realworld", "tiered_limits"]
+
+- id: vr_006
+  pattern: vault
+  difficulty: hard
+  intent: |
+    Create a secure vault for my startup treasury so that my normal wallet needs a waiting period, but 2 out of 3 recovery keys can move funds immediately.
+  required_features:
+    - signature_verification
+    - multisig
+    - multiple_paths
+  critical_features:
+    - valid_signature_check
+    - two_of_three_logic
+  expected_structure:
+    require_count_min: 7
+  tags: ["vault", "realworld", "multisig_recovery"]
+
+- id: vr_007
+  pattern: vault
+  difficulty: medium
+  intent: |
+    Make a vault where I first lock a withdrawal amount into a staging state, then finalize it after a delay.
+  required_features:
+    - signature_verification
+    - covenant_continuation
+    - time_validation
+    - output_destination_validation
+  critical_features:
+    - covenant_self_reference
+    - locktime_check
+  expected_structure:
+    require_count_min: 6
+  tags: ["vault", "realworld", "staged_withdrawal"]
+
+- id: vr_008
+  pattern: vault
+  difficulty: medium
+  intent: |
+    Build a delayed withdrawal vault that keeps the remaining funds safe in the contract after a partial withdrawal.
+  required_features:
+    - signature_verification
+    - covenant_continuation
+    - output_value_validation
+  critical_features:
+    - covenant_self_reference
+    - output_amount_check
+  expected_structure:
+    require_count_min: 6
+  tags: ["vault", "realworld", "partial_withdrawal"]
+
+- id: vr_009
+  pattern: vault
+  difficulty: hard
+  intent: |
+    Create a BCH vault for a founder treasury where I can spend a little instantly for operations, but large treasury movements should be delayed.
+  required_features:
+    - signature_verification
+    - output_value_validation
+    - multiple_paths
+  critical_features:
+    - amount_threshold_logic
+    - output_amount_check
+  expected_structure:
+    require_count_min: 6
+  tags: ["vault", "realworld", "founder_treasury"]
+
+- id: vr_010
+  pattern: vault
+  difficulty: hard
+  intent: |
+    Make a safety wallet that lets me announce a withdrawal today and only claim it after 3 days, unless my backup key cancels it first.
+  required_features:
+    - signature_verification
+    - time_validation
+    - multiple_paths
+    - covenant_continuation
+  critical_features:
+    - locktime_check
+    - cancellation_path
+  expected_structure:
+    require_count_min: 7
+  tags: ["vault", "realworld", "backup_cancel"]
+
+- id: vr_011
+  pattern: vault
+  difficulty: hard
+  intent: |
+    Build a vault for CashTokens where only a specific token category can be withdrawn after a 24 hour delay.
+  required_features:
+    - signature_verification
+    - time_validation
+    - token_validation
+  critical_features:
+    - token_category_check
+    - locktime_check
+  expected_structure:
+    require_count_min: 6
+  tags: ["vault", "realworld", "token_vault"]
+
+- id: vr_012
+  pattern: vault
+  difficulty: hard
+  intent: |
+    Create a token treasury vault where small token withdrawals are instant, but large token withdrawals need a delay.
+  required_features:
+    - signature_verification
+    - token_validation
+    - multiple_paths
+  critical_features:
+    - token_amount_check
+    - amount_threshold_logic
+  expected_structure:
+    require_count_min: 7
+  tags: ["vault", "realworld", "token_spending_limit"]
+
+- id: vr_013
+  pattern: vault
+  difficulty: hard
+  intent: |
+    Make a vault for fungible CashTokens where my backup key can immediately recover all tokens if needed.
+  required_features:
+    - signature_verification
+    - token_validation
+    - multiple_paths
+  critical_features:
+    - token_category_check
+    - emergency_path
+  expected_structure:
+    require_count_min: 6
+  tags: ["vault", "realworld", "token_recovery"]
+
+- id: vr_014
+  pattern: vault
+  difficulty: hard
+  intent: |
+    Build a delayed NFT vault where a specific NFT can only be transferred after a 2 day waiting period.
+  required_features:
+    - signature_verification
+    - time_validation
+    - token_validation
+  critical_features:
+    - token_category_check
+    - token_nft_amount_check
+    - locktime_check
+  expected_structure:
+    require_count_min: 6
+  tags: ["vault", "realworld", "nft_vault"]
+
+- id: vr_015
+  pattern: vault
+  difficulty: hard
+  intent: |
+    Create a vault where only one specific token amount can be staged and claimed after a delay.
+  required_features:
+    - signature_verification
+    - time_validation
+    - token_validation
+    - covenant_continuation
+  critical_features:
+    - token_amount_check
+    - locktime_check
+  expected_structure:
+    require_count_min: 7
+  tags: ["vault", "realworld", "staged_token_withdrawal"]
+
+- id: vr_016
+  pattern: vault
+  difficulty: medium
+  intent: |
+    Make a secure wallet where I can’t instantly drain everything by mistake.
+  required_features:
+    - signature_verification
+    - time_validation
+    - multiple_paths
+  critical_features:
+    - locktime_check
+    - amount_threshold_logic
+  expected_structure:
+    require_count_min: 5
+  tags: ["vault", "realworld", "ambiguous_safe"]
+
+- id: vr_017
+  pattern: vault
+  difficulty: medium
+  intent: |
+    Build a treasury vault that gives me a chance to react if my hot wallet gets compromised.
+  required_features:
+    - signature_verification
+    - time_validation
+    - multiple_paths
+  critical_features:
+    - locktime_check
+    - emergency_path
+  expected_structure:
+    require_count_min: 5
+  tags: ["vault", "realworld", "hot_wallet_protection"]
+
+- id: vr_018
+  pattern: vault
+  difficulty: medium
+  intent: |
+    Create a vault for team funds where normal withdrawals are delayed, but a recovery path exists if something goes wrong.
+  required_features:
+    - signature_verification
+    - time_validation
+    - multiple_paths
+  critical_features:
+    - locktime_check
+    - emergency_path
+  expected_structure:
+    require_count_min: 6
+  tags: ["vault", "realworld", "team_funds"]
+
+- id: vr_019
+  pattern: vault
+  difficulty: hard
+  intent: |
+    FAILURE CASE: Create a vault that always forces all funds back into the same contract forever with no actual withdrawal path.
+  required_features:
+    - covenant_continuation
+  critical_features:
+    - must_fail_permanent_covenant
+  expected_structure:
+    require_count_min: 3
+  tags: ["vault", "realworld", "failure", "vulnerability"]
+
+- id: vr_020
+  pattern: vault
+  difficulty: hard
+  intent: |
+    FAILURE CASE: Build a vault that stages withdrawals but never checks whether the remaining value is preserved correctly.
+  required_features:
+    - covenant_continuation
+  critical_features:
+    - must_fail_missing_amount_validation
+  expected_structure:
+    require_count_min: 3
+  tags: ["vault", "realworld", "failure", "vulnerability"]
+
+- id: vr_021
+  pattern: vault
+  difficulty: hard
+  intent: |
+    FAILURE CASE: Make a vault where the backup key can bypass all restrictions and drain funds instantly without safeguards.
+  required_features:
+    - signature_verification
+  critical_features:
+    - must_fail_unbounded_backup_path
+  expected_structure:
+    require_count_min: 3
+  tags: ["vault", "realworld", "failure", "vulnerability"]
+
+- id: vr_022
+  pattern: vault
+  difficulty: hard
+  intent: |
+    FAILURE CASE: Create a delayed vault that checks time but does not verify the withdrawal destination or amount properly.
+  required_features:
+    - time_validation
+  critical_features:
+    - must_fail_missing_output_constraints
+  expected_structure:
+    require_count_min: 3
+  tags: ["vault", "realworld", "failure", "vulnerability"]
+
+- id: vr_023
+  pattern: vault
+  difficulty: hard
+  intent: |
+    Build a founder treasury vault where the cold key can recover immediately, but normal operations should remain easy for small expenses.
+  required_features:
+    - signature_verification
+    - multiple_paths
+    - output_value_validation
+  critical_features:
+    - emergency_path
+    - amount_threshold_logic
+  expected_structure:
+    require_count_min: 6
+  tags: ["vault", "realworld", "founder_ops"]
+
+- id: vr_024
+  pattern: vault
+  difficulty: hard
+  intent: |
+    Create a secure vault for BCH that requires a delay for normal withdrawals, allows cancellation, and preserves funds correctly across stages.
+  required_features:
+    - signature_verification
+    - time_validation
+    - covenant_continuation
+    - output_value_validation
+    - multiple_paths
+  critical_features:
+    - locktime_check
+    - cancellation_path
+    - output_amount_check
+  expected_structure:
+    require_count_min: 8
+  tags: ["vault", "realworld", "comprehensive"]

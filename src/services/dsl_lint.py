@@ -208,7 +208,31 @@ def _check_value_anchoring(code: str, contract_mode: str = "") -> list[dict]:
             body, re.DOTALL
         ))
 
-        has_value_anchor = direct_anchor or sum_anchor or partial_anchor
+        # Vault staged split: out0 == in - withdraw AND out1 == withdraw (paired legs).
+        # Provable conservation without a single-line sum require().
+        vault_staged_split = False
+        if mode == "vault":
+            vault_staged_split = partial_anchor and bool(re.search(
+                r"require\s*\(\s*tx\.outputs\[1\]\.value\s*==\s*[\w\d]+\s*\)",
+                body,
+                re.DOTALL,
+            ))
+            # Token vault: same idea for tokenAmount
+            tok_partial = bool(re.search(
+                r"require\s*\(\s*tx\.outputs\[\d+\]\.tokenAmount\s*==\s*"
+                r"tx\.inputs\[this\.activeInputIndex\]\.tokenAmount\s*-\s*[\w\d]+\s*\)",
+                body,
+                re.DOTALL,
+            ))
+            vault_tok_split = tok_partial and bool(re.search(
+                r"require\s*\(\s*tx\.outputs\[1\]\.tokenAmount\s*==\s*[\w\d]+\s*\)",
+                body,
+                re.DOTALL,
+            ))
+
+            vault_staged_split = vault_staged_split or vault_tok_split
+
+        has_value_anchor = direct_anchor or sum_anchor or partial_anchor or vault_staged_split
         if not has_value_anchor:
             violations.append({
                 "rule_id": "LNC-003",
@@ -436,8 +460,9 @@ def _check_covenant_self_anchor(code: str, contract_mode: str = "") -> list[dict
 
     MODE MATRIX:
     - distribution, split, burn  → FORBID self-anchor (payout/exit intent)
-    - vesting, stateful, vault   → REQUIRE self-anchor (continuation intent)
-    - covenant                   → REQUIRE self-anchor
+    - vesting, stateful, covenant → REQUIRE self-anchor on non-terminal paths
+    - vault → ONLY staging/continuation function names (announce*, stage*, …);
+      terminal/payout paths (claim, finalize, instantSpend, recover*, …) skip
     - token                      → REQUIRE self-anchor UNLESS mode is specifically 'burn'
     - multisig, escrow, timelock → SKIP (stateless or single-spend)
     """
@@ -483,21 +508,38 @@ def _check_covenant_self_anchor(code: str, contract_mode: str = "") -> list[dict
             return [] # No covenant features detected
 
     violations = []
+    # Vault: only *staging / continuation* paths must self-anchor; terminal/payout paths must not.
+    _VAULT_STAGING_FUNC = re.compile(
+        r"(?i)^(announce\w*|stage\w*|start\w*|prepare\w*|initiate\w*)$"
+    )
+    # Exact names that are always payout/instant paths (not staging), including camelCase spend helpers.
+    _TERMINAL_EXACT = re.compile(
+        r"(?i)^(instantSpend|smallSpend|largeSpend|coldWithdrawal|coldRecovery|"
+        r"emergencyRecovery|emergencyWithdraw|delayedSpend|finalizeWithdrawal|"
+        r"finalizeLargeSpend|claim|finalize|recover\w*|emergency\w*)$"
+    )
+
     for func_name, body, start_lineno in _function_bodies(code):
-        # EXCEPTION: Terminal / exit functions that intentionally do NOT perpetuate the contract.
-        # These explicitly end the contract lifecycle — no self-anchor is correct here.
-        # Vault-specific: finalize*, claim*, full*, recover*, emergency*, guardian*, guardian*, cancel* (when exiting)
-        TERMINAL_FUNC_NAMES = re.compile(
-            r"\b("
-            r"burn|refund|claim|withdraw|exit|drain|close|liquidate|sweep"
-            r"|finalize|finalise|release|payout|pay|redeem|execute|settle"
-            r"|emergency|recover|recovery|guardian|guardianRecovery"
-            r"|fullWithdraw|fullSpend|finalWithdraw|complete"
-            r")\w*\b",
-            re.IGNORECASE
-        )
-        if TERMINAL_FUNC_NAMES.search(func_name):
-            continue
+        if mode == "vault":
+            if _TERMINAL_EXACT.match(func_name):
+                continue
+            if not _VAULT_STAGING_FUNC.match(func_name):
+                continue
+        else:
+            # EXCEPTION: Terminal / exit functions that intentionally do NOT perpetuate the contract.
+            TERMINAL_FUNC_NAMES = re.compile(
+                r"\b("
+                r"burn|refund|claim|withdraw|exit|drain|close|liquidate|sweep"
+                r"|finalize|finalise|release|payout|pay|redeem|execute|settle"
+                r"|emergency|recover|recovery|guardian|guardianRecovery"
+                r"|fullWithdraw|fullSpend|finalWithdraw|complete"
+                r")\w*\b",
+                re.IGNORECASE
+            )
+            if _TERMINAL_EXACT.match(func_name):
+                continue
+            if TERMINAL_FUNC_NAMES.search(func_name):
+                continue
 
         # Only check functions that actually touch outputs/tokens
         touches_outputs = bool(re.search(r"tx\.outputs\b", body))

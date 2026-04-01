@@ -45,7 +45,7 @@ class TestLNC008(unittest.TestCase):
     def test_vesting_requires_self_anchor(self):
         code = """
         contract Vesting(int cliff) {
-            function claim(sig s) {
+            function advance(sig s) {
                 require(tx.outputs[0].value == 1000);
                 // Missing self-anchor!
             }
@@ -83,7 +83,7 @@ class TestLNC008(unittest.TestCase):
     def test_vault_requires_self_anchor(self):
         code = """
         contract Vault() {
-            function deposit(sig s) {
+            function announce(sig s) {
                  require(tx.outputs[0].value > 1000);
             }
         }
@@ -102,6 +102,21 @@ class TestLNC008(unittest.TestCase):
         """
         violations = _check_covenant_self_anchor(code, "multisig")
         self.assertEqual(len(violations), 0)
+
+    def test_vault_instant_spend_skips_lnc008(self):
+        code = """
+        contract V(pubkey o, bytes r) {
+            function instantSpend(sig s) {
+                require(tx.outputs.length == 2);
+                require(tx.outputs[0].lockingBytecode == r);
+                require(tx.outputs[1].value == 1000);
+                require(checkSig(s, o));
+            }
+        }
+        """
+        violations = _check_covenant_self_anchor(code, "vault")
+        lnc008 = [v for v in violations if v["rule_id"] == "LNC-008"]
+        self.assertEqual(len(lnc008), 0)
 
 if __name__ == "__main__":
     unittest.main()

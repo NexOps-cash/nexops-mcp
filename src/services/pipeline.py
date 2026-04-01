@@ -227,6 +227,15 @@ EMERGENCY / CANCEL:
   Step 3: require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
   NOTE: MAY re-anchor if cancel (keep funds in vault), or exit if emergency.
 
+FOUNDER / OPS TREASURY (small instant spend + large delayed treasury moves):
+  Use distinct constructor ints, e.g. int opsLimitSats, int largeDelaySeconds.
+  - smallOpsSpend / instantSpend: amount <= opsLimitSats; 2 outputs; out0 MUST re-anchor
+    (lockingBytecode == this.activeBytecode); out1 pays recipient; NO this.age delay.
+  - announceLargeWithdrawal / stageLargeSpend: 2 outputs; both split value; out0 re-anchors full remainder;
+    include require(amount > opsLimitSats) for the large path.
+  - finalizeLargeWithdrawal: require(this.age >= largeDelaySeconds); 1 output to recipientLockingBytecode;
+    full value; signature required — do NOT re-anchor to this.activeBytecode on payout.
+
 FORBIDDEN (causes compile or security failure):
   - NEVER access tx.outputs[i] without a preceding require(tx.outputs.length >= i+1)
   - NEVER use this.activeBytecode in a terminal payout (finalize/claim/emergency-exit)
@@ -899,6 +908,15 @@ def _parse_phase1_response(raw: str, intent: str, security_level: str) -> Contra
                         data[key] = "generic"
                     else:
                         data[key] = ""
+            # Pre-coerce range-like timeouts so Pydantic does not fall back to generic intent.
+            td = data.get("timeout_days")
+            if isinstance(td, list) and td:
+                try:
+                    data["timeout_days"] = max(int(x) for x in td)
+                except (TypeError, ValueError):
+                    data["timeout_days"] = None
+            elif isinstance(td, list) and not td:
+                data["timeout_days"] = None
             model = IntentModel(**data)
         except Exception as exc:
             logger.warning(f"Pydantic validation failed, using raw defaults: {exc}")

@@ -65,7 +65,8 @@ class FeatureExtractor:
             functions.append({
                 "name": name,
                 "role": role,
-                "has_anchor": "this.activeBytecode" in body or "lockingBytecode" in body,
+                # Only self-continuation counts as covenant anchor (recipient lockingBytecode is not).
+                "has_anchor": "this.activeBytecode" in body,
                 "has_value_check": (".value" in body or "tokenAmount" in body) and "tx.inputs" in body
             })
 
