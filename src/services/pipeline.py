@@ -216,7 +216,7 @@ INTERMEDIATE STATE (Announcement / Start):
 
 DELAYED CLAIM (Finalize / Claim):
   Step 1: require(tx.outputs.length == 1);
-  Step 2: require(tx.age >= delaySeconds);
+  Step 2: require(this.age >= delaySeconds);
   Step 3: require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
   Step 4: require(checkSig(sig, owner));
   NOTE: Do NOT use this.activeBytecode in finalize — funds exit the contract.
@@ -231,6 +231,12 @@ FORBIDDEN (causes compile or security failure):
   - NEVER access tx.outputs[i] without a preceding require(tx.outputs.length >= i+1)
   - NEVER use this.activeBytecode in a terminal payout (finalize/claim/emergency-exit)
   - NEVER subtract fees from value inline (use named constructor param instead)
+
+TOKEN SAFETY (Vault hardening):
+  - For BCH-only vaults: require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
+    require(tx.inputs[this.activeInputIndex].tokenAmount == 0);
+  - For token-bearing vaults: ALWAYS validate BOTH tokenCategory and tokenAmount together
+    on relevant outputs.
 """
 
 def build_pattern_rails(tags: List[str], contract_type: str = "") -> str:
