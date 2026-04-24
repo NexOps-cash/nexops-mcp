@@ -143,17 +143,25 @@ class AuditAgent:
             err_type = err.get("type", "UnknownError")
             rule_id = COMPILE_ERROR_MAP.get(err_type, "compile_unknown_error")
 
+            # Internal/unknown compiler errors (e.g. Node.js runtime failures like
+            # "sourceTags is not iterable") are environment issues, not security
+            # defects — demote so they don't falsely block otherwise valid contracts.
+            INTERNAL_ERR_TYPES = {"UnknownError", "InternalError", "CompilerNotFoundError", "TimeoutError"}
+            compile_severity = Severity.HIGH if err_type in INTERNAL_ERR_TYPES else Severity.CRITICAL
+            compile_issue_class = IssueClass.CONTEXTUAL if err_type in INTERNAL_ERR_TYPES else IssueClass.REAL_ISSUE
+            compile_exploit = ExploitSeverity.GRIEFING if err_type in INTERNAL_ERR_TYPES else ExploitSeverity.DIRECT_FUND_LOSS
+
             issues.append(
                 AuditIssue(
                     title=f"Compilation Failed: {err_type}",
-                    severity=Severity.CRITICAL,
+                    severity=compile_severity,
                     line=err.get("line") or 0,
                     description=f"The contract failed to compile: {err.get('raw', 'Unknown compiler error')}",
                     recommendation=err.get("hint", "Review syntax and compiler output."),
                     rule_id=rule_id,
                     can_fix=True,
-                    issue_class=IssueClass.REAL_ISSUE,
-                    exploit_severity=ExploitSeverity.DIRECT_FUND_LOSS,
+                    issue_class=compile_issue_class,
+                    exploit_severity=compile_exploit,
                 )
             )
 

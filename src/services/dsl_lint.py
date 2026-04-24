@@ -288,8 +288,14 @@ def _check_fee_arithmetic(code: str, contract_mode: str = "") -> list[dict]:
 
     violations = []
     for lineno, line in _lines(code):
+        # Skip pure comment lines so doc comments like "- Fee collection vault" don't trigger
+        stripped = line.lstrip()
+        if stripped.startswith("//") or stripped.startswith("*") or stripped.startswith("/*"):
+            continue
+        # Remove inline trailing comments before pattern matching
+        code_part = re.sub(r"//.*$", "", line)
         # Detect patterns like: .value - fee, .value - 1000, inputValue -
-        if re.search(r"(?:\.value|inputValue|input_value)\s*-", line):
+        if re.search(r"(?:\.value|inputValue|input_value)\s*-", code_part):
             violations.append({
                 "rule_id": "LNC-005",
                 "message": (
@@ -300,7 +306,7 @@ def _check_fee_arithmetic(code: str, contract_mode: str = "") -> list[dict]:
                 "line_hint": lineno,
             })
         # Detect explicit `- fee` / `- miner_fee` variable
-        if re.search(r"\-\s*(?:fee|miner_?fee|tx_?fee|satoshis_?fee)\b", line, re.IGNORECASE):
+        if re.search(r"\-\s*(?:fee|miner_?fee|tx_?fee|satoshis_?fee)\b", code_part, re.IGNORECASE):
             violations.append({
                 "rule_id": "LNC-005",
                 "message": "Fee variable subtraction detected — forbidden. Use exact output values.",
@@ -734,7 +740,7 @@ def _check_mint_authority(code: str, contract_mode: str = "") -> list[dict]:
     return violations
 
 
-def _check_token_pair_completeness(code: str) -> list[dict]:
+def _check_token_pair_completeness(code: str, contract_mode: str = "") -> list[dict]:
     """
     LNC-014: Missing Token Pair Guard.
 
@@ -742,7 +748,14 @@ def _check_token_pair_completeness(code: str) -> list[dict]:
     If a contract reads one but not the other in a require(), it risks:
     - Silent burn (tokenAmount unconstrained → tokens disappear)
     - Category confusion (tokenCategory unconstrained → wrong token accepted)
+
+    Skipped for vault/minter/parser: these use tokenCategory for authorization
+    gating or controlled minting, not for token-pair conservation checks.
     """
+    mode = (contract_mode or "").lower().strip()
+    if mode in {"vault", "minter", "parser", "conditional_spend"}:
+        return []
+
     violations = []
 
     for func_name, body, start_lineno in _function_bodies(code):

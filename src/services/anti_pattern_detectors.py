@@ -603,26 +603,45 @@ class EVMHallucinationDetector(AntiPatternDetector):
 class EmptyFunctionDetector(AntiPatternDetector):
     """
     Detects public functions with no require() statements.
+    Skipped for vault/minter/parser contracts where authorization gates may use
+    intermediate variables rather than bare require() at the outermost block.
+    Uses brace-depth traversal so nested do{}/if{} blocks are handled correctly.
     """
     id = "empty_function_body"
-    
+
+    _SKIP_MODES = {"vault", "minter", "parser", "conditional_spend"}
+
     def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        if ast.contract_mode in self._SKIP_MODES:
+            return None
+
         import re
-        # Find function blocks and check for require()
-        fn_pattern = re.compile(r'function\s+(\w+)\s*\([^)]*\)\s*\{([^}]*)\}', re.DOTALL)
-        empty_fns = []
-        for match in fn_pattern.finditer(ast.code):
-            if 'require(' not in match.group(2):
-                empty_fns.append(match.group(1))
-        
+        empty_fns: List[str] = []
+        for match in re.finditer(r'function\s+(\w+)\s*\([^)]*\)\s*\{', ast.code):
+            fn_name = match.group(1)
+            start = match.end() - 1  # points at the opening '{'
+            depth = 0
+            body_chars: List[str] = []
+            for ch in ast.code[start:]:
+                if ch == '{':
+                    depth += 1
+                elif ch == '}':
+                    depth -= 1
+                    if depth == 0:
+                        break
+                body_chars.append(ch)
+            body = "".join(body_chars)
+            if 'require(' not in body:
+                empty_fns.append(fn_name)
+
         if empty_fns:
             return Violation(
-                rule=f"{self.id}",
+                rule=self.id,
                 reason=f"Functions with no require() statements: {', '.join(empty_fns)}",
                 exploit="Empty functions allow unrestricted spending of UTXOs by anyone. "
                         "Every public function must enforce at least one constraint.",
                 severity="critical",
-                location={"line": 0, "function": empty_fns[0]}
+                location={"line": 0, "function": empty_fns[0]},
             )
         return None
 

@@ -60,12 +60,13 @@ PATTERN_PROFILES: Dict[str, Dict[str, List[str]]] = {
     },
     "vault": {
         "knowledge_files": ["vault_rules.yaml"],
-        "disable_lint_rules": [],
+        "disable_lint_rules": ["LNC-005", "LNC-014", "LNC-018"],
         "disable_detectors": [
             "missing_output_anchor",
             "missing_output_limit",
             "missing_value_enforcement",
             "output_binding_missing",
+            "empty_function_body",
         ],
     },
     "covenant": {
@@ -80,17 +81,18 @@ PATTERN_PROFILES: Dict[str, Dict[str, List[str]]] = {
     },
     "minting": {
         "knowledge_files": ["covenant_rules.yaml", "cashtokens_rules.yaml", "nft_rules.yaml"],
-        "disable_lint_rules": [],
+        "disable_lint_rules": ["LNC-005", "LNC-014"],
         "disable_detectors": [
             "missing_output_limit",
             "missing_value_enforcement",
             "missing_token_amount_validation",
             "output_binding_missing",
+            "empty_function_body",
         ],
     },
     "parser": {
         "knowledge_files": ["covenant_rules.yaml"],
-        "disable_lint_rules": [],
+        "disable_lint_rules": ["LNC-005", "LNC-014", "LNC-018"],
         "disable_detectors": [
             "missing_output_limit",
             "missing_value_enforcement",
@@ -98,6 +100,7 @@ PATTERN_PROFILES: Dict[str, Dict[str, List[str]]] = {
             "weak_output_count_limit",
             "output_binding_missing",
             "partial_aggregation_risk",
+            "empty_function_body",
         ],
     },
     "manager": {
