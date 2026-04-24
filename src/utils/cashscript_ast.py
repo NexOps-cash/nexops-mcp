@@ -8,7 +8,7 @@ NOTE: This is a simplified parser for MVP. In production, this would use
 the actual CashScript compiler's AST or a full parser like tree-sitter.
 """
 
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Literal
 from dataclasses import dataclass
 import re
 
@@ -382,6 +382,196 @@ class CashScriptAST:
             if not self.validates_locking_bytecode_for(output_ref):
                 violations.append(output_ref)
         return violations
+
+    def _get_function_bodies(self) -> Dict[str, str]:
+        """Extract function bodies keyed by function name."""
+        bodies: Dict[str, str] = {}
+        for match in re.finditer(r'function\s+(\w+)\s*\([^)]*\)\s*\{(.*?)\}', self.code, re.DOTALL):
+            bodies[match.group(1)] = match.group(2)
+        return bodies
+
+    def has_index_underflow_risk(self) -> List[str]:
+        """
+        Detect this.activeInputIndex - k without require(this.activeInputIndex > k).
+        """
+        at_risk_functions: List[str] = []
+        for fn_name, body in self._get_function_bodies().items():
+            for match in re.finditer(r"this\.activeInputIndex\s*-\s*(\d+|\w+)", body):
+                operand = match.group(1)
+                guard = re.search(
+                    rf"require\s*\(\s*this\.activeInputIndex\s*>\s*{re.escape(operand)}\s*\)",
+                    body
+                )
+                if not guard:
+                    at_risk_functions.append(fn_name)
+                    break
+        return at_risk_functions
+
+    def classify_io_pattern(self, func_name: str) -> Literal["forwarding", "aggregation", "unknown"]:
+        """
+        Classify function behavior as forwarding or aggregation.
+        """
+        body = self._get_function_bodies().get(func_name, "")
+        if not body:
+            return "unknown"
+
+        input_refs = re.findall(r"tx\.inputs\[\s*([^\]]+)\s*\]\.", body)
+        output_refs = re.findall(r"tx\.outputs\[\s*([^\]]+)\s*\]\.", body)
+        if not input_refs or not output_refs:
+            return "unknown"
+
+        input_unique = set(i.strip() for i in input_refs)
+        output_unique = set(o.strip() for o in output_refs)
+
+        if input_unique == output_unique:
+            return "forwarding"
+
+        if len(input_unique) > len(output_unique):
+            return "aggregation"
+
+        if any(i in output_unique for i in input_unique):
+            return "forwarding"
+
+        return "unknown"
+
+    def has_input_without_output_coupling(self) -> List[str]:
+        """
+        Find forwarding functions reading tx.inputs[i] without enforcing tx.outputs[i].
+        """
+        violations: List[str] = []
+        for fn_name, body in self._get_function_bodies().items():
+            if self.classify_io_pattern(fn_name) != "forwarding":
+                continue
+            input_indices = set(re.findall(r"tx\.inputs\[\s*([^\]]+)\s*\]\.", body))
+            output_indices = set(re.findall(r"tx\.outputs\[\s*([^\]]+)\s*\]\.", body))
+            if not input_indices.issubset(output_indices):
+                violations.append(fn_name)
+        return violations
+
+    def has_partial_aggregation_risk(self) -> List[str]:
+        """
+        Boundary-aware aggregation risk:
+        - Aggregation loop/iteration pattern exists
+        - No boundary validation tying index to tx.inputs.length
+        """
+        at_risk: List[str] = []
+        for fn_name, body in self._get_function_bodies().items():
+            token_refs = re.findall(r"tx\.inputs\[\s*([A-Za-z_]\w*|\d+)\s*\]\.tokenCategory\s*==", body)
+            if len(token_refs) < 2:
+                continue
+
+            looks_iterative = bool(
+                re.search(r"\b(for|while)\s*\(", body)
+                or re.search(r"\b([A-Za-z_]\w*)\s*\+\+", body)
+                or re.search(r"\b([A-Za-z_]\w*)\s*=\s*\1\s*\+\s*1", body)
+                or len(set(token_refs)) == 1
+            )
+            if not looks_iterative:
+                continue
+
+            boundary_checks = [
+                r"require\s*\(\s*tx\.inputs\.length\s*(==|<=|>=)\s*(?:[A-Za-z_]\w*|\d+)\s*\)",
+                r"require\s*\(\s*(?:fundIndex|idx|i|j)\s*(==|>=)\s*tx\.inputs\.length\s*\)",
+                r"require\s*\(\s*tx\.inputs\.length\s*==\s*(?:fundIndex|idx|i|j)\s*\)",
+            ]
+            has_boundary = any(re.search(p, body) for p in boundary_checks)
+            if not has_boundary:
+                at_risk.append(fn_name)
+        return at_risk
+
+    def has_bytes_parse_without_length_check(self) -> List[str]:
+        """
+        Detect bytes split/slice parsing without length checks.
+        """
+        risky_functions: List[str] = []
+        for fn_name, body in self._get_function_bodies().items():
+            parse_ops = re.findall(r"(\w+)\.split\s*\(", body)
+            parse_ops += re.findall(r"(\w+)\s*\[\s*\d+\s*:\s*\d+\s*\]", body)
+            if not parse_ops:
+                continue
+            has_guard = bool(
+                re.search(r"require\s*\(\s*\w+\.length\s*>=\s*\d+\s*\)", body)
+                or re.search(r"require\s*\(\s*len\s*\(\s*\w+\s*\)\s*>=\s*\d+\s*\)", body)
+            )
+            if not has_guard:
+                risky_functions.append(fn_name)
+        return risky_functions
+
+    def has_unbounded_positive_only_check(self) -> List[str]:
+        """
+        Detect require(x > 0) without upper bound in same function.
+        """
+        violations: List[str] = []
+        for fn_name, body in self._get_function_bodies().items():
+            positives = re.findall(r"require\s*\(\s*([A-Za-z_]\w*)\s*>\s*0\s*\)", body)
+            if not positives:
+                continue
+            for var in positives:
+                has_upper = bool(
+                    re.search(rf"require\s*\(\s*{re.escape(var)}\s*(<=|<)\s*[\w\d_]+\s*\)", body)
+                )
+                if not has_upper:
+                    violations.append(f"{fn_name}:{var}")
+        return violations
+
+    def get_unbound_output_refs(self) -> List[OutputReference]:
+        """
+        Output refs lacking lockingBytecode validation in same function.
+        """
+        refs: List[OutputReference] = []
+        for output_ref in self.output_references:
+            if output_ref.property_accessed == "lockingBytecode":
+                continue
+            if not self.validates_locking_bytecode_for(output_ref):
+                refs.append(output_ref)
+        return refs
+
+    def is_minter_contract(self) -> bool:
+        """
+        Behavior-based minter detection.
+        """
+        has_ctor_category = any(
+            p.get("name", "").lower().endswith("category") or p.get("name", "").lower() == "tokencategory"
+            for p in self.constructor_params
+        )
+        has_mint_fn = any("mint" in fn.lower() for fn in self.functions)
+        if not (has_ctor_category or has_mint_fn):
+            return False
+
+        for _, body in self._get_function_bodies().items():
+            has_destination_lock = bool(
+                re.search(
+                    r"require\s*\(\s*tx\.outputs\[\d+\]\.lockingBytecode\s*==\s*(destination|recipient|toAddr)\s*\)",
+                    body,
+                    re.IGNORECASE
+                )
+            )
+            has_token_loop = bool(
+                re.search(r"tx\.outputs\[\s*[A-Za-z_]\w*\s*\]\.tokenCategory", body)
+                and re.search(r"tx\.outputs\[\s*[A-Za-z_]\w*\s*\]\.tokenAmount", body)
+            )
+            if has_destination_lock or has_token_loop:
+                return True
+        return False
+
+    def is_parser_contract(self) -> bool:
+        """
+        Heuristic parser contract detection.
+        """
+        split_count = len(re.findall(r"\.split\s*\(", self.code))
+        touches_outputs = bool(re.search(r"tx\.outputs\[\d+\]\.(?:value|tokenAmount|lockingBytecode)", self.code))
+        return split_count >= 3 and not touches_outputs
+
+    def controls_value(self) -> bool:
+        """
+        Value control includes satoshis and token amounts.
+        """
+        return bool(
+            re.search(r"tx\.outputs\[\d+\]\.value", self.code)
+            or re.search(r"tx\.outputs\[\d+\]\.tokenAmount", self.code)
+            or re.search(r"tokenAmount\s*[\+\-\*/]", self.code)
+            or re.search(r"[\+\-\*/]\s*tokenAmount", self.code)
+        )
     
     def to_dict(self) -> Dict[str, Any]:
         """Serialize AST to dict for debugging"""

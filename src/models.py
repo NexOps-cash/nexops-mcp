@@ -164,6 +164,20 @@ class Severity(str, Enum):
     LOW = "LOW"
     INFO = "INFO"
 
+
+class IssueClass(str, Enum):
+    REAL_ISSUE = "real_issue"
+    CONTEXTUAL = "contextual"
+    FALSE_POSITIVE = "false_positive"
+    NOISE = "noise"
+
+
+class ExploitSeverity(str, Enum):
+    DIRECT_FUND_LOSS = "direct_fund_loss"
+    PARTIAL_VIOLATION = "partial_violation"
+    GRIEFING = "griefing"
+    NOT_APPLICABLE = "n/a"
+
 class AuditIssue(BaseModel):
     title: str
     severity: Severity
@@ -172,12 +186,16 @@ class AuditIssue(BaseModel):
     recommendation: str
     rule_id: str
     can_fix: bool = True
+    issue_class: IssueClass = IssueClass.REAL_ISSUE
+    exploit_severity: ExploitSeverity = ExploitSeverity.NOT_APPLICABLE
+    deferred_validation: bool = False
 
 class AuditMetadata(BaseModel):
     compile_success: bool
     dsl_passed: bool
     structural_score: float
     semantic_score: Optional[int] = None
+    semantic_confidence: Optional[float] = None
     contract_hash: str
 
 class SemanticAuditResult(BaseModel):
