@@ -470,7 +470,7 @@ class CashScriptAST:
                 continue
 
             boundary_checks = [
-                r"require\s*\(\s*tx\.inputs\.length\s*(==|<=|>=)\s*[A-Za-z_]\w*|\d+\s*\)",
+                r"require\s*\(\s*tx\.inputs\.length\s*(==|<=|>=)\s*(?:[A-Za-z_]\w*|\d+)\s*\)",
                 r"require\s*\(\s*(?:fundIndex|idx|i|j)\s*(==|>=)\s*tx\.inputs\.length\s*\)",
                 r"require\s*\(\s*tx\.inputs\.length\s*==\s*(?:fundIndex|idx|i|j)\s*\)",
             ]
