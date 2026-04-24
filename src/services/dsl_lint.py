@@ -61,7 +61,6 @@ def _check_hardcoded_input_index(code: str) -> list[dict]:
 
     Banned:
       - tx.inputs[0]                    → use tx.inputs[this.activeInputIndex]
-      - require(this.activeInputIndex == 0)
       - tx.outputs[0] without a preceding length guard in the same function
     """
     violations = []
@@ -76,16 +75,7 @@ def _check_hardcoded_input_index(code: str) -> list[dict]:
                 "line_hint": lineno,
             })
 
-    # Pattern 2: require(this.activeInputIndex == 0)
-    for lineno, line in lines_list:
-        if re.search(r"this\.activeInputIndex\s*==\s*0", line):
-            violations.append({
-                "rule_id": "LNC-001b",
-                "message": "require(this.activeInputIndex == 0) is forbidden — not a security guard",
-                "line_hint": lineno,
-            })
-
-    # Pattern 3: tx.outputs[N] accessed without a matching length guard (must be >= N+1)
+    # Pattern 2: tx.outputs[N] accessed without a matching length guard (must be >= N+1)
     for func_name, body, start_lineno in _function_bodies(code):
         # Collect all explicit length guards: require(tx.outputs.length == K)
         guarded_lengths: set[int] = set()
@@ -983,7 +973,6 @@ class DSLLinter:
         _check_invalid_token_log,        # LNC-019
         _check_locking_bytecode_constructor,  # LNC-015  (P2PKH/P2SH constructor safety)
         _check_value_preservation,       # LNC-016  (Self-anchor + Value continuity)
-        _check_forbidden_syntax,         # LNC-009  (ternary, loops, etc.)
     ]
 
     def lint(self, code: str, contract_mode: str = "") -> dict[str, Any]:

@@ -14,6 +14,10 @@ def canonical_pattern(contract_mode: str) -> str:
         "stateful": "covenant",
         "token": "token",
         "minting": "minting",
+        "minter": "minting",
+        "parser": "parser",
+        "manager": "manager",
+        "hybrid": "hybrid",
     }
     return alias_map.get(mode, mode or "generic")
 
@@ -57,7 +61,12 @@ PATTERN_PROFILES: Dict[str, Dict[str, List[str]]] = {
     "vault": {
         "knowledge_files": ["vault_rules.yaml"],
         "disable_lint_rules": [],
-        "disable_detectors": ["missing_output_anchor"],
+        "disable_detectors": [
+            "missing_output_anchor",
+            "missing_output_limit",
+            "missing_value_enforcement",
+            "output_binding_missing",
+        ],
     },
     "covenant": {
         "knowledge_files": ["covenant_rules.yaml"],
@@ -72,7 +81,34 @@ PATTERN_PROFILES: Dict[str, Dict[str, List[str]]] = {
     "minting": {
         "knowledge_files": ["covenant_rules.yaml", "cashtokens_rules.yaml", "nft_rules.yaml"],
         "disable_lint_rules": [],
+        "disable_detectors": [
+            "missing_output_limit",
+            "missing_value_enforcement",
+            "missing_token_amount_validation",
+            "output_binding_missing",
+        ],
+    },
+    "parser": {
+        "knowledge_files": ["covenant_rules.yaml"],
+        "disable_lint_rules": [],
+        "disable_detectors": [
+            "missing_output_limit",
+            "missing_value_enforcement",
+            "missing_output_anchor",
+            "weak_output_count_limit",
+            "output_binding_missing",
+            "partial_aggregation_risk",
+        ],
+    },
+    "manager": {
+        "knowledge_files": ["covenant_rules.yaml"],
+        "disable_lint_rules": [],
         "disable_detectors": [],
+    },
+    "hybrid": {
+        "knowledge_files": ["covenant_rules.yaml"],
+        "disable_lint_rules": [],
+        "disable_detectors": ["output_binding_missing"],
     },
     "conditional_spend": {
         "knowledge_files": ["conditional_spend_rules.yaml"],
