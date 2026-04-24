@@ -186,6 +186,7 @@ class AuditIssue(BaseModel):
     recommendation: str
     rule_id: str
     can_fix: bool = True
+    source: str = "contract"
     issue_class: IssueClass = IssueClass.REAL_ISSUE
     exploit_severity: ExploitSeverity = ExploitSeverity.NOT_APPLICABLE
     deferred_validation: bool = False

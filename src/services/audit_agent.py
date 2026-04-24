@@ -150,6 +150,7 @@ class AuditAgent:
             compile_severity = Severity.HIGH if err_type in INTERNAL_ERR_TYPES else Severity.CRITICAL
             compile_issue_class = IssueClass.CONTEXTUAL if err_type in INTERNAL_ERR_TYPES else IssueClass.REAL_ISSUE
             compile_exploit = ExploitSeverity.GRIEFING if err_type in INTERNAL_ERR_TYPES else ExploitSeverity.DIRECT_FUND_LOSS
+            compile_source = "toolchain" if err_type in INTERNAL_ERR_TYPES else "contract"
 
             issues.append(
                 AuditIssue(
@@ -160,6 +161,7 @@ class AuditAgent:
                     recommendation=err.get("hint", "Review syntax and compiler output."),
                     rule_id=rule_id,
                     can_fix=True,
+                    source=compile_source,
                     issue_class=compile_issue_class,
                     exploit_severity=compile_exploit,
                 )
