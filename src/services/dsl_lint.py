@@ -17,6 +17,7 @@ from __future__ import annotations
 import re
 import logging
 from typing import Any
+from src.services.pattern_profiles import get_pattern_profile
 
 logger = logging.getLogger("nexops.dsl_lint")
 
@@ -207,7 +208,31 @@ def _check_value_anchoring(code: str, contract_mode: str = "") -> list[dict]:
             body, re.DOTALL
         ))
 
-        has_value_anchor = direct_anchor or sum_anchor or partial_anchor
+        # Vault staged split: out0 == in - withdraw AND out1 == withdraw (paired legs).
+        # Provable conservation without a single-line sum require().
+        vault_staged_split = False
+        if mode == "vault":
+            vault_staged_split = partial_anchor and bool(re.search(
+                r"require\s*\(\s*tx\.outputs\[1\]\.value\s*==\s*[\w\d]+\s*\)",
+                body,
+                re.DOTALL,
+            ))
+            # Token vault: same idea for tokenAmount
+            tok_partial = bool(re.search(
+                r"require\s*\(\s*tx\.outputs\[\d+\]\.tokenAmount\s*==\s*"
+                r"tx\.inputs\[this\.activeInputIndex\]\.tokenAmount\s*-\s*[\w\d]+\s*\)",
+                body,
+                re.DOTALL,
+            ))
+            vault_tok_split = tok_partial and bool(re.search(
+                r"require\s*\(\s*tx\.outputs\[1\]\.tokenAmount\s*==\s*[\w\d]+\s*\)",
+                body,
+                re.DOTALL,
+            ))
+
+            vault_staged_split = vault_staged_split or vault_tok_split
+
+        has_value_anchor = direct_anchor or sum_anchor or partial_anchor or vault_staged_split
         if not has_value_anchor:
             violations.append({
                 "rule_id": "LNC-003",
@@ -435,8 +460,9 @@ def _check_covenant_self_anchor(code: str, contract_mode: str = "") -> list[dict
 
     MODE MATRIX:
     - distribution, split, burn  → FORBID self-anchor (payout/exit intent)
-    - vesting, stateful, vault   → REQUIRE self-anchor (continuation intent)
-    - covenant                   → REQUIRE self-anchor
+    - vesting, stateful, covenant → REQUIRE self-anchor on non-terminal paths
+    - vault → ONLY staging/continuation function names (announce*, stage*, …);
+      terminal/payout paths (claim, finalize, instantSpend, recover*, …) skip
     - token                      → REQUIRE self-anchor UNLESS mode is specifically 'burn'
     - multisig, escrow, timelock → SKIP (stateless or single-spend)
     """
@@ -482,21 +508,38 @@ def _check_covenant_self_anchor(code: str, contract_mode: str = "") -> list[dict
             return [] # No covenant features detected
 
     violations = []
+    # Vault: only *staging / continuation* paths must self-anchor; terminal/payout paths must not.
+    _VAULT_STAGING_FUNC = re.compile(
+        r"(?i)^(announce\w*|stage\w*|start\w*|prepare\w*|initiate\w*)$"
+    )
+    # Exact names that are always payout/instant paths (not staging), including camelCase spend helpers.
+    _TERMINAL_EXACT = re.compile(
+        r"(?i)^(instantSpend|smallSpend|largeSpend|coldWithdrawal|coldRecovery|"
+        r"emergencyRecovery|emergencyWithdraw|delayedSpend|finalizeWithdrawal|"
+        r"finalizeLargeSpend|claim|finalize|recover\w*|emergency\w*)$"
+    )
+
     for func_name, body, start_lineno in _function_bodies(code):
-        # EXCEPTION: Terminal / exit functions that intentionally do NOT perpetuate the contract.
-        # These explicitly end the contract lifecycle — no self-anchor is correct here.
-        # Vault-specific: finalize*, claim*, full*, recover*, emergency*, guardian*, guardian*, cancel* (when exiting)
-        TERMINAL_FUNC_NAMES = re.compile(
-            r"\b("
-            r"burn|refund|claim|withdraw|exit|drain|close|liquidate|sweep"
-            r"|finalize|finalise|release|payout|pay|redeem|execute|settle"
-            r"|emergency|recover|recovery|guardian|guardianRecovery"
-            r"|fullWithdraw|fullSpend|finalWithdraw|complete"
-            r")\w*\b",
-            re.IGNORECASE
-        )
-        if TERMINAL_FUNC_NAMES.search(func_name):
-            continue
+        if mode == "vault":
+            if _TERMINAL_EXACT.match(func_name):
+                continue
+            if not _VAULT_STAGING_FUNC.match(func_name):
+                continue
+        else:
+            # EXCEPTION: Terminal / exit functions that intentionally do NOT perpetuate the contract.
+            TERMINAL_FUNC_NAMES = re.compile(
+                r"\b("
+                r"burn|refund|claim|withdraw|exit|drain|close|liquidate|sweep"
+                r"|finalize|finalise|release|payout|pay|redeem|execute|settle"
+                r"|emergency|recover|recovery|guardian|guardianRecovery"
+                r"|fullWithdraw|fullSpend|finalWithdraw|complete"
+                r")\w*\b",
+                re.IGNORECASE
+            )
+            if _TERMINAL_EXACT.match(func_name):
+                continue
+            if TERMINAL_FUNC_NAMES.search(func_name):
+                continue
 
         # Only check functions that actually touch outputs/tokens
         touches_outputs = bool(re.search(r"tx\.outputs\b", body))
@@ -744,6 +787,85 @@ def _check_token_pair_completeness(code: str) -> list[dict]:
     return violations
 
 
+def _check_token_mint_supply_enforcement(code: str, contract_mode: str = "") -> list[dict]:
+    """
+    LNC-017: Fungible mint paths must enforce supply bounds.
+    """
+    mode = (contract_mode or "").lower().strip()
+    if mode not in {"token", "minting", "covenant"} and "mint" not in code.lower():
+        return []
+
+    violations = []
+    for func_name, body, start_lineno in _function_bodies(code):
+        if "mint" not in func_name.lower() and "mint" not in body.lower():
+            continue
+        has_supply_guard = bool(
+            re.search(r"totalSupply|maxSupply|remainingSupply|cap", body, re.IGNORECASE)
+            and re.search(r"require\s*\(", body)
+        )
+        if not has_supply_guard:
+            violations.append({
+                "rule_id": "LNC-017",
+                "message": (
+                    f"Mint function '{func_name}' has no visible supply enforcement. "
+                    "Add a cap guard (e.g. require(totalSupply + mintAmount <= maxSupply))."
+                ),
+                "line_hint": start_lineno,
+            })
+    return violations
+
+
+def _check_nft_mint_transfer_rules(code: str, contract_mode: str = "") -> list[dict]:
+    """
+    LNC-018: NFT mint/transfer should preserve singleton semantics.
+    """
+    mode = (contract_mode or "").lower().strip()
+    if mode not in {"token", "minting", "escrow_2of3_nft", "escrow"} and "nft" not in code.lower():
+        return []
+
+    references_token = bool(re.search(r"tokenCategory|tokenAmount|nft", code, re.IGNORECASE))
+    if not references_token:
+        return []
+
+    has_singleton_guard = bool(
+        re.search(r"tokenAmount\s*==\s*1", code)
+        or re.search(r"tokenAmount\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenAmount", code)
+    )
+    if has_singleton_guard:
+        return []
+
+    return [{
+        "rule_id": "LNC-018",
+        "message": (
+            "NFT path missing singleton/amount preservation guard. "
+            "Add require(tokenAmount == 1) for singleton NFTs or preserve input tokenAmount exactly."
+        ),
+        "line_hint": 0,
+    }]
+
+
+def _check_invalid_token_log(code: str, contract_mode: str = "") -> list[dict]:
+    """
+    LNC-019: Detect contradictory token validation patterns.
+    """
+    mode = (contract_mode or "").lower().strip()
+    if mode not in {"token", "minting", "covenant", "escrow"} and "token" not in code.lower():
+        return []
+
+    # Contradiction example: asserts NO_TOKEN while also asserting tokenAmount > 0.
+    no_token_zero = re.search(r"tokenCategory\s*==\s*(?:NO_TOKEN|0x0+)", code)
+    positive_amount = re.search(r"tokenAmount\s*>\s*0", code)
+    if no_token_zero and positive_amount:
+        return [{
+            "rule_id": "LNC-019",
+            "message": (
+                "Invalid token validation logic: tokenCategory indicates no token while tokenAmount requires > 0."
+            ),
+            "line_hint": 0,
+        }]
+    return []
+
+
 
 def _check_locking_bytecode_constructor(code: str) -> list[dict]:
     """
@@ -856,6 +978,9 @@ class DSLLinter:
         _check_covenant_self_anchor,     # LNC-008  (mode-conditional)
         _check_mint_authority,           # LNC-013  (token/minting mode only)
         _check_token_pair_completeness,  # LNC-014  (any code touching tokens)
+        _check_token_mint_supply_enforcement,  # LNC-017
+        _check_nft_mint_transfer_rules,  # LNC-018
+        _check_invalid_token_log,        # LNC-019
         _check_locking_bytecode_constructor,  # LNC-015  (P2PKH/P2SH constructor safety)
         _check_value_preservation,       # LNC-016  (Self-anchor + Value continuity)
         _check_forbidden_syntax,         # LNC-009  (ternary, loops, etc.)
@@ -896,14 +1021,21 @@ class DSLLinter:
             except Exception as exc:
                 logger.warning(f"[DSLLinter] Rule {rule_fn.__name__} raised: {exc}")
 
-        passed = len(all_violations) == 0
+        profile = get_pattern_profile(contract_mode)
+        disabled_rule_prefixes = set(profile.get("disable_lint_rules", []))
+        filtered_violations = [
+            v for v in all_violations
+            if not any(str(v.get("rule_id", "")).startswith(prefix) for prefix in disabled_rule_prefixes)
+        ]
+
+        passed = len(filtered_violations) == 0
         if not passed:
-            for v in all_violations:
+            for v in filtered_violations:
                 logger.warning(f"[DSLLint] {v['rule_id']} L{v['line_hint']}: {v['message']}")
         else:
             logger.info(f"[DSLLint] PASSED (mode={contract_mode or 'auto'}) — no violations.")
 
-        return {"passed": passed, "violations": all_violations}
+        return {"passed": passed, "violations": filtered_violations}
 
     def format_for_prompt(self, violations: list[dict]) -> str:
         """

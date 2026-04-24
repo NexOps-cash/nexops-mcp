@@ -1,0 +1,10 @@
+family: hashlock
+description: "Preimage-validated spend path, optionally with timeout refund."
+must:
+  - id: HL-PREIMAGE
+    rule: "require(hash256(preimage) == expectedHash); // or hash160"
+  - id: HL-AUTH
+    rule: "require(checkSig(claimSig, claimant));"
+optional:
+  - id: HL-TIMEOUT
+    rule: "Refund path: require(tx.time >= timeout); require(checkSig(refundSig, refundPk));"

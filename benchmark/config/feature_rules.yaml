@@ -1,10 +1,10 @@
 features:
   timelock_unlock:
-    rule: 'tx\.(time|age)\s*>=\s*\w+'
-    description: "Delayed execution using tx.time or tx.age"
+    rule: '(tx\.(time|age)|this\.age)\s*>=\s*\w+'
+    description: "Delayed execution using tx.time, tx.age, or this.age"
   timelock_refund:
-    rule: 'require\s*\(\s*tx\.(time|age)\s*>=\s*\w+\s*\)'
-    description: "Timelock using tx.time or tx.age in a require"
+    rule: 'require\s*\(\s*(tx\.(time|age)|this\.age)\s*>=\s*\w+\s*\)'
+    description: "Timelock using tx.time, tx.age, or this.age in a require"
   multisig_2of2:
     rule: 'checkSig\([^)]+\)\s*&&\s*checkSig\([^)]+\)'
     description: "Two signature checks present in the same require statement"
@@ -24,5 +24,8 @@ features:
     rule: '\.lockingBytecode\s*==\s*\w+'
     description: "Output destination validation"
   value_check:
-    rule: '\.value\s*==\s*tx\.inputs\['
+    rule: 'tx\.outputs\[\d+\]\.value\s*==\s*'
     description: "Output value equality check"
+  output_value_validation:
+    rule: 'tx\.outputs\[\d+\]\.value\s*==\s*'
+    description: "Detected output value validation"

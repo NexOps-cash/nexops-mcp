@@ -47,6 +47,30 @@ class IntentModel(BaseModel):
             return [str(x) for x in v]
         return []
 
+    @field_validator("timeout_days", mode="before")
+    @classmethod
+    def coerce_timeout_days(cls, v: Any) -> Optional[int]:
+        """LLMs sometimes emit [1, 7] for a range; normalize to a single int."""
+        if v is None:
+            return None
+        if isinstance(v, list):
+            if not v:
+                return None
+            try:
+                nums = [int(x) for x in v]
+            except (TypeError, ValueError):
+                return None
+            return max(nums) if nums else None
+        if isinstance(v, tuple):
+            try:
+                return max(int(x) for x in v)
+            except (TypeError, ValueError):
+                return None
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return None
+
 
 # ─── Contract IR (Intermediate Representation) ───────────────────────
 

@@ -1,0 +1,9 @@
+family: refundable_payment
+description: "Primary spend path + timeout refund path."
+must:
+  - id: RP-PAYMENT
+    rule: "Release path validates signer and output value."
+  - id: RP-REFUND
+    rule: "Refund path uses require(tx.time >= timeout) and sender authorization."
+  - id: RP-OUTPUT-LIMIT
+    rule: "require(tx.outputs.length == N);"

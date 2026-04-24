@@ -1,0 +1,15 @@
+family: cashtokens
+description: "CashTokens mint/transfer invariants for fungible and NFT assets."
+fungible_mint:
+  - id: CT-MINT-CAP
+    rule: "require(totalSupply + mintAmount <= maxSupply);"
+  - id: CT-MINT-AUTH
+    rule: "require(checkSig(mintSig, mintAuthority));"
+nft_transfer:
+  - id: CT-NFT-CATEGORY
+    rule: "require(tx.outputs[0].tokenCategory == tx.inputs[this.activeInputIndex].tokenCategory);"
+  - id: CT-NFT-AMOUNT
+    rule: "require(tx.outputs[0].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount);"
+invalid_token_log_detection:
+  - id: CT-INVALID-LOGIC
+    rule: "Reject contradictory logic (NO_TOKEN category with positive tokenAmount)."

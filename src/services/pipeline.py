@@ -22,6 +22,7 @@ from src.models import (
 from src.services.llm.factory import LLMFactory
 from src.services.anti_pattern_enforcer import get_anti_pattern_enforcer
 from src.services.rule_engine import get_rule_engine
+from src.services.pattern_profiles import get_pattern_profile, canonical_pattern
 from knowledge.golden.registry import GoldenRegistry
 from knowledge.golden.golden_adaptation import verify_anchor_integrity
 from knowledge.golden.golden_prompt import (
@@ -215,7 +216,7 @@ INTERMEDIATE STATE (Announcement / Start):
 
 DELAYED CLAIM (Finalize / Claim):
   Step 1: require(tx.outputs.length == 1);
-  Step 2: require(tx.age >= delaySeconds);
+  Step 2: require(this.age >= delaySeconds);
   Step 3: require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
   Step 4: require(checkSig(sig, owner));
   NOTE: Do NOT use this.activeBytecode in finalize — funds exit the contract.
@@ -226,10 +227,25 @@ EMERGENCY / CANCEL:
   Step 3: require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
   NOTE: MAY re-anchor if cancel (keep funds in vault), or exit if emergency.
 
+FOUNDER / OPS TREASURY (small instant spend + large delayed treasury moves):
+  Use distinct constructor ints, e.g. int opsLimitSats, int largeDelaySeconds.
+  - smallOpsSpend / instantSpend: amount <= opsLimitSats; 2 outputs; out0 MUST re-anchor
+    (lockingBytecode == this.activeBytecode); out1 pays recipient; NO this.age delay.
+  - announceLargeWithdrawal / stageLargeSpend: 2 outputs; both split value; out0 re-anchors full remainder;
+    include require(amount > opsLimitSats) for the large path.
+  - finalizeLargeWithdrawal: require(this.age >= largeDelaySeconds); 1 output to recipientLockingBytecode;
+    full value; signature required — do NOT re-anchor to this.activeBytecode on payout.
+
 FORBIDDEN (causes compile or security failure):
   - NEVER access tx.outputs[i] without a preceding require(tx.outputs.length >= i+1)
   - NEVER use this.activeBytecode in a terminal payout (finalize/claim/emergency-exit)
   - NEVER subtract fees from value inline (use named constructor param instead)
+
+TOKEN SAFETY (Vault hardening):
+  - For BCH-only vaults: require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
+    require(tx.inputs[this.activeInputIndex].tokenAmount == 0);
+  - For token-bearing vaults: ALWAYS validate BOTH tokenCategory and tokenAmount together
+    on relevant outputs.
 """
 
 def build_pattern_rails(tags: List[str], contract_type: str = "") -> str:
@@ -266,9 +282,12 @@ def _load_yaml(filename: str) -> dict:
 
 
 def build_structured_knowledge(ir: ContractIR) -> str:
-    """Build a compact YAML knowledge string, conditionally injecting covenant rules."""
+    """Build YAML knowledge with pattern-specific overlays for generation."""
     intent_model = ir.metadata.intent_model if ir.metadata else None
     tags = set(intent_model.features if intent_model else [])
+    contract_mode = intent_model.contract_type if intent_model else ""
+    pattern_name = canonical_pattern(contract_mode)
+    pattern_profile = get_pattern_profile(contract_mode)
 
     knowledge = {
         "core": _load_yaml("core_language.yaml"),
@@ -280,8 +299,19 @@ def build_structured_knowledge(ir: ContractIR) -> str:
     if needs_covenant:
         knowledge["security"] = _load_yaml("covenant_security.yaml")
 
+    # Inject pattern-specific YAML overlays for generation control.
+    pattern_layers = {}
+    for filename in pattern_profile.get("knowledge_files", []):
+        layer_name = f"pattern_{filename.replace('.yaml', '')}"
+        pattern_layers[layer_name] = _load_yaml(filename)
+    if pattern_layers:
+        knowledge["pattern_overlays"] = pattern_layers
+
     injected_layers = list(knowledge.keys())
-    logger.info(f"[Phase2] Injected knowledge layers: {injected_layers} (tags={sorted(tags)})")
+    logger.info(
+        f"[Phase2] Injected knowledge layers: {injected_layers} "
+        f"(pattern={pattern_name}, mode={contract_mode}, tags={sorted(tags)})"
+    )
 
     # Emit as YAML string — preserves hierarchy better than JSON for LLM comprehension
     return yaml.dump(knowledge, sort_keys=False, allow_unicode=True, default_flow_style=False)
@@ -644,14 +674,18 @@ async def _free_phase2(
     # Extract .cash code from response
     code = _extract_cash_code(raw_response)
     
-    # ── Deterministic Post-Gen Sanitizer ─────────────────────────────────────────
-    # Fix AI confusing this.activeBytecode (self-reference) with tx.outputs[N].activeBytecode
-    # (which doesn't exist in CashScript — causes "Token recognition error at: '.a'")
+    # ── Deterministic Post-Gen Sanitizers ────────────────────────────────────────
     import re as _re
-    sanitized = _re.sub(r"(tx\.outputs\[.*?\])\.activeBytecode", r"\1.lockingBytecode", code)
-    if sanitized != code:
-        logger.warning("[Phase2][Sanitizer] Fixed tx.outputs[N].activeBytecode -> .lockingBytecode (AI field confusion)")
-        code = sanitized
+    
+    # Bug 1: .activeBytecode misuse on tx objects (Confusion with this.activeBytecode)
+    # The '.a' token error often starts here. Inputs/Outputs use .lockingBytecode.
+    code = _re.sub(r"(\btx\.(?:outputs|inputs)\[[^\]]*\])\s*\.\s*activeBytecode", r"\1.lockingBytecode", code)
+    
+    # Bug 2: tx.age is NOT supported in cashc 0.13.0-next.3 (Token recognition error at: '.a')
+    # Correct mapping is to 'this.age' (global) to maintain relative timelock semantics.
+    if "age" in code:
+        logger.warning("[Phase2][Sanitizer] Environment fix: Mapping tx.age -> this.age (CSV compatibility for 0.13.0-next.3)")
+        code = _re.sub(r"\btx\s*\.\s*age\b", "this.age", code)
     
     return code
 
@@ -874,6 +908,15 @@ def _parse_phase1_response(raw: str, intent: str, security_level: str) -> Contra
                         data[key] = "generic"
                     else:
                         data[key] = ""
+            # Pre-coerce range-like timeouts so Pydantic does not fall back to generic intent.
+            td = data.get("timeout_days")
+            if isinstance(td, list) and td:
+                try:
+                    data["timeout_days"] = max(int(x) for x in td)
+                except (TypeError, ValueError):
+                    data["timeout_days"] = None
+            elif isinstance(td, list) and not td:
+                data["timeout_days"] = None
             model = IntentModel(**data)
         except Exception as exc:
             logger.warning(f"Pydantic validation failed, using raw defaults: {exc}")

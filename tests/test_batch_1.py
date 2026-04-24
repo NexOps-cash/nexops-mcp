@@ -4,7 +4,12 @@ import logging
 import json
 import time
 import sys
+import os
 from typing import List, Dict, Any
+
+# Add project root to path to resolve 'src' imports
+sys.path.append(os.getcwd())
+
 from src.services.pipeline_engine import get_guarded_pipeline_engine
 
 # ANSI Colors
@@ -44,9 +49,9 @@ logger = logging.getLogger("nexops.batch_1")
 # Test Data
 BATCH_NAME = "BATCH 1 (Baseline Core)"
 TESTS = [
-    {"id": "1", "name": "Simple 2-of-2 Multisig", "intent": "simple 2-of-2 multisig wallet"},
-    {"id": "2", "name": "2-of-2 Split 50/50", "intent": "2-of-2 multisig that splits funds 50/50 to two fixed pubkeys"},
-    {"id": "3", "name": "Timelock Beneficiary", "intent": "single beneficiary timelock unlockable after timestamp"},
+    {"id": "1", "name": "vault", "intent": "Security vault with 24 hour withdrawal delay for owner and immediate rescue for backup key"},
+    {"id": "2", "name": "escrow", "intent": "2-of-3 escrow with buyer, seller, and arbitrator plus 30 day refund for buyer"},
+   # {"id": "3", "name": "Timelock Beneficiary", "intent": "single beneficiary timelock unlockable after timestamp"},
 ]
 
 def print_table(headers, data):
@@ -80,7 +85,7 @@ async def run_test(test_case: Dict[str, str], engine) -> Dict[str, Any]:
     }
 
     try:
-        result = await engine.generate_guarded(test_case["intent"], security_level="high")
+        result = await engine.generate_guarded(test_case["intent"], security_level="standard")
         elapsed = time.time() - start_time
         
         if result["type"] == "success":

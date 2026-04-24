@@ -22,9 +22,10 @@ from benchmark.schemas import BenchmarkCase, CaseResult, BenchmarkReport
 from src.services.pipeline_engine import get_guarded_pipeline_engine
 
 class BenchmarkRunner:
-    def __init__(self, yaml_path: str, tags: List[str] = None):
+    def __init__(self, yaml_path: str, tags: List[str] = None, case_ids: List[str] = None):
         self.yaml_path = Path(yaml_path)
         self.tags = tags or []
+        self.case_ids = case_ids or []  # if non-empty, only run these case ids
         self.engine = get_guarded_pipeline_engine()
         self.cases: List[BenchmarkCase] = []
         self.dataset_hash = ""
@@ -46,6 +47,8 @@ class BenchmarkRunner:
 
         for case_data in data:
             case = BenchmarkCase(**case_data)
+            if self.case_ids and case.id not in self.case_ids:
+                continue
             # Filter by tags if provided
             if self.tags:
                 if not any(tag in case.tags for tag in self.tags):
@@ -119,13 +122,15 @@ async def main():
     parser = argparse.ArgumentParser(description="NexOps MCP Pattern Benchmark Runner")
     parser.add_argument("suite", help="Path to the YAML suite file")
     parser.add_argument("--tags", help="Comma-separated tags to filter", default="")
+    parser.add_argument("--ids", help="Comma-separated case ids to run (subset)", default="")
     parser.add_argument("--model", help="Model override", default=None)
     
     args = parser.parse_args()
     
     tags = [t.strip() for t in args.tags.split(",") if t.strip()]
+    case_ids = [t.strip() for t in args.ids.split(",") if t.strip()]
     
-    runner = BenchmarkRunner(args.suite, tags=tags)
+    runner = BenchmarkRunner(args.suite, tags=tags, case_ids=case_ids)
     runner.load_suite()
     await runner.run_all(model_override=args.model)
 

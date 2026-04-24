@@ -1,0 +1,50 @@
+//----------------------------------------------------
+// NnexOps-Vault-Golden-Template (v1.0)
+// Pattern: 2-Step Secure Vault Covenant
+//----------------------------------------------------
+pragma cashscript ^0.13.0;
+
+contract SecureVault(
+    pubkey owner,
+    pubkey backupOwner,
+    int delaySeconds
+) {
+    // ── Function 1: Start withdrawal announcement (Intermediate state) ──────────
+    function announce(sig ownerSig, int amount) {
+        // 1. Signature check
+        require(checkSig(ownerSig, owner));
+        require(amount > 0);
+
+        // 2. Output limit: Ensure current funds STAY in the vault (minus any fee)
+        require(tx.outputs.length == 2);
+        
+        // Output[0] is the "Staging" state (Self-Continuing)
+        require(tx.outputs[0].lockingBytecode == this.activeBytecode);
+        // Note: The stalling logic would update constructor state here,
+        // but for a template we anchor the current bytecode.
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value - amount);
+
+        // Output[1] is the "Staged Funds" output (with CSV delay)
+        // [In a real vault, this would go to a specific 'staging' address]
+        // This is a placeholder for structural anchoring
+    }
+
+    // ── Function 2: Finalize payout after delay ───────────────────
+    function finalize(sig ownerSig) {
+        // Enforce the 2-step delay (relative timelock)
+        require(tx.age >= delaySeconds);
+        require(checkSig(ownerSig, owner));
+
+        // Full exit: all remaining funds to owner address
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+    }
+
+    // ── Function 3: Emergency recovery by backup key ───────────────
+    function emergencyRecover(sig backupSig) {
+        // Instant escape for backup owner
+        require(checkSig(backupSig, backupOwner));
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+    }
+}

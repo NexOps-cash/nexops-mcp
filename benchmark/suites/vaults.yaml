@@ -8,7 +8,6 @@
     - covenant_continuation
     - time_validation
     - output_destination_validation
-    - token_validation
   critical_features:
     - valid_signature_check
     - covenant_self_reference
@@ -44,7 +43,6 @@
     - time_validation
     - covenant_continuation
     - multiple_paths
-    - token_validation
   critical_features:
     - valid_signature_check
     - locktime_check

@@ -329,6 +329,8 @@ class GuardedPipelineEngine:
     ) -> str:
         """Helper to fix syntax errors. Tries deterministic fixes first, then LLM."""
         import re as _re
+        import json
+        
         # Extract fields from structured error dict
         error_type  = error_obj.get("type", "UnknownError")
         error_raw   = error_obj.get("raw", "")
@@ -375,29 +377,26 @@ class GuardedPipelineEngine:
         # ── Deterministic: 'Token recognition error at .a' ──────────────────────
         # AI confuses this.activeBytecode (self-reference) with tx.outputs[N].activeBytecode
         # (which doesn't exist). The correct output field is .lockingBytecode.
+        # ALSO: The environment (cashc 0.13.0-next.3) often fails on 'tx.age' with '.a' error.
         if "Token recognition error" in error_raw and ".a" in error_raw:
-            # Fix 1: tx.outputs[N].activeBytecode → tx.outputs[N].lockingBytecode
-            fixed = _re.sub(
-                r"(tx\.outputs\[.*?\])\.activeBytecode",
-                r"\1.lockingBytecode",
-                code,
-            )
-            # Fix 2: output.activeBytecode → this.activeBytecode (rare but seen)
-            fixed = _re.sub(
-                r"\boutput\.activeBytecode\b",
-                "this.activeBytecode",
-                fixed,
-            )
+            # Fix 1: .activeBytecode misuse on tx objects
+            fixed = _re.sub(r"(\btx\.(?:outputs|inputs)\[[^\]]*\])\s*\.\s*activeBytecode", r"\1.lockingBytecode", code)
+            
+            # Fix 2: tx.age -> this.age (Environment compatibility for 0.13.0-next.3)
+            if "age" in fixed:
+                logger.warning("[Fix] Deterministic: Mapping tx.age -> this.age for environment compatibility")
+                fixed = _re.sub(r"\btx\s*\.\s*age\b", "this.age", fixed)
+
             if fixed != code:
-                logger.info("[Fix] Deterministic: replaced .activeBytecode on outputs with .lockingBytecode")
+                logger.info("[Fix] Deterministic: Replaced .activeBytecode/tx.age with .lockingBytecode/this.age")
                 return fixed.strip()
         # ── LLM fallback for non-deterministic errors ────────────────────────────
         from src.services.llm.factory import LLMFactory
-        import json
-        from src.services.pipeline import build_pattern_rails
+        from src.services.pipeline import build_pattern_rails, build_unified_dsl_rules
         tags = ir.metadata.intent_model.features if ir.metadata.intent_model else []
         contract_type = ir.metadata.intent_model.contract_type if ir.metadata.intent_model else ""
         pattern_rails = build_pattern_rails(tags, contract_type=contract_type)
+        unified_rules = build_unified_dsl_rules()
 
         system = f"""You are performing CashScript syntax repair ONLY.
 You MUST preserve ALL structural invariants below.

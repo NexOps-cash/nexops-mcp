@@ -1,0 +1,15 @@
+family: vault
+description: "Two-step or delayed-withdrawal covenant with strict intermediate vs terminal rules."
+intermediate_must:
+  - id: VLT-INTERMEDIATE-LIMIT
+    rule: "require(tx.outputs.length == 2);"
+  - id: VLT-INTERMEDIATE-ANCHOR
+    rule: "require(tx.outputs[0].lockingBytecode == this.activeBytecode);"
+terminal_must:
+  - id: VLT-TERMINAL-LIMIT
+    rule: "require(tx.outputs.length == 1);"
+  - id: VLT-TERMINAL-TIME
+    rule: "require(tx.time >= unlockTime) or require(this.age >= delay);"
+forbidden:
+  - id: VLT-NO-TERMINAL-SELF-ANCHOR
+    rule: "Terminal payout functions must not force self-continuation."

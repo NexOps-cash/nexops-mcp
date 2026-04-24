@@ -1,0 +1,6 @@
+pragma cashscript ^0.13.0;
+contract Test(int delay) {
+    function spend() {
+        require(tx.time >= delay);
+    }
+}
