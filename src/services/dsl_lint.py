@@ -21,6 +21,14 @@ from src.services.pattern_profiles import get_pattern_profile
 
 logger = logging.getLogger("nexops.dsl_lint")
 
+# Best-effort rule-to-prefix map for pre-execution mode gating.
+# Some functions emit multiple rule IDs; those remain post-filtered.
+RULE_PREFIX_BY_FUNCTION = {
+    "_check_fee_arithmetic": "LNC-005",
+    "_check_token_pair_completeness": "LNC-014",
+    "_check_nft_mint_transfer_rules": "LNC-018",
+}
+
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
@@ -274,18 +282,6 @@ def _check_fee_arithmetic(code: str, contract_mode: str = "") -> list[dict]:
       require(tx.outputs[0].value == inputVal - fee);
     These modes are identified by having a composite ID (pattern with underscore suffix).
     """
-    mode = (contract_mode or "").lower().strip()
-
-    # Golden modes have composite IDs like escrow_2of3_nft, crowdfund_refundable, etc.
-    # In golden mode, fee arithmetic is explicitly allowed and scaffolded.
-    GOLDEN_MODE_PREFIXES = (
-        "escrow_", "crowdfund_", "dutch_", "vesting_", "multisig_2of3", "auction_", 
-        "refundable_", "linear_vesting", "streaming"
-    )
-    is_golden_mode = any(mode.startswith(p) for p in GOLDEN_MODE_PREFIXES)
-    if is_golden_mode or mode == "vault" or mode == "streaming":
-        return []  # Fee arithmetic/subtraction is valid in golden, vault, and streaming modes
-
     violations = []
     for lineno, line in _lines(code):
         # Skip pure comment lines so doc comments like "- Fee collection vault" don't trigger
@@ -749,13 +745,9 @@ def _check_token_pair_completeness(code: str, contract_mode: str = "") -> list[d
     - Silent burn (tokenAmount unconstrained → tokens disappear)
     - Category confusion (tokenCategory unconstrained → wrong token accepted)
 
-    Skipped for vault/minter/parser: these use tokenCategory for authorization
-    gating or controlled minting, not for token-pair conservation checks.
+    Applicability is profile-driven in DSLLinter.lint via disable_lint_rules.
+    Keep this rule mode-agnostic to avoid split gating logic.
     """
-    mode = (contract_mode or "").lower().strip()
-    if mode in {"vault", "minter", "parser", "conditional_spend"}:
-        return []
-
     violations = []
 
     for func_name, body, start_lineno in _function_bodies(code):
@@ -1011,8 +1003,14 @@ class DSLLinter:
                 "violations": [{"rule_id": "LNC-000", "message": "Empty code", "line_hint": 0}],
             }
 
+        profile = get_pattern_profile(contract_mode)
+        disabled_rule_prefixes = set(profile.get("disable_lint_rules", []))
+
         all_violations: list[dict] = []
         for rule_fn in self.RULES:
+            mapped_prefix = RULE_PREFIX_BY_FUNCTION.get(rule_fn.__name__, "")
+            if mapped_prefix and any(mapped_prefix.startswith(p) for p in disabled_rule_prefixes):
+                continue
             try:
                 import inspect
                 sig = inspect.signature(rule_fn)
@@ -1023,8 +1021,6 @@ class DSLLinter:
             except Exception as exc:
                 logger.warning(f"[DSLLinter] Rule {rule_fn.__name__} raised: {exc}")
 
-        profile = get_pattern_profile(contract_mode)
-        disabled_rule_prefixes = set(profile.get("disable_lint_rules", []))
         filtered_violations = [
             v for v in all_violations
             if not any(str(v.get("rule_id", "")).startswith(prefix) for prefix in disabled_rule_prefixes)

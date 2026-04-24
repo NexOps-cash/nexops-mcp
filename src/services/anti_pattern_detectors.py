@@ -5,7 +5,7 @@ Each detector implements semantic detection for a specific anti-pattern.
 Detectors use AST analysis, not string matching or heuristics.
 """
 
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
 from src.utils.cashscript_ast import CashScriptAST, OutputReference
 
@@ -603,18 +603,11 @@ class EVMHallucinationDetector(AntiPatternDetector):
 class EmptyFunctionDetector(AntiPatternDetector):
     """
     Detects public functions with no require() statements.
-    Skipped for vault/minter/parser contracts where authorization gates may use
-    intermediate variables rather than bare require() at the outermost block.
     Uses brace-depth traversal so nested do{}/if{} blocks are handled correctly.
     """
     id = "empty_function_body"
 
-    _SKIP_MODES = {"vault", "minter", "parser", "conditional_spend"}
-
     def detect(self, ast: CashScriptAST) -> Optional[Violation]:
-        if ast.contract_mode in self._SKIP_MODES:
-            return None
-
         import re
         empty_fns: List[str] = []
         for match in re.finditer(r'function\s+(\w+)\s*\([^)]*\)\s*\{', ast.code):
