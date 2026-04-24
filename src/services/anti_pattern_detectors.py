@@ -18,6 +18,9 @@ class Violation:
     exploit: str  # Why this is exploitable on BCH
     location: Dict[str, Any]  # Where in code
     severity: str = "high"
+    issue_class: str = "real_issue"
+    exploit_severity: str = "n/a"
+    deferred_validation: bool = False
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -25,7 +28,10 @@ class Violation:
             "reason": self.reason,
             "exploit": self.exploit,
             "location": self.location,
-            "severity": self.severity
+            "severity": self.severity,
+            "issue_class": self.issue_class,
+            "exploit_severity": self.exploit_severity,
+            "deferred_validation": self.deferred_validation,
         }
 
 
@@ -69,6 +75,9 @@ class ImplicitOutputOrderingDetector(AntiPatternDetector):
         """
         import re
         mode = ast.contract_mode  # e.g. 'escrow_2of3_nft'
+        active_modes = {"manager", "stateful", "covenant", "escrow", ""}
+        if mode not in active_modes and not mode.startswith(("escrow_", "stateful_", "covenant_")):
+            return None
 
         # Golden mode exception: payout/release functions in golden templates explicitly
         # validate both output values and fee-recipient lockingBytecode in business logic.
@@ -206,6 +215,196 @@ class UnvalidatedPositionDetector(AntiPatternDetector):
             severity="medium"
         )
 
+
+class IndexUnderflowDetector(AntiPatternDetector):
+    """Detect activeInputIndex subtraction without lower-bound guard."""
+
+    id = "index_underflow"
+
+    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        risky_functions = ast.has_index_underflow_risk()
+        if not risky_functions:
+            return None
+        fn_name = risky_functions[0]
+        return Violation(
+            rule=self.id,
+            reason=f"Function '{fn_name}' subtracts from this.activeInputIndex without a strict lower-bound guard",
+            exploit="A crafted transaction placing this contract at index 0 can trigger script failure on index underflow. "
+                    "This is a denial-of-service/bricking risk for that spend path.",
+            location={"line": 0, "function": fn_name},
+            severity="high",
+            issue_class="real_issue",
+            exploit_severity="griefing",
+        )
+
+
+class InputOutputCouplingDetector(AntiPatternDetector):
+    """Detect forwarding functions that read inputs without coupled outputs."""
+
+    id = "input_output_coupling"
+
+    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        violations = ast.has_input_without_output_coupling()
+        if not violations:
+            return None
+        fn_name = violations[0]
+        return Violation(
+            rule=self.id,
+            reason=f"Forwarding function '{fn_name}' reads tx.inputs[i] without coupled tx.outputs[i] constraints",
+            exploit="In positional forwarding logic, attacker-controlled output layout can violate intended per-index invariants "
+                    "when input and output coupling is not enforced.",
+            location={"line": 0, "function": fn_name},
+            severity="high",
+            issue_class="real_issue",
+            exploit_severity="partial_violation",
+        )
+
+
+class PartialAggregationDetector(AntiPatternDetector):
+    """Detect aggregation loops that do not prove full input coverage."""
+
+    id = "partial_aggregation_risk"
+
+    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        if ast.contract_mode == "parser":
+            return None
+        risky_functions = ast.has_partial_aggregation_risk()
+        if not risky_functions:
+            return None
+        fn_name = risky_functions[0]
+        return Violation(
+            rule=self.id,
+            reason=f"Aggregation in '{fn_name}' has no boundary proof that all inputs are processed",
+            exploit="Subset processing can make behavior input-order dependent. A malicious transaction builder may insert "
+                    "inputs to bypass expected full-coverage aggregation invariants.",
+            location={"line": 0, "function": fn_name},
+            severity="medium",
+            issue_class="contextual",
+            exploit_severity="partial_violation",
+        )
+
+
+class CommitmentLengthSafetyDetector(AntiPatternDetector):
+    """Detect bytes parsing without minimum length checks."""
+
+    id = "commitment_length_missing"
+
+    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        risky_functions = ast.has_bytes_parse_without_length_check()
+        if not risky_functions:
+            return None
+        fn_name = risky_functions[0]
+        return Violation(
+            rule=self.id,
+            reason=f"Function '{fn_name}' parses bytes via split/slice without explicit length guard",
+            exploit="Short commitment payloads can decode into unexpected empty/truncated values and violate downstream invariants.",
+            location={"line": 0, "function": fn_name},
+            severity="high",
+            issue_class="real_issue",
+            exploit_severity="direct_fund_loss",
+        )
+
+
+class UnboundedNumericFieldDetector(AntiPatternDetector):
+    """Detect positive-only numeric checks without upper bounds."""
+
+    id = "unbounded_numeric_field"
+
+    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        violations = ast.has_unbounded_positive_only_check()
+        if not violations:
+            return None
+        fn_name, var_name = violations[0].split(":", 1)
+        return Violation(
+            rule=self.id,
+            reason=f"Variable '{var_name}' in '{fn_name}' is only checked with > 0 and has no upper bound",
+            exploit="Unbounded positive fields can enable griefing/economic abuse through extreme values even when strictly positive.",
+            location={"line": 0, "function": fn_name, "field": var_name},
+            severity="medium",
+            issue_class="contextual",
+            exploit_severity="griefing",
+        )
+
+
+class OutputBindingDetector(AntiPatternDetector):
+    """Detect output value/token checks with missing lockingBytecode binding."""
+
+    id = "output_binding_missing"
+
+    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        if ast.contract_mode not in {"manager", "stateful", "covenant"}:
+            return None
+        refs = ast.get_unbound_output_refs()
+        if not refs:
+            return None
+        ref = refs[0]
+        if ref.property_accessed not in {"value", "tokenAmount"}:
+            return None
+        return Violation(
+            rule=self.id,
+            reason=f"Output {ref.index} in '{ref.location.function}' validates {ref.property_accessed} without lockingBytecode binding",
+            exploit="Amount checks alone can be redirected to attacker-controlled scripts if the destination script is never bound.",
+            location={
+                "line": ref.location.line,
+                "function": ref.location.function,
+                "output_index": ref.index,
+                "property": ref.property_accessed,
+            },
+            severity="medium",
+            issue_class="contextual",
+            exploit_severity="partial_violation",
+        )
+
+
+class AuthorizationModelClassifierDetector(AntiPatternDetector):
+    """
+    Classify tokenCategory-based auth loops.
+    Contextual if the contract controls value, otherwise informational/noise.
+    """
+
+    id = "authorization_model_classifier"
+
+    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        has_category_auth = bool(
+            "tokenCategory" in ast.code
+            and any("tokenCategory" in v.condition for v in ast.validations)
+        )
+        if not has_category_auth:
+            return None
+
+        if ast.controls_value():
+            return Violation(
+                rule=self.id,
+                reason="Category-based authorization controls value transfer logic",
+                exploit="This model grants shared access to any holder of the auth category token. "
+                        "Usually intentional, but should be reviewed as a design tradeoff.",
+                location={"line": 0, "function": "all"},
+                severity="medium",
+                issue_class="contextual",
+                exploit_severity="griefing",
+            )
+
+        return Violation(
+            rule=self.id,
+            reason="Category-based authorization detected in non-value-routing context",
+            exploit="Informational classification: shared category auth model with low direct risk in this contract context.",
+            location={"line": 0, "function": "all"},
+            severity="info",
+            issue_class="noise",
+            exploit_severity="n/a",
+        )
+
+
+class InvariantBreakDetector(AntiPatternDetector):
+    """
+    Optional Phase-2 detector placeholder for cross-function invariant checks.
+    Intentionally not registered until graph-based analysis is implemented.
+    """
+
+    id = "invariant_break"
+
+    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        return None
 
 
 class FeeAssumptionViolationDetector(AntiPatternDetector):
@@ -670,21 +869,24 @@ class MultisigSignatureReuseDetector(AntiPatternDetector):
 # Registry of all detectors
 DETECTOR_REGISTRY = [
     ImplicitOutputOrderingDetector(),
-    MissingOutputLimitDetector(),
     UnvalidatedPositionDetector(),
+    IndexUnderflowDetector(),
+    InputOutputCouplingDetector(),
+    PartialAggregationDetector(),
+    CommitmentLengthSafetyDetector(),
+    UnboundedNumericFieldDetector(),
+    OutputBindingDetector(),
+    AuthorizationModelClassifierDetector(),
     FeeAssumptionViolationDetector(),
     DivisionByZeroDetector(),
     TokenPairValidationDetector(),
     CovenantContinuationDetector(),
     TimeOperatorViolationDetector(),
     HardcodedInputIndexDetector(),
-    EVMHallucinationDetector(),
     EmptyFunctionDetector(),
     SemanticTypeValidationDetector(),
     MultisigDistinctnessDetector(),
-    SpendingPathSecurityDetector(),
     WeakOutputLimitDetector(),
-    EscrowRoleEnforcementDetector(),
     TautologicalGuardDetector(),
     InvalidLockingBytecodeSelfComparisonDetector(),
     MultisigSignatureReuseDetector()
