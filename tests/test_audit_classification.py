@@ -84,9 +84,35 @@ async def test_semantic_assumption_sets_deferred_validation():
 
     semantic_issue = next(i for i in report.issues if i.rule_id.startswith("semantic_"))
     assert report.semantic_category == "minor_design_risk"
+    assert semantic_issue.severity == Severity.MEDIUM
     assert semantic_issue.issue_class == IssueClass.CONTEXTUAL
     assert semantic_issue.deferred_validation is True
     assert semantic_issue.exploit_severity == ExploitSeverity.NOT_APPLICABLE
+
+
+@pytest.mark.anyio
+async def test_semantic_design_tradeoff_caps_severity_and_exploit_severity():
+    """DESIGN_TRADEOFF may not be escalated to HIGH/CRITICAL or direct fund loss on semantic path."""
+    payload = {
+        "category": "DESIGN_TRADEOFF",
+        "exploit_severity": "direct_fund_loss",
+        "explanation": "Slightly weaker UX for edge cases.",
+        "confidence": 0.9,
+        "business_logic_score": 5,
+        "business_logic_notes": "Tradeoff accepted by design.",
+    }
+
+    with patch("src.services.llm.factory.LLMFactory.get_provider", return_value=_mock_provider(payload)), \
+         patch("src.services.audit_agent.get_compiler_service", return_value=MagicMock(compile=_compile_ok)), \
+         patch("src.services.audit_agent.get_dsl_linter", return_value=MagicMock(lint=_lint_ok)), \
+         patch("src.services.audit_agent.Phase3.validate", side_effect=_toll_gate_ok):
+        report = await AuditAgent.audit("pragma cashscript ^0.13.0; contract T(){}")
+
+    semantic_issue = next(i for i in report.issues if i.rule_id.startswith("semantic_"))
+    assert report.semantic_category == "moderate_logic_risk"
+    assert semantic_issue.severity == Severity.MEDIUM
+    assert semantic_issue.issue_class == IssueClass.CONTEXTUAL
+    assert semantic_issue.exploit_severity == ExploitSeverity.GRIEFING
 
 
 def test_authorization_classifier_contextual_when_value_controlled():

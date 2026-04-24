@@ -334,7 +334,11 @@ class OutputBindingDetector(AntiPatternDetector):
     def detect(self, ast: CashScriptAST) -> Optional[Violation]:
         if ast.contract_mode not in {"manager", "stateful", "covenant", "vault"}:
             return None
-        refs = ast.get_unbound_output_refs()
+        refs: List[OutputReference] = []
+        for r in ast.get_unbound_output_refs():
+            if r.property_accessed == "tokenCategory" and ast.is_empty_token_output_policy(r):
+                continue
+            refs.append(r)
         if not refs:
             return None
         ref = refs[0]
@@ -343,10 +347,21 @@ class OutputBindingDetector(AntiPatternDetector):
             allowed_props.add("tokenCategory")
         if ref.property_accessed not in allowed_props:
             return None
+        if ref.property_accessed in ("value", "tokenAmount"):
+            exploit = (
+                "Value/token amount checks without lockingBytecode binding can be satisfied by outputs sent to "
+                "attacker-chosen scripts if the contract never fixes the output's locking script."
+            )
+        else:
+            exploit = (
+                "Token category checks without lockingBytecode binding are policy-only: they do not show where "
+                "funds or tokens are sent. Pair category checks with output locking script validation when the "
+                "intended security property is destination control."
+            )
         return Violation(
             rule=self.id,
             reason=f"Output {ref.index} in '{ref.location.function}' validates {ref.property_accessed} without lockingBytecode binding",
-            exploit="Amount checks alone can be redirected to attacker-controlled scripts if the destination script is never bound.",
+            exploit=exploit,
             location={
                 "line": ref.location.line,
                 "function": ref.location.function,

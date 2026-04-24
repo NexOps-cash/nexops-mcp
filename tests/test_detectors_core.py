@@ -160,6 +160,23 @@ def test_output_binding_does_not_trigger_in_minter_or_parser(mode):
     assert d.detect(CashScriptAST(_code_unbound_value_no_locking(), contract_mode=mode)) is None
 
 
+def _code_vault_no_token_only_on_output():
+    return """
+    contract M(pubkey a) {
+        function spend(sig s) {
+            require(checkSig(s, a));
+            require(tx.outputs[0].tokenCategory == NO_TOKEN);
+        }
+    }
+    """
+
+
+def test_output_binding_skips_no_token_output_policy_in_vault():
+    """No-token / empty tokenCategory require is policy, not missing destination binding."""
+    d = OutputBindingDetector()
+    assert d.detect(CashScriptAST(_code_vault_no_token_only_on_output(), contract_mode="vault")) is None
+
+
 # ---------------------------------------------------------------------------
 # 4) CommitmentLengthSafetyDetector
 # ---------------------------------------------------------------------------

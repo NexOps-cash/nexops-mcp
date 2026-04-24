@@ -26,6 +26,11 @@ SEMANTIC_SYSTEM_PROMPT = """\
 You are a BCH CashScript smart-contract auditor.
 Classify semantic risk with UTXO-aware reasoning only.
 
+UTXO / BCH guardrails (must respect):
+- Every input to a valid transaction is consumed when the spend succeeds; the spending path authorizes that input.
+- If a required authorization or policy token appears on an input, that input is a controlled, signed spend of that UTXO — it is not automatically an "attacker-injected bypass" of the authorizer merely because a token with the right category also appears on a different input in the same transaction.
+- Distinguish (a) a concrete on-chain value-loss or authorization-bypass from (b) design tradeoffs or off-chain/issuer assumptions. Do not label (b) as EXPLOIT without a clear on-chain break.
+
 Use exactly one category:
 - EXPLOIT
 - DESIGN_TRADEOFF
@@ -50,6 +55,7 @@ Do NOT:
 - mention race conditions or front-running
 - assume EVM account/call-stack behavior
 - treat single-party control as a vulnerability by default
+- infer "bypass" from multi-input layouts alone when a category-based auth check is the intended design
 
 Focus only on:
 - value conservation (BCH and tokenAmount flows)
@@ -351,11 +357,21 @@ class AuditAgent:
 
                     if semantic_confidence is not None and semantic_confidence < 0.5:
                         semantic_issue_class = _downgrade_issue_class(semantic_issue_class)
-                    
+
+                    issue_severity = severity_map.get(semantic_category, Severity.HIGH)
+                    # DESIGN_TRADEOFF / ASSUMPTION: never HIGH/CRITICAL as semantic finding without concrete on-chain loss path.
+                    if semantic_label in ("design_tradeoff", "assumption"):
+                        issue_severity = Severity.MEDIUM
+                        semantic_issue_class = IssueClass.CONTEXTUAL
+                        if semantic_label == "assumption":
+                            semantic_exploit_severity = ExploitSeverity.NOT_APPLICABLE
+                        else:
+                            semantic_exploit_severity = ExploitSeverity.GRIEFING
+
                     issues.append(
                         AuditIssue(
                             title=title_map.get(semantic_category, f"Semantic Risk: {semantic_category}"),
-                            severity=severity_map.get(semantic_category, Severity.HIGH),
+                            severity=issue_severity,
                             line=0,
                             description=explanation or f"Semantic risk category '{semantic_category}' detected.",
                             recommendation=biz_notes or "Review the contract logic and ensure all spending paths are reachable.",

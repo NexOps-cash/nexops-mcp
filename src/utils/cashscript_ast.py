@@ -561,6 +561,33 @@ class CashScriptAST:
                 refs.append(output_ref)
         return refs
 
+    def is_empty_token_output_policy(self, ref: OutputReference) -> bool:
+        """
+        True when tx.outputs[N].tokenCategory is only used to assert empty / no-token (NO_TOKEN, 0x…),
+        i.e. structural policy, not a missing destination bind.
+        """
+        fn = ref.location.function
+        if not fn:
+            return False
+        body = self._get_function_bodies().get(fn, "")
+        idx = ref.index
+        if not re.search(rf"tx\.outputs\[\s*{idx}\s*\]\.tokenCategory", body):
+            return False
+        if re.search(
+            rf"tx\.outputs\[\s*{idx}\s*\]\.tokenCategory\s*==\s*(NO_TOKEN|0x0+)\b",
+            body,
+            re.IGNORECASE,
+        ):
+            return True
+        # Truncated or bare `0x` (no hex payload), common in no-token checks
+        if re.search(
+            rf"tx\.outputs\[\s*{idx}\s*\]\.tokenCategory\s*==\s*0x(?![0-9a-fA-F])",
+            body,
+            re.IGNORECASE,
+        ):
+            return True
+        return False
+
     def is_minter_contract(self) -> bool:
         """
         Behavior-based minter detection.
