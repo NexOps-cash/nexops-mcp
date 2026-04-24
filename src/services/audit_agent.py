@@ -214,6 +214,7 @@ class AuditAgent:
 
             if rule_id == "index_underflow":
                 exploit_severity = ExploitSeverity.GRIEFING
+                issue_class = IssueClass.REAL_ISSUE
             elif rule_id in {"commitment_length_missing", "vulnerable_covenant.cash"}:
                 exploit_severity = ExploitSeverity.DIRECT_FUND_LOSS
             elif rule_id in {"unbounded_numeric_field", "authorization_model_classifier"}:

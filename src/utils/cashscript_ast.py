@@ -383,16 +383,45 @@ class CashScriptAST:
                 violations.append(output_ref)
         return violations
 
+    @staticmethod
+    def _body_inside_braces(code: str, open_brace_idx: int) -> Optional[str]:
+        """
+        Return source inside a balanced `{ ... }` block starting at open_brace_idx.
+        The opening `{` must be at open_brace_idx. Does not include the outer brace pair.
+        """
+        if open_brace_idx < 0 or open_brace_idx >= len(code) or code[open_brace_idx] != "{":
+            return None
+        depth = 0
+        i = open_brace_idx
+        while i < len(code):
+            ch = code[i]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return code[open_brace_idx + 1 : i]
+            i += 1
+        return None
+
     def _get_function_bodies(self) -> Dict[str, str]:
-        """Extract function bodies keyed by function name."""
+        """
+        Extract function inner bodies (no outermost `{` `}`) keyed by function name.
+        Uses brace-depth so nested do/if blocks do not truncate the body.
+        """
         bodies: Dict[str, str] = {}
-        for match in re.finditer(r'function\s+(\w+)\s*\([^)]*\)\s*\{(.*?)\}', self.code, re.DOTALL):
-            bodies[match.group(1)] = match.group(2)
+        for match in re.finditer(r"function\s+(\w+)\s*\([^)]*\)\s*\{", self.code):
+            name = match.group(1)
+            start_brace = match.end() - 1
+            inner = self._body_inside_braces(self.code, start_brace)
+            if inner is not None:
+                bodies[name] = inner
         return bodies
 
     def has_index_underflow_risk(self) -> List[str]:
         """
-        Detect this.activeInputIndex - k without require(this.activeInputIndex > k).
+        Per-function: `this.activeInputIndex - k` must have a same-function guard
+        `require(this.activeInputIndex > k)` where k matches the subtracted literal/identifier.
         """
         at_risk_functions: List[str] = []
         for fn_name, body in self._get_function_bodies().items():
@@ -400,7 +429,7 @@ class CashScriptAST:
                 operand = match.group(1)
                 guard = re.search(
                     rf"require\s*\(\s*this\.activeInputIndex\s*>\s*{re.escape(operand)}\s*\)",
-                    body
+                    body,
                 )
                 if not guard:
                     at_risk_functions.append(fn_name)

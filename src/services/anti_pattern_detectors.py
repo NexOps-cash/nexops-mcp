@@ -232,7 +232,7 @@ class IndexUnderflowDetector(AntiPatternDetector):
             exploit="A crafted transaction placing this contract at index 0 can trigger script failure on index underflow. "
                     "This is a denial-of-service/bricking risk for that spend path.",
             location={"line": 0, "function": fn_name},
-            severity="high",
+            severity="medium",
             issue_class="real_issue",
             exploit_severity="griefing",
         )
