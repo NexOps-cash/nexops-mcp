@@ -332,13 +332,16 @@ class OutputBindingDetector(AntiPatternDetector):
     id = "output_binding_missing"
 
     def detect(self, ast: CashScriptAST) -> Optional[Violation]:
-        if ast.contract_mode not in {"manager", "stateful", "covenant"}:
+        if ast.contract_mode not in {"manager", "stateful", "covenant", "vault"}:
             return None
         refs = ast.get_unbound_output_refs()
         if not refs:
             return None
         ref = refs[0]
-        if ref.property_accessed not in {"value", "tokenAmount"}:
+        allowed_props = {"value", "tokenAmount"}
+        if ast.contract_mode == "vault":
+            allowed_props.add("tokenCategory")
+        if ref.property_accessed not in allowed_props:
             return None
         return Violation(
             rule=self.id,

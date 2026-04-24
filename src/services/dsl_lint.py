@@ -94,6 +94,9 @@ def _check_hardcoded_input_index(code: str) -> list[dict]:
 
         for m in re.finditer(r"tx\.outputs\[\s*(\d+)\s*\]", body):
             idx = int(m.group(1))
+            # Constant access to output 0: valid spends always have ≥1 output; do not require length guard.
+            if idx == 0:
+                continue
             # Safe only if there is a length guard that guarantees length > idx
             safe = any(g > idx for g in guarded_lengths)
             if not safe:

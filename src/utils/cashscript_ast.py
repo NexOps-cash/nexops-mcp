@@ -350,7 +350,13 @@ class CashScriptAST:
         return unguarded
     
     def find_token_pair_violations(self) -> List[int]:
-        """Find output indices with tokenCategory check but no tokenAmount check"""
+        """Find output indices with tokenCategory check but no tokenAmount check.
+
+        Only applies when the contract actually references tokenAmount anywhere—category-only
+        checks (e.g. no-token guards) do not require a synthetic tokenAmount pair.
+        """
+        if not re.search(r"\btokenAmount\b", self.code):
+            return []
         cats = {v.validates_token_category for v in self.validations if v.validates_token_category is not None}
         amts = {v.validates_token_amount for v in self.validations if v.validates_token_amount is not None}
         return list(cats - amts)

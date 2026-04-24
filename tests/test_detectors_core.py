@@ -124,7 +124,7 @@ def test_partial_aggregation_skipped_for_parser_mode():
 
 
 # ---------------------------------------------------------------------------
-# 3) OutputBindingDetector — only manager|stateful|covenant; not vault|minter|parser
+# 3) OutputBindingDetector — manager|stateful|covenant|vault; not minter|parser
 # ---------------------------------------------------------------------------
 
 
@@ -147,8 +147,15 @@ def test_output_binding_triggers_in_manager_mode():
     assert v.location.get("property") == "value"
 
 
-@pytest.mark.parametrize("mode", ["vault", "minter", "parser"])
-def test_output_binding_does_not_trigger_in_non_bound_modes(mode):
+def test_output_binding_triggers_in_vault_mode():
+    d = OutputBindingDetector()
+    v = d.detect(CashScriptAST(_code_unbound_value_no_locking(), contract_mode="vault"))
+    assert v is not None
+    assert v.rule == "output_binding_missing"
+
+
+@pytest.mark.parametrize("mode", ["minter", "parser"])
+def test_output_binding_does_not_trigger_in_minter_or_parser(mode):
     d = OutputBindingDetector()
     assert d.detect(CashScriptAST(_code_unbound_value_no_locking(), contract_mode=mode)) is None
 

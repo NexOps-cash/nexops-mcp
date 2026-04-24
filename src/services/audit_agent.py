@@ -285,6 +285,11 @@ class AuditAgent:
                     mapped_category = "none"
 
                 semantic_category = mapped_category
+                # Only treat as major flaw when the model claims direct fund loss.
+                if semantic_category == "major_protocol_flaw":
+                    semantic_exploit_check = str(semantic_data.get("exploit_severity", "n/a")).strip().lower()
+                    if semantic_exploit_check != "direct_fund_loss":
+                        semantic_category = "moderate_logic_risk"
                 confidence = semantic_data.get("confidence", 0.0)
                 try:
                     semantic_confidence = max(0.0, min(1.0, float(confidence)))

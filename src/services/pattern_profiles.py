@@ -65,7 +65,6 @@ PATTERN_PROFILES: Dict[str, Dict[str, List[str]]] = {
             "missing_output_anchor",
             "missing_output_limit",
             "missing_value_enforcement",
-            "output_binding_missing",
             "empty_function_body",
         ],
     },
