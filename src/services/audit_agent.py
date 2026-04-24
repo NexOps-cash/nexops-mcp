@@ -1,7 +1,7 @@
 import logging
 from typing import List, Optional
 
-from src.models import AuditIssue, AuditReport, Severity
+from src.models import AuditIssue, AuditReport, Severity, IssueClass, ExploitSeverity
 from src.services.compiler import get_compiler_service
 from src.services.dsl_lint import get_dsl_linter
 from src.services.pipeline import Phase3
@@ -23,55 +23,81 @@ COMPILE_ERROR_MAP = {
 # ── Semantic Audit ──────────────────────────────────────────────────────────
 
 SEMANTIC_SYSTEM_PROMPT = """\
-You are a CashScript Security Auditor. You must perform TWO assessments:
+You are a BCH CashScript smart-contract auditor.
+Classify semantic risk with UTXO-aware reasoning only.
 
-─────────────────────────────────────────────
-PART 1 — Structural Risk Category (choose EXACTLY ONE):
-─────────────────────────────────────────────
-  none                – No semantic issues. Logic is sound and complete.
-  minor_design_risk   – Suboptimal design but not exploitable under normal conditions.
-  moderate_logic_risk – Logical flaw that could be exploited under adversarial conditions.
-  major_protocol_flaw – Serious protocol-level flaw that breaks core contract guarantees.
-  funds_unspendable   – Funds are PERMANENTLY locked with NO exit path whatsoever.
+Use exactly one category:
+- EXPLOIT
+- DESIGN_TRADEOFF
+- ASSUMPTION
+- SAFE
 
-Rules for "funds_unspendable" (use ONLY when ALL apply):
-  • Funds are locked back into the same contract or a void with no exit.
-  • No branch exists that pays out to any external address.
-  • Both the release branch AND the refund branch are missing or permanently unreachable.
-  • Logic structurally leads to a deadlock with no time-based escape.
-  DO NOT use "funds_unspendable" for: power imbalance, arbiter fairness debates,
-  timeout disagreements, or game-theory critique.
+For EXPLOIT also set exploit_severity:
+- direct_fund_loss
+- partial_violation
+- griefing
 
-─────────────────────────────────────────────
-PART 2 — Business Logic Quality Score (integer 0-10):
-─────────────────────────────────────────────
-Assess the SUBJECTIVE quality of the business logic. This is your FREE-FORM judgment.
-Consider:
-  • Race conditions or timing-based attack windows (e.g., front-running, UTXO races)
-  • Multi-party fairness: does any single party hold disproportionate power to grief others?
-  • Edge-case handling: what happens when values are 0, min, or max?
-  • Economic incentive alignment: are all parties incentivised to behave honestly?
-  • Completeness: are there common scenarios the contract fails to handle?
+For non-EXPLOIT set exploit_severity = "n/a".
 
-Scoring guide:
-  10 = Excellent business logic, no conceivable subjective concern
-   8 = Minor subjective gaps but unlikely to matter in practice
-   5 = Noticeable business logic weakness that a sophisticated user should know about
-   3 = Significant subjective concern (e.g., clear race window or power imbalance)
-   0 = Business logic is fundamentally unsound
+Definitions:
+- EXPLOIT: attacker can violate value/authorization invariants on-chain.
+- DESIGN_TRADEOFF: intentional but risky architecture with no direct exploit proof.
+- ASSUMPTION: safety relies on an external contract/system (deferred validation).
+- SAFE: no meaningful semantic issue found.
 
-Note: Even well-written contracts rarely deserve 10/10. Be honest and strict.
+Do NOT:
+- mention reentrancy
+- mention race conditions or front-running
+- assume EVM account/call-stack behavior
+- treat single-party control as a vulnerability by default
 
-Do NOT re-examine syntax, formatting, or PRAGMA.
+Focus only on:
+- value conservation (BCH and tokenAmount flows)
+- authorization bypass
+- invariant breaks under attacker-controlled transaction structure
 
-You MUST return ONLY a strict JSON object — no prose, no markdown, no explanation outside JSON:
+Return strict JSON only:
 {
-  "category": "<one of the 5 categories above>",
-  "explanation": "<brief explanation of the category classification>",
-  "confidence": <float 0.0-1.0>,
-  "business_logic_score": <integer 0-10>,
-  "business_logic_notes": "<brief explanation of the business logic score>"
+  "category": "EXPLOIT | DESIGN_TRADEOFF | ASSUMPTION | SAFE",
+  "exploit_severity": "direct_fund_loss | partial_violation | griefing | n/a",
+  "explanation": "short rationale",
+  "confidence": 0.0,
+  "business_logic_score": 0,
+  "business_logic_notes": "short rationale"
 }"""
+
+SEMANTIC_CLASS_TO_INTERNAL = {
+    "safe": "none",
+    "assumption": "minor_design_risk",
+    "design_tradeoff": "moderate_logic_risk",
+    "exploit": "major_protocol_flaw",
+    # Backward-compatible semantic labels from existing tests/providers.
+    "none": "none",
+    "minor_design_risk": "minor_design_risk",
+    "moderate_logic_risk": "moderate_logic_risk",
+    "major_protocol_flaw": "major_protocol_flaw",
+    "funds_unspendable": "funds_unspendable",
+}
+
+
+def _downgrade_issue_class(issue_class: IssueClass) -> IssueClass:
+    if issue_class == IssueClass.REAL_ISSUE:
+        return IssueClass.CONTEXTUAL
+    if issue_class == IssueClass.CONTEXTUAL:
+        return IssueClass.NOISE
+    return IssueClass.NOISE
+
+
+def _severity_from_string(raw_severity: str) -> Severity:
+    sev_str = (raw_severity or "HIGH").upper()
+    if sev_str == "WARNING":
+        sev_str = "MEDIUM"
+    if sev_str == "INFO":
+        return Severity.INFO
+    try:
+        return Severity(sev_str)
+    except ValueError:
+        return Severity.HIGH
 
 
 def _build_semantic_user_prompt(code: str, intent: str) -> str:
@@ -105,6 +131,7 @@ class AuditAgent:
         openrouter_key: Optional[str] = None
     ) -> AuditReport:
         issues: List[AuditIssue] = []
+        semantic_confidence: Optional[float] = None
 
         # ── 1. Compile Check ──────────────────────────────────────────────
         compiler = get_compiler_service()
@@ -125,6 +152,8 @@ class AuditAgent:
                     recommendation=err.get("hint", "Review syntax and compiler output."),
                     rule_id=rule_id,
                     can_fix=True,
+                    issue_class=IssueClass.REAL_ISSUE,
+                    exploit_severity=ExploitSeverity.DIRECT_FUND_LOSS,
                 )
             )
 
@@ -135,13 +164,8 @@ class AuditAgent:
 
         for violation in lint_result.get("violations", []):
             rule_id = violation.get("rule_id", "unknown_lint")
-            lint_sev_str = (violation.get("severity") or "HIGH").upper()
-            if lint_sev_str == "INFO":
-                lint_sev_str = "LOW"
-            try:
-                lint_severity = Severity(lint_sev_str)
-            except ValueError:
-                lint_severity = Severity.HIGH
+            lint_severity = _severity_from_string(violation.get("severity") or "HIGH")
+            issue_class = IssueClass.NOISE if rule_id == "LNC-002" else IssueClass.CONTEXTUAL
             is_info = violation.get("severity", "").lower() == "info"
             issues.append(
                 AuditIssue(
@@ -152,24 +176,48 @@ class AuditAgent:
                     recommendation="Adhere to NexOps CashScript DSL conventions.",
                     rule_id=rule_id,
                     can_fix=not is_info,
+                    issue_class=issue_class,
+                    exploit_severity=ExploitSeverity.NOT_APPLICABLE,
                 )
             )
 
         # ── 3. TollGate / AntiPatterns ────────────────────────────────────
-        toll_gate_result = Phase3.validate(code)
+        try:
+            toll_gate_result = Phase3.validate(code, effective_mode)
+        except TypeError:
+            # Backward compatibility for mocked/legacy single-arg validators in tests.
+            toll_gate_result = Phase3.validate(code)
         structural_score = toll_gate_result.structural_score
 
         for violation in toll_gate_result.violations:
             rule_id = violation.rule
-            sev_str = (
-                violation.severity.upper()
-                if hasattr(violation, "severity") and violation.severity
-                else "HIGH"
+            severity = _severity_from_string(
+                violation.severity if hasattr(violation, "severity") else "HIGH"
             )
-            try:
-                severity = Severity(sev_str)
-            except ValueError:
-                severity = Severity.HIGH
+            issue_class = (
+                IssueClass.REAL_ISSUE
+                if severity in (Severity.CRITICAL, Severity.HIGH)
+                else IssueClass.CONTEXTUAL
+            )
+            exploit_severity = ExploitSeverity.PARTIAL_VIOLATION
+            deferred_validation = False
+
+            if rule_id == "index_underflow":
+                exploit_severity = ExploitSeverity.GRIEFING
+            elif rule_id in {"commitment_length_missing", "vulnerable_covenant.cash"}:
+                exploit_severity = ExploitSeverity.DIRECT_FUND_LOSS
+            elif rule_id in {"unbounded_numeric_field", "authorization_model_classifier"}:
+                exploit_severity = ExploitSeverity.GRIEFING
+            elif severity == Severity.CRITICAL:
+                exploit_severity = ExploitSeverity.DIRECT_FUND_LOSS
+
+            if rule_id == "authorization_model_classifier" and severity == Severity.INFO:
+                issue_class = IssueClass.NOISE
+                exploit_severity = ExploitSeverity.NOT_APPLICABLE
+
+            if (effective_mode or "").lower() == "parser" and "missing" in rule_id:
+                deferred_validation = True
+                issue_class = IssueClass.CONTEXTUAL
 
             issues.append(
                 AuditIssue(
@@ -181,6 +229,9 @@ class AuditAgent:
                     or "Review contract architecture and apply secure patterns.",
                     rule_id=rule_id,
                     can_fix=True,
+                    issue_class=issue_class,
+                    exploit_severity=exploit_severity,
+                    deferred_validation=deferred_validation,
                 )
             )
 
@@ -214,16 +265,29 @@ class AuditAgent:
                     raise ValueError("No JSON object found in LLM audit response.")
                 semantic_data, _ = decoder.raw_decode(raw_response, start)
 
-                raw_category = str(semantic_data.get("category", "none")).strip().lower()
-                if raw_category not in ALLOWED_CATEGORIES:
+                semantic_label = str(semantic_data.get("category", "SAFE")).strip().lower()
+                mapped_category = SEMANTIC_CLASS_TO_INTERNAL.get(semantic_label, "none")
+                if mapped_category not in ALLOWED_CATEGORIES:
                     logger.warning(
-                        f"[Semantic Audit] Unknown category '{raw_category}' — defaulting to 'none'."
+                        f"[Semantic Audit] Unknown category '{semantic_label}' — defaulting to 'none'."
                     )
-                    raw_category = "none"
+                    mapped_category = "none"
 
-                semantic_category = raw_category
+                semantic_category = mapped_category
                 confidence = semantic_data.get("confidence", 0.0)
+                try:
+                    semantic_confidence = max(0.0, min(1.0, float(confidence)))
+                except (TypeError, ValueError):
+                    semantic_confidence = 0.0
                 explanation = semantic_data.get("explanation", "")
+                semantic_exploit = str(semantic_data.get("exploit_severity", "n/a")).strip().lower()
+                exploit_map = {
+                    "direct_fund_loss": ExploitSeverity.DIRECT_FUND_LOSS,
+                    "partial_violation": ExploitSeverity.PARTIAL_VIOLATION,
+                    "griefing": ExploitSeverity.GRIEFING,
+                    "n/a": ExploitSeverity.NOT_APPLICABLE,
+                }
+                semantic_exploit_severity = exploit_map.get(semantic_exploit, ExploitSeverity.NOT_APPLICABLE)
 
                 # Free-form business logic score (0-10)
                 raw_biz = semantic_data.get("business_logic_score", 5)
@@ -235,7 +299,7 @@ class AuditAgent:
 
                 logger.info(
                     f"[Semantic Audit] category={semantic_category!r} "
-                    f"confidence={confidence:.2f} biz_score={business_logic_score}/10 | "
+                    f"confidence={semantic_confidence:.2f} biz_score={business_logic_score}/10 | "
                     f"{explanation[:80]} | {biz_notes[:80]}"
                 )
 
@@ -253,6 +317,24 @@ class AuditAgent:
                         "moderate_logic_risk": Severity.HIGH,
                         "minor_design_risk": Severity.MEDIUM,
                     }
+                    semantic_issue_class = IssueClass.REAL_ISSUE
+                    deferred_validation = False
+                    if semantic_label == "design_tradeoff":
+                        semantic_issue_class = IssueClass.CONTEXTUAL
+                        if semantic_exploit_severity == ExploitSeverity.NOT_APPLICABLE:
+                            semantic_exploit_severity = ExploitSeverity.GRIEFING
+                    elif semantic_label == "assumption":
+                        semantic_issue_class = IssueClass.CONTEXTUAL
+                        semantic_exploit_severity = ExploitSeverity.NOT_APPLICABLE
+                        deferred_validation = True
+                    elif semantic_label == "safe":
+                        semantic_issue_class = IssueClass.NOISE
+                        semantic_exploit_severity = ExploitSeverity.NOT_APPLICABLE
+                    elif semantic_label == "exploit" and semantic_exploit_severity == ExploitSeverity.NOT_APPLICABLE:
+                        semantic_exploit_severity = ExploitSeverity.DIRECT_FUND_LOSS
+
+                    if semantic_confidence is not None and semantic_confidence < 0.5:
+                        semantic_issue_class = _downgrade_issue_class(semantic_issue_class)
                     
                     issues.append(
                         AuditIssue(
@@ -263,6 +345,9 @@ class AuditAgent:
                             recommendation=biz_notes or "Review the contract logic and ensure all spending paths are reachable.",
                             rule_id=f"semantic_{semantic_category}",
                             can_fix=False, # Semantic logic deadlocks usually require human redesign
+                            issue_class=semantic_issue_class,
+                            exploit_severity=semantic_exploit_severity,
+                            deferred_validation=deferred_validation,
                         )
                     )
 
@@ -270,6 +355,7 @@ class AuditAgent:
                 logger.error(f"[Semantic Audit] LLM classification failed: {e} — defaulting to 'none'.")
                 semantic_category = "none"
                 business_logic_score = 5   # conservative default on failure
+                semantic_confidence = None
         else:
             logger.info("[Semantic Audit] Skipped — compile failed.")
 
@@ -281,6 +367,7 @@ class AuditAgent:
             structural_score=structural_score,
             semantic_category=semantic_category,
             business_logic_score=business_logic_score,
+            semantic_confidence=semantic_confidence,
             original_code=code,
         )
 

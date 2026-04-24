@@ -4,7 +4,9 @@ from src.models import (
     AuditIssue,
     AuditReport,
     AuditMetadata,
-    Severity
+    Severity,
+    IssueClass,
+    ExploitSeverity,
 )
 
 # ── Deterministic Bucket (0-70) ─────────────────────────────────────────────
@@ -47,6 +49,7 @@ def calculate_audit_report(
     structural_score: float,
     semantic_category: str,
     business_logic_score: int,        # 0-10, free-form AI assessment
+    semantic_confidence: Optional[float],
     original_code: str,
 ) -> AuditReport:
     """
@@ -95,11 +98,39 @@ def calculate_audit_report(
     total_medium = sum(1 for i in deduped_issues if i.severity == Severity.MEDIUM)
     total_low = sum(1 for i in deduped_issues if i.severity == Severity.LOW)
 
+    def _class_multiplier(issue: AuditIssue) -> float:
+        if issue.issue_class == IssueClass.REAL_ISSUE:
+            return 1.0
+        if issue.issue_class == IssueClass.CONTEXTUAL:
+            return 0.5
+        return 0.0
+
+    def _severity_multiplier(issue: AuditIssue) -> float:
+        if issue.issue_class != IssueClass.REAL_ISSUE:
+            return 1.0
+        if issue.exploit_severity == ExploitSeverity.DIRECT_FUND_LOSS:
+            return 1.0
+        if issue.exploit_severity == ExploitSeverity.PARTIAL_VIOLATION:
+            return 0.7
+        if issue.exploit_severity == ExploitSeverity.GRIEFING:
+            return 0.3
+        return 1.0
+
+    def _effective_penalty(issue: AuditIssue) -> int:
+        if issue.rule_id.startswith("semantic_"):
+            # Semantic findings are accounted for in the semantic bucket, not deterministic.
+            return 0
+        if issue.deferred_validation:
+            return 0
+        base = DET_PENALTIES.get(issue.severity, 0)
+        penalty = base * _class_multiplier(issue) * _severity_multiplier(issue)
+        return int(round(penalty))
+
     # ── Deterministic score ──────────────────────────────────────────────
     if not compile_success:
         det_score = 0
     else:
-        total_deductions = sum(DET_PENALTIES.get(i.severity, 0) for i in deduped_issues)
+        total_deductions = sum(_effective_penalty(i) for i in deduped_issues)
         det_score = max(0, DET_MAX - total_deductions)
 
     # ── Semantic score ───────────────────────────────────────────────────
@@ -143,6 +174,7 @@ def calculate_audit_report(
         dsl_passed=dsl_passed,
         structural_score=structural_score,
         semantic_score=semantic_score,
+        semantic_confidence=semantic_confidence,
         contract_hash=contract_hash,
     )
 
