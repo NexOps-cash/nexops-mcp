@@ -47,6 +47,38 @@ class AuditDetector:
         raise NotImplementedError
 
 
+# ── Module-level helpers ────────────────────────────────────────────────────
+
+
+def _has_hash_precondition(code: str) -> bool:
+    """True when the given code contains hash256(var) == var — bytes are upstream-pinned."""
+    return bool(re.search(r'hash256\s*\(\s*\w+\s*\)\s*==\s*\w+', code))
+
+
+def _has_full_equality_coupling(code: str) -> bool:
+    """
+    True when active-index coupling is expressed as three explicit equality requires
+    covering lockingBytecode, tokenCategory, AND nftCommitment.
+    When all three are present the detector would be a false positive.
+    """
+    has_locking = bool(re.search(
+        r'tx\.inputs\[this\.activeInputIndex\]\.lockingBytecode\s*==\s*tx\.outputs\[this\.activeInputIndex',
+        code,
+    ))
+    has_category = bool(re.search(
+        r'tx\.inputs\[this\.activeInputIndex\]\.tokenCategory\s*==\s*tx\.outputs\[this\.activeInputIndex',
+        code,
+    ))
+    has_commitment = bool(re.search(
+        r'tx\.inputs\[this\.activeInputIndex\]\.nftCommitment\s*==\s*tx\.outputs\[this\.activeInputIndex',
+        code,
+    ))
+    return has_locking and has_category and has_commitment
+
+
+# ── Detectors ───────────────────────────────────────────────────────────────
+
+
 class IndexUnderflowDetector(AuditDetector):
     """Detect activeInputIndex subtraction without lower-bound guard."""
 
@@ -81,12 +113,95 @@ class IndexUnderflowDetector(AuditDetector):
         )
 
 
+class PositiveOffsetOOBDetector(AuditDetector):
+    """
+    Detect tx.(inputs|outputs)[this.activeInputIndex + N] accesses without a
+    matching length guard on the SAME collection (inputs or outputs).
+    """
+
+    id = "positive_offset_oob"
+
+    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        for fn_name, body in ast._get_function_bodies().items():
+            for m in re.finditer(
+                r'tx\.(inputs|outputs)\[this\.activeInputIndex\s*\+\s*(\d+)\]', body
+            ):
+                collection = m.group(1)   # "inputs" or "outputs" — must match guard
+                offset = int(m.group(2))
+                # Guard must reference the same collection, not the other one
+                guard = re.search(
+                    rf'tx\.{collection}\.length\s*(>|>=)\s*this\.activeInputIndex\s*\+\s*{offset}',
+                    body,
+                )
+                if not guard:
+                    return Violation(
+                        rule=self.id,
+                        reason=(
+                            f"Function '{fn_name}' accesses tx.{collection}[this.activeInputIndex+{offset}] "
+                            "without a length guard on the same collection"
+                        ),
+                        exploit=(
+                            "Placement-driven script abort if the transaction has fewer "
+                            f"{collection} than activeInputIndex + {offset}. "
+                            "This is a denial-of-service/griefing risk for that spend path."
+                        ),
+                        location={"line": 0, "function": fn_name},
+                        severity="medium",
+                        issue_class="contextual",
+                        exploit_severity="griefing",
+                    )
+        return None
+
+
+class UnsupportedWhileDetector(AuditDetector):
+    """
+    Detect a top-level while(...) loop that CashScript v0.13.x does not support.
+    Valid do-while syntax is: do { ... } while (...); — the while token is always
+    preceded (after stripping whitespace) by a closing brace.
+    """
+
+    id = "cashscript_unsupported_top_level_while"
+
+    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        # Strip line and block comments before scanning so comment text cannot
+        # accidentally look like a standalone while keyword.
+        clean = re.sub(r'//.*$', '', ast.code, flags=re.MULTILINE)
+        clean = re.sub(r'/\*.*?\*/', '', clean, flags=re.DOTALL)
+
+        for m in re.finditer(r'\bwhile\s*\(', clean):
+            prefix = clean[:m.start()]
+            # A valid do-while has } (possibly followed by whitespace) immediately
+            # before the while keyword.  Use re.search so multi-line gaps are handled.
+            if not re.search(r'\}\s*$', prefix):
+                lineno = prefix.count('\n') + 1
+                return Violation(
+                    rule=self.id,
+                    reason="Top-level while() loop detected (not a valid do-while closing)",
+                    exploit=(
+                        "CashScript v0.13.x only supports do { } while () loops. "
+                        "A standalone while() causes a compile-time ExtraneousInputError "
+                        "and makes the contract non-deployable."
+                    ),
+                    location={"line": lineno, "function": "any"},
+                    severity="critical",
+                    issue_class="real_issue",
+                    exploit_severity="direct_fund_loss",
+                )
+        return None
+
+
 class InputOutputCouplingDetector(AuditDetector):
     """Detect forwarding functions that read inputs without coupled outputs."""
 
     id = "input_output_coupling"
 
     def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        # If the contract fully expresses active-index coupling via three explicit
+        # equality requires (locking + category + commitment), the detector would
+        # be a false positive on every minter/manager that self-returns correctly.
+        if _has_full_equality_coupling(ast.code):
+            return None
+
         violations = [
             fn_name
             for fn_name in ast.has_input_without_output_coupling()
@@ -151,14 +266,28 @@ class CommitmentLengthSafetyDetector(AuditDetector):
         if not risky_functions:
             return None
         fn_name = risky_functions[0]
+
+        # Severity is function-scoped: if the risky function itself contains a
+        # hash256(var) == var precondition the bytes are upstream-pinned and the
+        # worst-case impact is self-grief (griefing), not direct fund loss.
+        risky_fn_body = ast._get_function_bodies().get(fn_name, "")
+        if _has_hash_precondition(risky_fn_body):
+            severity = "medium"
+            issue_class = "contextual"
+            exploit_severity = "griefing"
+        else:
+            severity = "high"
+            issue_class = "real_issue"
+            exploit_severity = "direct_fund_loss"
+
         return Violation(
             rule=self.id,
             reason=f"Function '{fn_name}' parses bytes via split/slice without explicit length guard",
             exploit="Short commitment payloads can decode into unexpected empty/truncated values and violate downstream invariants.",
             location={"line": 0, "function": fn_name},
-            severity="high",
-            issue_class="real_issue",
-            exploit_severity="direct_fund_loss",
+            severity=severity,
+            issue_class=issue_class,
+            exploit_severity=exploit_severity,
         )
 
 
@@ -211,7 +340,15 @@ class OutputBindingDetector(AuditDetector):
 
 
 class AuthorizationModelClassifierDetector(AuditDetector):
-    """Classify tokenCategory-based authorization without escalating it."""
+    """
+    Classify tokenCategory-based authorization without escalating it.
+
+    NOTE: This detector is intentionally NOT in AUDIT_DETECTOR_REGISTRY.
+    The enforcer routes any result to `auth_classifier_metadata` instead of
+    the violations list so it never surfaces as an AuditIssue.
+    The class is kept here so that the enforcer can instantiate it separately
+    if metadata tagging is desired in the future.
+    """
 
     id = "authorization_model_classifier"
 
@@ -235,9 +372,12 @@ class AuthorizationModelClassifierDetector(AuditDetector):
 
 AUDIT_DETECTOR_REGISTRY = [
     IndexUnderflowDetector(),
+    PositiveOffsetOOBDetector(),
+    UnsupportedWhileDetector(),
     CommitmentLengthSafetyDetector(),
     OutputBindingDetector(),
-    AuthorizationModelClassifierDetector(),
     PartialAggregationDetector(),
     InputOutputCouplingDetector(),
+    # AuthorizationModelClassifierDetector is NOT included here.
+    # The enforcer routes it to auth_classifier_metadata (not violations).
 ]

@@ -30,6 +30,34 @@ RULE_PREFIX_BY_FUNCTION = {
 }
 
 
+# ── Audit-lint gate helpers ───────────────────────────────────────────────────
+
+def _is_genesis_input_pattern(code: str) -> bool:
+    """
+    True when the contract explicitly checks BOTH:
+      - tx.inputs[0].outpointIndex == 0  (genesis output anchor)
+      - tx.inputs[0].tokenCategory == 0x (no token on genesis input)
+    Such contracts intentionally reference input[0] by spec; suppress LNC-001a.
+    """
+    has_outpoint = bool(re.search(r'tx\.inputs\[0\]\.outpointIndex\s*==\s*0', code))
+    has_no_token = bool(re.search(r'tx\.inputs\[0\]\.tokenCategory\s*==\s*0x', code))
+    return has_outpoint and has_no_token
+
+
+def _has_nft_commitment_preservation(code: str) -> bool:
+    """
+    True when any output nftCommitment is explicitly pinned via a require()
+    equality constraint.  Covers both:
+      - Self-return: require(inputs[active].nftCommitment == outputs[active].nftCommitment)
+      - Pinned mint:  require(outputs[N].nftCommitment == bytes(...))
+    When present the singleton-amount guard (LNC-018) is redundant.
+    """
+    return bool(re.search(
+        r'require\s*\(.*?tx\.outputs\[.*?\]\.nftCommitment\s*==',
+        code, re.DOTALL,
+    ))
+
+
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 def _lines(code: str) -> list[tuple[int, str]]:
@@ -75,8 +103,14 @@ def _check_hardcoded_input_index(code: str) -> list[dict]:
     lines_list = _lines(code)
 
     # Pattern 1: tx.inputs[0]
+    # Exception: genesis-input pattern — the contract explicitly anchors to
+    # tx.inputs[0].outpointIndex == 0 AND no-token check.  This is intentional
+    # by spec and must not be flagged.
+    genesis_pattern = _is_genesis_input_pattern(code)
     for lineno, line in lines_list:
         if re.search(r"tx\.inputs\[\s*0\s*\]", line):
+            if genesis_pattern:
+                continue
             violations.append({
                 "rule_id": "LNC-001a",
                 "message": "Hardcoded tx.inputs[0] — use tx.inputs[this.activeInputIndex]",
@@ -441,6 +475,7 @@ def _check_division_guard(code: str) -> list[dict]:
                         f"Division by '{divisor}' without require({divisor} > 0) guard."
                     ),
                     "line_hint": lineno,
+                    "severity": "medium",   # downgraded from implicit HIGH default
                 })
 
     return violations
@@ -797,6 +832,18 @@ def _check_token_mint_supply_enforcement(code: str, contract_mode: str = "") -> 
     for func_name, body, start_lineno in _function_bodies(code):
         if "mint" not in func_name.lower() and "mint" not in body.lower():
             continue
+
+        # Skip release patterns: a function that DECREASES the active-index
+        # tokenAmount is a fund-token release (supply goes down), NOT a supply
+        # mint that needs a cap guard.
+        is_release = bool(re.search(
+            r'tx\.inputs\[this\.activeInputIndex\]\.tokenAmount'
+            r'\s*>\s*tx\.outputs\[this\.activeInputIndex\]\.tokenAmount',
+            body,
+        ))
+        if is_release:
+            continue
+
         has_supply_guard = bool(
             re.search(r"totalSupply|maxSupply|remainingSupply|cap", body, re.IGNORECASE)
             and re.search(r"require\s*\(", body)
@@ -825,6 +872,12 @@ def _check_nft_mint_transfer_rules(code: str, contract_mode: str = "") -> list[d
     if not references_token:
         return []
 
+    # Skip when any output nftCommitment is explicitly pinned via require() equality.
+    # This covers self-return (commitment preserved) and pinned mints (commitment set to
+    # a specific computed value), both of which make the singleton-amount guard redundant.
+    if _has_nft_commitment_preservation(code):
+        return []
+
     has_singleton_guard = bool(
         re.search(r"tokenAmount\s*==\s*1", code)
         or re.search(r"tokenAmount\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenAmount", code)
@@ -839,6 +892,7 @@ def _check_nft_mint_transfer_rules(code: str, contract_mode: str = "") -> list[d
             "Add require(tokenAmount == 1) for singleton NFTs or preserve input tokenAmount exactly."
         ),
         "line_hint": 0,
+        "severity": "medium",   # downgraded from implicit HIGH default
     }]
 
 

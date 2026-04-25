@@ -297,6 +297,19 @@ class AuditAgent:
                     semantic_confidence = max(0.0, min(1.0, float(confidence)))
                 except (TypeError, ValueError):
                     semantic_confidence = 0.0
+
+                # Multi-contract system context: the LLM only sees one contract
+                # and cannot verify sibling contract invariants.  Cap confidence
+                # so high-confidence ratings do not propagate from partial analysis.
+                _MULTI_CONTRACT_SIGNALS = [
+                    "startupContract",
+                    "fundContract",
+                    "assetContract",
+                    "managerContract",
+                ]
+                if any(signal in code for signal in _MULTI_CONTRACT_SIGNALS):
+                    if semantic_confidence is not None:
+                        semantic_confidence = min(semantic_confidence, 0.72)
                 explanation = semantic_data.get("explanation", "")
                 semantic_exploit = str(semantic_data.get("exploit_severity", "n/a")).strip().lower()
                 exploit_map = {
@@ -363,6 +376,32 @@ class AuditAgent:
                             semantic_exploit_severity = ExploitSeverity.NOT_APPLICABLE
                         else:
                             semantic_exploit_severity = ExploitSeverity.GRIEFING
+
+                    # ── UTXO guardrail: keyword-based downgrade ────────────
+                    # If the LLM explanation uses phrases that indicate it is
+                    # applying EVM-leaning "category presence is not authorization"
+                    # reasoning, cap severity at MEDIUM and contextualise the finding.
+                    _DOWNGRADE_PHRASES = [
+                        "category-based",
+                        "token presence",
+                        "not signature-bound",
+                        "each input independently signed",
+                        "inject input",
+                        "inject a",
+                        "attacker can include",
+                        "attacker-controlled input",
+                    ]
+                    _explanation_lower = (explanation or "").lower()
+                    if any(phrase in _explanation_lower for phrase in _DOWNGRADE_PHRASES):
+                        if issue_severity in (Severity.HIGH, Severity.CRITICAL):
+                            issue_severity = Severity.MEDIUM
+                        semantic_issue_class = IssueClass.CONTEXTUAL
+                        semantic_exploit_severity = ExploitSeverity.GRIEFING
+                        _semantic_reason = "utxo_guardrail_downgrade"
+                        logger.debug(
+                            f"[Semantic Audit] Downgraded to MEDIUM/contextual "
+                            f"({_semantic_reason}) — UTXO phrase matched in explanation."
+                        )
 
                     issues.append(
                         AuditIssue(

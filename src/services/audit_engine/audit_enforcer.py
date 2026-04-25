@@ -207,10 +207,16 @@ class AuditEnforcer:
             except Exception as e:
                 logger.error(f"Detector {detector.id} failed: {e}")
         
+        # Route authorization_model_classifier to metadata only — it must not
+        # appear as an AuditIssue finding (noise on every shared-category contract).
+        auth_metadata = [v for v in violations if v.get("rule") == "authorization_model_classifier"]
+        findings = [v for v in violations if v.get("rule") != "authorization_model_classifier"]
+
         return {
-            "valid": len(violations) == 0,
-            "violated_rules": [v["rule"] for v in violations],
-            "violations": violations,
+            "valid": len(findings) == 0,
+            "violated_rules": [v["rule"] for v in findings],
+            "violations": findings,
+            "auth_classifier_metadata": auth_metadata,  # metadata only, not surfaced as issues
         }
 
 
