@@ -3,9 +3,9 @@ FROM nikolaik/python-nodejs:python3.11-nodejs22
 
 WORKDIR /app
 
-# Install Node deps first (cashc compiler)
-COPY package.json .
-RUN npm install
+# Install Node deps first (cashc at node_modules/.bin — must match compiler.get_cashc_path)
+COPY package.json package-lock.json ./
+RUN npm ci
 
 # Install Python deps
 COPY requirements.txt .

@@ -19,6 +19,10 @@ DET_PENALTIES: dict = {
 }
 DET_MAX = 70
 
+# When cashc crashes with a known toolchain error (not a contract defect), do not
+# zero the deterministic bucket — avoids misleading CRITICAL scores.
+TOOLCHAIN_NEUTRAL_DET_SCORE = 40
+
 # ── Semantic Bucket (0-30) — split into two sub-components ─────────────────
 #
 #   Structured category  (0-20 pts): machine-determined from 5 enum values.
@@ -51,13 +55,15 @@ def calculate_audit_report(
     business_logic_score: int,        # 0-10, free-form AI assessment
     semantic_confidence: Optional[float],
     original_code: str,
+    compile_toolchain_error: bool = False,
 ) -> AuditReport:
     """
     Hybrid Scoring v2 (revised semantic split):
 
     Deterministic (0-70):
         Deductions per severity: CRITICAL→-20, HIGH→-10, MEDIUM→-5, LOW→-2, INFO→0.
-        If compile fails → det_score = 0.
+        If compile fails → det_score = 0, except compile_toolchain_error (cashc crash) →
+        det_score = TOOLCHAIN_NEUTRAL_DET_SCORE (not a contract syntax failure).
 
     Semantic (0-30):
         Structured category (0-20):
@@ -128,7 +134,11 @@ def calculate_audit_report(
 
     # ── Deterministic score ──────────────────────────────────────────────
     if not compile_success:
-        det_score = 0
+        if compile_toolchain_error:
+            # cashc/Node internal failure — not treated as a blank compile failure
+            det_score = TOOLCHAIN_NEUTRAL_DET_SCORE
+        else:
+            det_score = 0
     else:
         total_deductions = sum(_effective_penalty(i) for i in deduped_issues)
         det_score = max(0, DET_MAX - total_deductions)

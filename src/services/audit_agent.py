@@ -18,6 +18,7 @@ COMPILE_ERROR_MAP = {
     "CompilerNotFoundError": "compile_environment_error",
     "InternalError": "compile_internal_error",
     "UnknownError": "compile_unknown_error",
+    "ToolchainError": "compile_toolchain_error",
 }
 
 # ── Semantic Audit ──────────────────────────────────────────────────────────
@@ -143,6 +144,7 @@ class AuditAgent:
         compiler = get_compiler_service()
         compile_result = compiler.compile(code)
         compile_success = compile_result.get("success", False)
+        compile_toolchain_error = bool(compile_result.get("toolchain_error", False))
 
         if not compile_success:
             err = compile_result.get("error", {})
@@ -152,16 +154,31 @@ class AuditAgent:
             # Internal/unknown compiler errors (e.g. Node.js runtime failures like
             # "sourceTags is not iterable") are environment issues, not security
             # defects — demote so they don't falsely block otherwise valid contracts.
-            INTERNAL_ERR_TYPES = {"UnknownError", "InternalError", "CompilerNotFoundError", "TimeoutError"}
+            INTERNAL_ERR_TYPES = {
+                "UnknownError",
+                "InternalError",
+                "CompilerNotFoundError",
+                "TimeoutError",
+                "ToolchainError",
+            }
             compile_severity = Severity.HIGH if err_type in INTERNAL_ERR_TYPES else Severity.CRITICAL
             compile_issue_class = IssueClass.CONTEXTUAL if err_type in INTERNAL_ERR_TYPES else IssueClass.REAL_ISSUE
             compile_exploit = ExploitSeverity.GRIEFING if err_type in INTERNAL_ERR_TYPES else ExploitSeverity.DIRECT_FUND_LOSS
+            if err_type == "ToolchainError":
+                compile_title = "Compiler toolchain error (cashc/Node)"
+                compile_desc = (
+                    "The cashc compiler crashed with an internal error — this is not a CashScript syntax "
+                    f"diagnosis. Raw output: {err.get('raw', '')}"
+                )
+            else:
+                compile_title = f"Compilation Failed: {err_type}"
+                compile_desc = f"The contract failed to compile: {err.get('raw', 'Unknown compiler error')}"
             issues.append(
                 AuditIssue(
-                    title=f"Compilation Failed: {err_type}",
+                    title=compile_title,
                     severity=compile_severity,
                     line=err.get("line") or 0,
-                    description=f"The contract failed to compile: {err.get('raw', 'Unknown compiler error')}",
+                    description=compile_desc.strip(),
                     recommendation=err.get("hint", "Review syntax and compiler output."),
                     rule_id=rule_id,
                     can_fix=True,
@@ -437,6 +454,7 @@ class AuditAgent:
             business_logic_score=business_logic_score,
             semantic_confidence=semantic_confidence,
             original_code=code,
+            compile_toolchain_error=compile_toolchain_error,
         )
 
         return report
