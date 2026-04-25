@@ -25,11 +25,15 @@ def _compile_ok(_code):
     return {"success": True}
 
 
+def _compile_unknown_error(_code):
+    return {"success": False, "error": {"type": "UnknownError", "raw": "sourceTags is not iterable"}}
+
+
 def _lint_ok(_code, contract_mode=""):
     return {"passed": True, "violations": []}
 
 
-def _toll_gate_ok(_code):
+def _toll_gate_ok(_code, contract_mode=""):
     r = MagicMock()
     r.passed = True
     r.violations = []
@@ -51,7 +55,7 @@ async def test_semantic_exploit_low_confidence_downgrades_issue_class():
     with patch("src.services.llm.factory.LLMFactory.get_provider", return_value=_mock_provider(payload)), \
          patch("src.services.audit_agent.get_compiler_service", return_value=MagicMock(compile=_compile_ok)), \
          patch("src.services.audit_agent.get_dsl_linter", return_value=MagicMock(lint=_lint_ok)), \
-         patch("src.services.audit_agent.Phase3.validate", side_effect=_toll_gate_ok):
+         patch("src.services.audit_agent.validate_audit", side_effect=_toll_gate_ok):
         report = await AuditAgent.audit("pragma cashscript ^0.13.0; contract T(){}")
 
     semantic_issue = next(i for i in report.issues if i.rule_id.startswith("semantic_"))
@@ -75,14 +79,40 @@ async def test_semantic_assumption_sets_deferred_validation():
     with patch("src.services.llm.factory.LLMFactory.get_provider", return_value=_mock_provider(payload)), \
          patch("src.services.audit_agent.get_compiler_service", return_value=MagicMock(compile=_compile_ok)), \
          patch("src.services.audit_agent.get_dsl_linter", return_value=MagicMock(lint=_lint_ok)), \
-         patch("src.services.audit_agent.Phase3.validate", side_effect=_toll_gate_ok):
+         patch("src.services.audit_agent.validate_audit", side_effect=_toll_gate_ok):
         report = await AuditAgent.audit("pragma cashscript ^0.13.0; contract T(){}")
 
     semantic_issue = next(i for i in report.issues if i.rule_id.startswith("semantic_"))
     assert report.semantic_category == "minor_design_risk"
+    assert semantic_issue.severity == Severity.MEDIUM
     assert semantic_issue.issue_class == IssueClass.CONTEXTUAL
     assert semantic_issue.deferred_validation is True
     assert semantic_issue.exploit_severity == ExploitSeverity.NOT_APPLICABLE
+
+
+@pytest.mark.anyio
+async def test_semantic_design_tradeoff_caps_severity_and_exploit_severity():
+    """DESIGN_TRADEOFF may not be escalated to HIGH/CRITICAL or direct fund loss on semantic path."""
+    payload = {
+        "category": "DESIGN_TRADEOFF",
+        "exploit_severity": "direct_fund_loss",
+        "explanation": "Slightly weaker UX for edge cases.",
+        "confidence": 0.9,
+        "business_logic_score": 5,
+        "business_logic_notes": "Tradeoff accepted by design.",
+    }
+
+    with patch("src.services.llm.factory.LLMFactory.get_provider", return_value=_mock_provider(payload)), \
+         patch("src.services.audit_agent.get_compiler_service", return_value=MagicMock(compile=_compile_ok)), \
+         patch("src.services.audit_agent.get_dsl_linter", return_value=MagicMock(lint=_lint_ok)), \
+         patch("src.services.audit_agent.validate_audit", side_effect=_toll_gate_ok):
+        report = await AuditAgent.audit("pragma cashscript ^0.13.0; contract T(){}")
+
+    semantic_issue = next(i for i in report.issues if i.rule_id.startswith("semantic_"))
+    assert report.semantic_category == "moderate_logic_risk"
+    assert semantic_issue.severity == Severity.MEDIUM
+    assert semantic_issue.issue_class == IssueClass.CONTEXTUAL
+    assert semantic_issue.exploit_severity == ExploitSeverity.GRIEFING
 
 
 def test_authorization_classifier_contextual_when_value_controlled():
@@ -117,7 +147,7 @@ def test_index_underflow_detector_marks_griefing():
     assert violation is not None
     assert violation.rule == "index_underflow"
     assert violation.exploit_severity == "griefing"
-    assert violation.severity == "high"
+    assert violation.severity == "medium"
 
 
 def test_scoring_skips_deferred_validation_penalties():
@@ -147,3 +177,16 @@ def test_scoring_skips_deferred_validation_penalties():
 
     assert report.deterministic_score == 70
     assert report.total_score == 100
+
+
+@pytest.mark.anyio
+async def test_compile_unknown_error_is_tagged_deterministic():
+    with patch("src.services.audit_agent.get_compiler_service", return_value=MagicMock(compile=_compile_unknown_error)), \
+         patch("src.services.audit_agent.get_dsl_linter", return_value=MagicMock(lint=_lint_ok)), \
+         patch("src.services.audit_agent.validate_audit", side_effect=_toll_gate_ok):
+        report = await AuditAgent.audit("pragma cashscript ^0.13.0; contract T(){}")
+
+    compile_issue = next(i for i in report.issues if i.rule_id == "compile_unknown_error")
+    assert compile_issue.source == "deterministic"
+    assert compile_issue.severity == Severity.HIGH
+    assert compile_issue.issue_class == IssueClass.CONTEXTUAL

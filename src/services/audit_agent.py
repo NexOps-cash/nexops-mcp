@@ -2,9 +2,9 @@ import logging
 from typing import List, Optional
 
 from src.models import AuditIssue, AuditReport, Severity, IssueClass, ExploitSeverity
+from src.services.audit_engine.audit_lint import get_audit_linter as get_dsl_linter
+from src.services.audit_engine.audit_phase import validate_audit
 from src.services.compiler import get_compiler_service
-from src.services.dsl_lint import get_dsl_linter
-from src.services.pipeline import Phase3
 from src.services.scoring import calculate_audit_report, ALLOWED_CATEGORIES
 
 logger = logging.getLogger("nexops.audit_agent")
@@ -25,6 +25,11 @@ COMPILE_ERROR_MAP = {
 SEMANTIC_SYSTEM_PROMPT = """\
 You are a BCH CashScript smart-contract auditor.
 Classify semantic risk with UTXO-aware reasoning only.
+
+UTXO / BCH guardrails (must respect):
+- Every input to a valid transaction is consumed when the spend succeeds; the spending path authorizes that input.
+- If a required authorization or policy token appears on an input, that input is a controlled, signed spend of that UTXO — it is not automatically an "attacker-injected bypass" of the authorizer merely because a token with the right category also appears on a different input in the same transaction.
+- Distinguish (a) a concrete on-chain value-loss or authorization-bypass from (b) design tradeoffs or off-chain/issuer assumptions. Do not label (b) as EXPLOIT without a clear on-chain break.
 
 Use exactly one category:
 - EXPLOIT
@@ -50,6 +55,7 @@ Do NOT:
 - mention race conditions or front-running
 - assume EVM account/call-stack behavior
 - treat single-party control as a vulnerability by default
+- infer "bypass" from multi-input layouts alone when a category-based auth check is the intended design
 
 Focus only on:
 - value conservation (BCH and tokenAmount flows)
@@ -143,17 +149,25 @@ class AuditAgent:
             err_type = err.get("type", "UnknownError")
             rule_id = COMPILE_ERROR_MAP.get(err_type, "compile_unknown_error")
 
+            # Internal/unknown compiler errors (e.g. Node.js runtime failures like
+            # "sourceTags is not iterable") are environment issues, not security
+            # defects — demote so they don't falsely block otherwise valid contracts.
+            INTERNAL_ERR_TYPES = {"UnknownError", "InternalError", "CompilerNotFoundError", "TimeoutError"}
+            compile_severity = Severity.HIGH if err_type in INTERNAL_ERR_TYPES else Severity.CRITICAL
+            compile_issue_class = IssueClass.CONTEXTUAL if err_type in INTERNAL_ERR_TYPES else IssueClass.REAL_ISSUE
+            compile_exploit = ExploitSeverity.GRIEFING if err_type in INTERNAL_ERR_TYPES else ExploitSeverity.DIRECT_FUND_LOSS
             issues.append(
                 AuditIssue(
                     title=f"Compilation Failed: {err_type}",
-                    severity=Severity.CRITICAL,
+                    severity=compile_severity,
                     line=err.get("line") or 0,
                     description=f"The contract failed to compile: {err.get('raw', 'Unknown compiler error')}",
                     recommendation=err.get("hint", "Review syntax and compiler output."),
                     rule_id=rule_id,
                     can_fix=True,
-                    issue_class=IssueClass.REAL_ISSUE,
-                    exploit_severity=ExploitSeverity.DIRECT_FUND_LOSS,
+                    source="deterministic",
+                    issue_class=compile_issue_class,
+                    exploit_severity=compile_exploit,
                 )
             )
 
@@ -176,17 +190,14 @@ class AuditAgent:
                     recommendation="Adhere to NexOps CashScript DSL conventions.",
                     rule_id=rule_id,
                     can_fix=not is_info,
+                    source="deterministic",
                     issue_class=issue_class,
                     exploit_severity=ExploitSeverity.NOT_APPLICABLE,
                 )
             )
 
         # ── 3. TollGate / AntiPatterns ────────────────────────────────────
-        try:
-            toll_gate_result = Phase3.validate(code, effective_mode)
-        except TypeError:
-            # Backward compatibility for mocked/legacy single-arg validators in tests.
-            toll_gate_result = Phase3.validate(code)
+        toll_gate_result = validate_audit(code, effective_mode)
         structural_score = toll_gate_result.structural_score
 
         for violation in toll_gate_result.violations:
@@ -204,6 +215,7 @@ class AuditAgent:
 
             if rule_id == "index_underflow":
                 exploit_severity = ExploitSeverity.GRIEFING
+                issue_class = IssueClass.REAL_ISSUE
             elif rule_id in {"commitment_length_missing", "vulnerable_covenant.cash"}:
                 exploit_severity = ExploitSeverity.DIRECT_FUND_LOSS
             elif rule_id in {"unbounded_numeric_field", "authorization_model_classifier"}:
@@ -229,6 +241,7 @@ class AuditAgent:
                     or "Review contract architecture and apply secure patterns.",
                     rule_id=rule_id,
                     can_fix=True,
+                    source="deterministic",
                     issue_class=issue_class,
                     exploit_severity=exploit_severity,
                     deferred_validation=deferred_validation,
@@ -274,11 +287,29 @@ class AuditAgent:
                     mapped_category = "none"
 
                 semantic_category = mapped_category
+                # Only treat as major flaw when the model claims direct fund loss.
+                if semantic_category == "major_protocol_flaw":
+                    semantic_exploit_check = str(semantic_data.get("exploit_severity", "n/a")).strip().lower()
+                    if semantic_exploit_check != "direct_fund_loss":
+                        semantic_category = "moderate_logic_risk"
                 confidence = semantic_data.get("confidence", 0.0)
                 try:
                     semantic_confidence = max(0.0, min(1.0, float(confidence)))
                 except (TypeError, ValueError):
                     semantic_confidence = 0.0
+
+                # Multi-contract system context: the LLM only sees one contract
+                # and cannot verify sibling contract invariants.  Cap confidence
+                # so high-confidence ratings do not propagate from partial analysis.
+                _MULTI_CONTRACT_SIGNALS = [
+                    "startupContract",
+                    "fundContract",
+                    "assetContract",
+                    "managerContract",
+                ]
+                if any(signal in code for signal in _MULTI_CONTRACT_SIGNALS):
+                    if semantic_confidence is not None:
+                        semantic_confidence = min(semantic_confidence, 0.72)
                 explanation = semantic_data.get("explanation", "")
                 semantic_exploit = str(semantic_data.get("exploit_severity", "n/a")).strip().lower()
                 exploit_map = {
@@ -335,16 +366,53 @@ class AuditAgent:
 
                     if semantic_confidence is not None and semantic_confidence < 0.5:
                         semantic_issue_class = _downgrade_issue_class(semantic_issue_class)
-                    
+
+                    issue_severity = severity_map.get(semantic_category, Severity.HIGH)
+                    # DESIGN_TRADEOFF / ASSUMPTION: never HIGH/CRITICAL as semantic finding without concrete on-chain loss path.
+                    if semantic_label in ("design_tradeoff", "assumption"):
+                        issue_severity = Severity.MEDIUM
+                        semantic_issue_class = IssueClass.CONTEXTUAL
+                        if semantic_label == "assumption":
+                            semantic_exploit_severity = ExploitSeverity.NOT_APPLICABLE
+                        else:
+                            semantic_exploit_severity = ExploitSeverity.GRIEFING
+
+                    # ── UTXO guardrail: keyword-based downgrade ────────────
+                    # If the LLM explanation uses phrases that indicate it is
+                    # applying EVM-leaning "category presence is not authorization"
+                    # reasoning, cap severity at MEDIUM and contextualise the finding.
+                    _DOWNGRADE_PHRASES = [
+                        "category-based",
+                        "token presence",
+                        "not signature-bound",
+                        "each input independently signed",
+                        "inject input",
+                        "inject a",
+                        "attacker can include",
+                        "attacker-controlled input",
+                    ]
+                    _explanation_lower = (explanation or "").lower()
+                    if any(phrase in _explanation_lower for phrase in _DOWNGRADE_PHRASES):
+                        if issue_severity in (Severity.HIGH, Severity.CRITICAL):
+                            issue_severity = Severity.MEDIUM
+                        semantic_issue_class = IssueClass.CONTEXTUAL
+                        semantic_exploit_severity = ExploitSeverity.GRIEFING
+                        _semantic_reason = "utxo_guardrail_downgrade"
+                        logger.debug(
+                            f"[Semantic Audit] Downgraded to MEDIUM/contextual "
+                            f"({_semantic_reason}) — UTXO phrase matched in explanation."
+                        )
+
                     issues.append(
                         AuditIssue(
                             title=title_map.get(semantic_category, f"Semantic Risk: {semantic_category}"),
-                            severity=severity_map.get(semantic_category, Severity.HIGH),
+                            severity=issue_severity,
                             line=0,
                             description=explanation or f"Semantic risk category '{semantic_category}' detected.",
                             recommendation=biz_notes or "Review the contract logic and ensure all spending paths are reachable.",
                             rule_id=f"semantic_{semantic_category}",
                             can_fix=False, # Semantic logic deadlocks usually require human redesign
+                            source="semantic",
                             issue_class=semantic_issue_class,
                             exploit_severity=semantic_exploit_severity,
                             deferred_validation=deferred_validation,

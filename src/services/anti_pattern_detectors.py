@@ -5,7 +5,7 @@ Each detector implements semantic detection for a specific anti-pattern.
 Detectors use AST analysis, not string matching or heuristics.
 """
 
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
 from src.utils.cashscript_ast import CashScriptAST, OutputReference
 
@@ -232,7 +232,7 @@ class IndexUnderflowDetector(AntiPatternDetector):
             exploit="A crafted transaction placing this contract at index 0 can trigger script failure on index underflow. "
                     "This is a denial-of-service/bricking risk for that spend path.",
             location={"line": 0, "function": fn_name},
-            severity="high",
+            severity="medium",
             issue_class="real_issue",
             exploit_severity="griefing",
         )
@@ -332,18 +332,36 @@ class OutputBindingDetector(AntiPatternDetector):
     id = "output_binding_missing"
 
     def detect(self, ast: CashScriptAST) -> Optional[Violation]:
-        if ast.contract_mode not in {"manager", "stateful", "covenant"}:
+        if ast.contract_mode not in {"manager", "stateful", "covenant", "vault"}:
             return None
-        refs = ast.get_unbound_output_refs()
+        refs: List[OutputReference] = []
+        for r in ast.get_unbound_output_refs():
+            if r.property_accessed == "tokenCategory" and ast.is_empty_token_output_policy(r):
+                continue
+            refs.append(r)
         if not refs:
             return None
         ref = refs[0]
-        if ref.property_accessed not in {"value", "tokenAmount"}:
+        allowed_props = {"value", "tokenAmount"}
+        if ast.contract_mode == "vault":
+            allowed_props.add("tokenCategory")
+        if ref.property_accessed not in allowed_props:
             return None
+        if ref.property_accessed in ("value", "tokenAmount"):
+            exploit = (
+                "Value/token amount checks without lockingBytecode binding can be satisfied by outputs sent to "
+                "attacker-chosen scripts if the contract never fixes the output's locking script."
+            )
+        else:
+            exploit = (
+                "Token category checks without lockingBytecode binding are policy-only: they do not show where "
+                "funds or tokens are sent. Pair category checks with output locking script validation when the "
+                "intended security property is destination control."
+            )
         return Violation(
             rule=self.id,
             reason=f"Output {ref.index} in '{ref.location.function}' validates {ref.property_accessed} without lockingBytecode binding",
-            exploit="Amount checks alone can be redirected to attacker-controlled scripts if the destination script is never bound.",
+            exploit=exploit,
             location={
                 "line": ref.location.line,
                 "function": ref.location.function,
@@ -603,26 +621,38 @@ class EVMHallucinationDetector(AntiPatternDetector):
 class EmptyFunctionDetector(AntiPatternDetector):
     """
     Detects public functions with no require() statements.
+    Uses brace-depth traversal so nested do{}/if{} blocks are handled correctly.
     """
     id = "empty_function_body"
-    
+
     def detect(self, ast: CashScriptAST) -> Optional[Violation]:
         import re
-        # Find function blocks and check for require()
-        fn_pattern = re.compile(r'function\s+(\w+)\s*\([^)]*\)\s*\{([^}]*)\}', re.DOTALL)
-        empty_fns = []
-        for match in fn_pattern.finditer(ast.code):
-            if 'require(' not in match.group(2):
-                empty_fns.append(match.group(1))
-        
+        empty_fns: List[str] = []
+        for match in re.finditer(r'function\s+(\w+)\s*\([^)]*\)\s*\{', ast.code):
+            fn_name = match.group(1)
+            start = match.end() - 1  # points at the opening '{'
+            depth = 0
+            body_chars: List[str] = []
+            for ch in ast.code[start:]:
+                if ch == '{':
+                    depth += 1
+                elif ch == '}':
+                    depth -= 1
+                    if depth == 0:
+                        break
+                body_chars.append(ch)
+            body = "".join(body_chars)
+            if 'require(' not in body:
+                empty_fns.append(fn_name)
+
         if empty_fns:
             return Violation(
-                rule=f"{self.id}",
+                rule=self.id,
                 reason=f"Functions with no require() statements: {', '.join(empty_fns)}",
                 exploit="Empty functions allow unrestricted spending of UTXOs by anyone. "
                         "Every public function must enforce at least one constraint.",
                 severity="critical",
-                location={"line": 0, "function": empty_fns[0]}
+                location={"line": 0, "function": empty_fns[0]},
             )
         return None
 

@@ -17,7 +17,7 @@ from __future__ import annotations
 import re
 import logging
 from typing import Any
-from src.services.pattern_profiles import get_pattern_profile
+from src.services.pattern_profiles import canonical_pattern, get_pattern_profile
 
 logger = logging.getLogger("nexops.dsl_lint")
 
@@ -28,6 +28,34 @@ RULE_PREFIX_BY_FUNCTION = {
     "_check_token_pair_completeness": "LNC-014",
     "_check_nft_mint_transfer_rules": "LNC-018",
 }
+
+
+# ── Audit-lint gate helpers ───────────────────────────────────────────────────
+
+def _is_genesis_input_pattern(code: str) -> bool:
+    """
+    True when the contract explicitly checks BOTH:
+      - tx.inputs[0].outpointIndex == 0  (genesis output anchor)
+      - tx.inputs[0].tokenCategory == 0x (no token on genesis input)
+    Such contracts intentionally reference input[0] by spec; suppress LNC-001a.
+    """
+    has_outpoint = bool(re.search(r'tx\.inputs\[0\]\.outpointIndex\s*==\s*0', code))
+    has_no_token = bool(re.search(r'tx\.inputs\[0\]\.tokenCategory\s*==\s*0x', code))
+    return has_outpoint and has_no_token
+
+
+def _has_nft_commitment_preservation(code: str) -> bool:
+    """
+    True when any output nftCommitment is explicitly pinned via a require()
+    equality constraint.  Covers both:
+      - Self-return: require(inputs[active].nftCommitment == outputs[active].nftCommitment)
+      - Pinned mint:  require(outputs[N].nftCommitment == bytes(...))
+    When present the singleton-amount guard (LNC-018) is redundant.
+    """
+    return bool(re.search(
+        r'require\s*\(.*?tx\.outputs\[.*?\]\.nftCommitment\s*==',
+        code, re.DOTALL,
+    ))
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -75,8 +103,14 @@ def _check_hardcoded_input_index(code: str) -> list[dict]:
     lines_list = _lines(code)
 
     # Pattern 1: tx.inputs[0]
+    # Exception: genesis-input pattern — the contract explicitly anchors to
+    # tx.inputs[0].outpointIndex == 0 AND no-token check.  This is intentional
+    # by spec and must not be flagged.
+    genesis_pattern = _is_genesis_input_pattern(code)
     for lineno, line in lines_list:
         if re.search(r"tx\.inputs\[\s*0\s*\]", line):
+            if genesis_pattern:
+                continue
             violations.append({
                 "rule_id": "LNC-001a",
                 "message": "Hardcoded tx.inputs[0] — use tx.inputs[this.activeInputIndex]",
@@ -441,6 +475,7 @@ def _check_division_guard(code: str) -> list[dict]:
                         f"Division by '{divisor}' without require({divisor} > 0) guard."
                     ),
                     "line_hint": lineno,
+                    "severity": "medium",   # downgraded from implicit HIGH default
                 })
 
     return violations
@@ -797,6 +832,18 @@ def _check_token_mint_supply_enforcement(code: str, contract_mode: str = "") -> 
     for func_name, body, start_lineno in _function_bodies(code):
         if "mint" not in func_name.lower() and "mint" not in body.lower():
             continue
+
+        # Skip release patterns: a function that DECREASES the active-index
+        # tokenAmount is a fund-token release (supply goes down), NOT a supply
+        # mint that needs a cap guard.
+        is_release = bool(re.search(
+            r'tx\.inputs\[this\.activeInputIndex\]\.tokenAmount'
+            r'\s*>\s*tx\.outputs\[this\.activeInputIndex\]\.tokenAmount',
+            body,
+        ))
+        if is_release:
+            continue
+
         has_supply_guard = bool(
             re.search(r"totalSupply|maxSupply|remainingSupply|cap", body, re.IGNORECASE)
             and re.search(r"require\s*\(", body)
@@ -825,6 +872,12 @@ def _check_nft_mint_transfer_rules(code: str, contract_mode: str = "") -> list[d
     if not references_token:
         return []
 
+    # Skip when any output nftCommitment is explicitly pinned via require() equality.
+    # This covers self-return (commitment preserved) and pinned mints (commitment set to
+    # a specific computed value), both of which make the singleton-amount guard redundant.
+    if _has_nft_commitment_preservation(code):
+        return []
+
     has_singleton_guard = bool(
         re.search(r"tokenAmount\s*==\s*1", code)
         or re.search(r"tokenAmount\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenAmount", code)
@@ -839,6 +892,7 @@ def _check_nft_mint_transfer_rules(code: str, contract_mode: str = "") -> list[d
             "Add require(tokenAmount == 1) for singleton NFTs or preserve input tokenAmount exactly."
         ),
         "line_hint": 0,
+        "severity": "medium",   # downgraded from implicit HIGH default
     }]
 
 
@@ -954,7 +1008,7 @@ def _check_value_preservation(code: str, contract_mode: str = "") -> list[dict]:
 
 # ── Main DSLLinter class ──────────────────────────────────────────────────────
 
-class DSLLinter:
+class AuditDSLLinter:
     """
     Deterministic CashScript ^0.13.0 lint runner.
 
@@ -962,25 +1016,16 @@ class DSLLinter:
     Zero LLM calls. Zero side effects.
     """
 
-    RULES = [
-        _check_hardcoded_input_index,    # LNC-001 a/b/c
-        _check_unused_variables,         # LNC-002  (heuristic)
-        _check_value_anchoring,          # LNC-003  (any output index)
-        _check_implicit_output_ordering, # LNC-004
-        _check_fee_arithmetic,           # LNC-005
+    BASE_RULES = [
+        _check_hardcoded_input_index,    # LNC-001a/b only; LNC-001c is post-filtered
+        _check_unused_variables,         # LNC-002
         _check_wrong_self_reference,     # LNC-006
         _check_deprecated_patterns,      # LNC-007
         _check_timelock_standalone,      # LNC-010
         _check_division_guard,           # LNC-011
-        _check_frozen_state,             # LNC-012  (warning, stateful/vesting only)
-        _check_covenant_self_anchor,     # LNC-008  (mode-conditional)
-        _check_mint_authority,           # LNC-013  (token/minting mode only)
-        _check_token_pair_completeness,  # LNC-014  (any code touching tokens)
-        _check_token_mint_supply_enforcement,  # LNC-017
-        _check_nft_mint_transfer_rules,  # LNC-018
         _check_invalid_token_log,        # LNC-019
-        _check_locking_bytecode_constructor,  # LNC-015  (P2PKH/P2SH constructor safety)
-        _check_value_preservation,       # LNC-016  (Self-anchor + Value continuity)
+        _check_locking_bytecode_constructor,  # LNC-015
+        _check_value_preservation,       # LNC-016
     ]
 
     def lint(self, code: str, contract_mode: str = "") -> dict[str, Any]:
@@ -1006,11 +1051,28 @@ class DSLLinter:
                 "violations": [{"rule_id": "LNC-000", "message": "Empty code", "line_hint": 0}],
             }
 
+        normalized_mode = (contract_mode or "").lower().strip()
+        canonical_mode = canonical_pattern(contract_mode)
+        skip_token_heavy = normalized_mode in {"vault", "minter", "minting", "parser"} or canonical_mode in {
+            "vault",
+            "minting",
+            "parser",
+        }
+
         profile = get_pattern_profile(contract_mode)
         disabled_rule_prefixes = set(profile.get("disable_lint_rules", []))
 
         all_violations: list[dict] = []
-        for rule_fn in self.RULES:
+        rules = list(self.BASE_RULES)
+        if normalized_mode not in {"vault", "parser"}:
+            rules.append(_check_value_anchoring)  # LNC-003
+        if normalized_mode == "manager":
+            rules.append(_check_implicit_output_ordering)  # LNC-004
+        if not skip_token_heavy:
+            rules.append(_check_token_mint_supply_enforcement)  # LNC-017
+            rules.append(_check_nft_mint_transfer_rules)  # LNC-018
+
+        for rule_fn in rules:
             mapped_prefix = RULE_PREFIX_BY_FUNCTION.get(rule_fn.__name__, "")
             if mapped_prefix and any(mapped_prefix.startswith(p) for p in disabled_rule_prefixes):
                 continue
@@ -1022,11 +1084,12 @@ class DSLLinter:
                 else:
                     all_violations.extend(rule_fn(code))
             except Exception as exc:
-                logger.warning(f"[DSLLinter] Rule {rule_fn.__name__} raised: {exc}")
+                logger.warning(f"[AuditDSLLinter] Rule {rule_fn.__name__} raised: {exc}")
 
         filtered_violations = [
             v for v in all_violations
-            if not any(str(v.get("rule_id", "")).startswith(prefix) for prefix in disabled_rule_prefixes)
+            if str(v.get("rule_id", "")) != "LNC-001c"
+            and not any(str(v.get("rule_id", "")).startswith(prefix) for prefix in disabled_rule_prefixes)
         ]
 
         passed = len(filtered_violations) == 0
@@ -1056,11 +1119,11 @@ class DSLLinter:
 
 # ── Module-level singleton ────────────────────────────────────────────────────
 
-_linter_instance: DSLLinter | None = None
+_audit_linter_instance: AuditDSLLinter | None = None
 
 
-def get_dsl_linter() -> DSLLinter:
-    global _linter_instance
-    if _linter_instance is None:
-        _linter_instance = DSLLinter()
-    return _linter_instance
+def get_audit_linter() -> AuditDSLLinter:
+    global _audit_linter_instance
+    if _audit_linter_instance is None:
+        _audit_linter_instance = AuditDSLLinter()
+    return _audit_linter_instance

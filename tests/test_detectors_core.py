@@ -124,7 +124,7 @@ def test_partial_aggregation_skipped_for_parser_mode():
 
 
 # ---------------------------------------------------------------------------
-# 3) OutputBindingDetector — only manager|stateful|covenant; not vault|minter|parser
+# 3) OutputBindingDetector — manager|stateful|covenant|vault; not minter|parser
 # ---------------------------------------------------------------------------
 
 
@@ -147,10 +147,34 @@ def test_output_binding_triggers_in_manager_mode():
     assert v.location.get("property") == "value"
 
 
-@pytest.mark.parametrize("mode", ["vault", "minter", "parser"])
-def test_output_binding_does_not_trigger_in_non_bound_modes(mode):
+def test_output_binding_triggers_in_vault_mode():
+    d = OutputBindingDetector()
+    v = d.detect(CashScriptAST(_code_unbound_value_no_locking(), contract_mode="vault"))
+    assert v is not None
+    assert v.rule == "output_binding_missing"
+
+
+@pytest.mark.parametrize("mode", ["minter", "parser"])
+def test_output_binding_does_not_trigger_in_minter_or_parser(mode):
     d = OutputBindingDetector()
     assert d.detect(CashScriptAST(_code_unbound_value_no_locking(), contract_mode=mode)) is None
+
+
+def _code_vault_no_token_only_on_output():
+    return """
+    contract M(pubkey a) {
+        function spend(sig s) {
+            require(checkSig(s, a));
+            require(tx.outputs[0].tokenCategory == NO_TOKEN);
+        }
+    }
+    """
+
+
+def test_output_binding_skips_no_token_output_policy_in_vault():
+    """No-token / empty tokenCategory require is policy, not missing destination binding."""
+    d = OutputBindingDetector()
+    assert d.detect(CashScriptAST(_code_vault_no_token_only_on_output(), contract_mode="vault")) is None
 
 
 # ---------------------------------------------------------------------------
