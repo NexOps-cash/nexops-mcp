@@ -2,9 +2,9 @@ import logging
 from typing import List, Optional
 
 from src.models import AuditIssue, AuditReport, Severity, IssueClass, ExploitSeverity
+from src.services.audit_engine.audit_lint import get_audit_linter as get_dsl_linter
+from src.services.audit_engine.audit_phase import validate_audit
 from src.services.compiler import get_compiler_service
-from src.services.dsl_lint import get_dsl_linter
-from src.services.pipeline import Phase3
 from src.services.scoring import calculate_audit_report, ALLOWED_CATEGORIES
 
 logger = logging.getLogger("nexops.audit_agent")
@@ -156,8 +156,6 @@ class AuditAgent:
             compile_severity = Severity.HIGH if err_type in INTERNAL_ERR_TYPES else Severity.CRITICAL
             compile_issue_class = IssueClass.CONTEXTUAL if err_type in INTERNAL_ERR_TYPES else IssueClass.REAL_ISSUE
             compile_exploit = ExploitSeverity.GRIEFING if err_type in INTERNAL_ERR_TYPES else ExploitSeverity.DIRECT_FUND_LOSS
-            compile_source = "toolchain" if err_type in INTERNAL_ERR_TYPES else "contract"
-
             issues.append(
                 AuditIssue(
                     title=f"Compilation Failed: {err_type}",
@@ -167,7 +165,7 @@ class AuditAgent:
                     recommendation=err.get("hint", "Review syntax and compiler output."),
                     rule_id=rule_id,
                     can_fix=True,
-                    source=compile_source,
+                    source="deterministic",
                     issue_class=compile_issue_class,
                     exploit_severity=compile_exploit,
                 )
@@ -192,17 +190,14 @@ class AuditAgent:
                     recommendation="Adhere to NexOps CashScript DSL conventions.",
                     rule_id=rule_id,
                     can_fix=not is_info,
+                    source="deterministic",
                     issue_class=issue_class,
                     exploit_severity=ExploitSeverity.NOT_APPLICABLE,
                 )
             )
 
         # ── 3. TollGate / AntiPatterns ────────────────────────────────────
-        try:
-            toll_gate_result = Phase3.validate(code, effective_mode)
-        except TypeError:
-            # Backward compatibility for mocked/legacy single-arg validators in tests.
-            toll_gate_result = Phase3.validate(code)
+        toll_gate_result = validate_audit(code, effective_mode)
         structural_score = toll_gate_result.structural_score
 
         for violation in toll_gate_result.violations:
@@ -246,6 +241,7 @@ class AuditAgent:
                     or "Review contract architecture and apply secure patterns.",
                     rule_id=rule_id,
                     can_fix=True,
+                    source="deterministic",
                     issue_class=issue_class,
                     exploit_severity=exploit_severity,
                     deferred_validation=deferred_validation,
@@ -377,6 +373,7 @@ class AuditAgent:
                             recommendation=biz_notes or "Review the contract logic and ensure all spending paths are reachable.",
                             rule_id=f"semantic_{semantic_category}",
                             can_fix=False, # Semantic logic deadlocks usually require human redesign
+                            source="semantic",
                             issue_class=semantic_issue_class,
                             exploit_severity=semantic_exploit_severity,
                             deferred_validation=deferred_validation,

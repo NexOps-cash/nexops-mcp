@@ -532,6 +532,10 @@ class CashScriptAST:
                 risky_functions.append(fn_name)
         return risky_functions
 
+    def contains_bytes_parsing(self) -> bool:
+        """True when source contains CashScript bytes parsing operations."""
+        return any(x in self.code for x in ("split(", ".slice(", ".split("))
+
     def has_unbounded_positive_only_check(self) -> List[str]:
         """
         Detect require(x > 0) without upper bound in same function.
