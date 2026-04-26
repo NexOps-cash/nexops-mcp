@@ -18,6 +18,10 @@ import re
 import logging
 from typing import Any
 from src.services.pattern_profiles import canonical_pattern, get_pattern_profile
+from src.services.audit_engine.invariant_engine import (
+    _parse_output_length_guards,
+    fixed_indices_covered_by_guards,
+)
 
 logger = logging.getLogger("nexops.dsl_lint")
 
@@ -91,7 +95,7 @@ def _function_bodies(code: str) -> list[tuple[str, str, int]]:
 
 # ── Rule implementations ──────────────────────────────────────────────────────
 
-def _check_hardcoded_input_index(code: str) -> list[dict]:
+def _check_hardcoded_input_index(code: str, invariants: Any = None) -> list[dict]:
     """
     LNC-001: Detect hardcoded input/output index patterns.
 
@@ -107,9 +111,13 @@ def _check_hardcoded_input_index(code: str) -> list[dict]:
     # tx.inputs[0].outpointIndex == 0 AND no-token check.  This is intentional
     # by spec and must not be flagged.
     genesis_pattern = _is_genesis_input_pattern(code)
+    requires_index_zero = bool(
+        invariants
+        and (invariants.get("input_constraints") or {}).get("requires_index_zero")
+    )
     for lineno, line in lines_list:
         if re.search(r"tx\.inputs\[\s*0\s*\]", line):
-            if genesis_pattern:
+            if genesis_pattern or requires_index_zero:
                 continue
             violations.append({
                 "rule_id": "LNC-001a",
@@ -117,29 +125,24 @@ def _check_hardcoded_input_index(code: str) -> list[dict]:
                 "line_hint": lineno,
             })
 
-    # Pattern 2: tx.outputs[N] accessed without a matching length guard (must be >= N+1)
+    # Pattern 2: tx.outputs[N] with N>0 need a length guard: ==, >=, or > parsed consistently
+    # with invariant_engine (fixed_indices_covered_by_guards).
     for func_name, body, start_lineno in _function_bodies(code):
-        # Collect all explicit length guards: require(tx.outputs.length == K)
-        guarded_lengths: set[int] = set()
-        for gm in re.finditer(r"require\s*\(\s*tx\.outputs\.length\s*(==|>=)\s*(\d+)\s*\)", body):
-            op  = gm.group(1)
-            val = int(gm.group(2))
-            guarded_lengths.add(val)  # both == and >= guarantee at least val outputs
+        parsed = _parse_output_length_guards(body)
 
         for m in re.finditer(r"tx\.outputs\[\s*(\d+)\s*\]", body):
             idx = int(m.group(1))
-            # Constant access to output 0: valid spends always have ≥1 output; do not require length guard.
             if idx == 0:
                 continue
-            # Safe only if there is a length guard that guarantees length > idx
-            safe = any(g > idx for g in guarded_lengths)
-            if not safe:
+            if not fixed_indices_covered_by_guards(idx, parsed):
                 body_lineno = start_lineno + body[: m.start()].count("\n")
                 violations.append({
                     "rule_id": "LNC-001c",
                     "message": (
                         f"tx.outputs[{idx}] accessed but no guard ensures "
-                        f"tx.outputs.length >= {idx + 1} in function '{func_name}'"
+                        f"enough outputs for index {idx} in function '{func_name}' "
+                        f"(e.g. require(tx.outputs.length >= {idx + 1}) or a strict '>'/ '==' form "
+                        f"with matching semantics; see min length vs index in CashScript invariants)"
                     ),
                     "line_hint": body_lineno,
                 })
@@ -860,7 +863,11 @@ def _check_token_mint_supply_enforcement(code: str, contract_mode: str = "") -> 
     return violations
 
 
-def _check_nft_mint_transfer_rules(code: str, contract_mode: str = "") -> list[dict]:
+def _check_nft_mint_transfer_rules(
+    code: str,
+    contract_mode: str = "",
+    invariants: Any = None,
+) -> list[dict]:
     """
     LNC-018: NFT mint/transfer should preserve singleton semantics.
     """
@@ -876,6 +883,9 @@ def _check_nft_mint_transfer_rules(code: str, contract_mode: str = "") -> list[d
     # This covers self-return (commitment preserved) and pinned mints (commitment set to
     # a specific computed value), both of which make the singleton-amount guard redundant.
     if _has_nft_commitment_preservation(code):
+        return []
+
+    if invariants and (invariants.get("value_flow") or {}).get("has_token_checks"):
         return []
 
     has_singleton_guard = bool(
@@ -1051,6 +1061,17 @@ class AuditDSLLinter:
                 "violations": [{"rule_id": "LNC-000", "message": "Empty code", "line_hint": 0}],
             }
 
+        invariants: dict[str, Any] = {}
+        try:
+            from src.utils.cashscript_ast import CashScriptAST
+            from src.services.audit_engine.invariant_engine import InvariantEngine
+
+            _ast = CashScriptAST(code, contract_mode=contract_mode or "")
+            invariants = InvariantEngine(_ast).analyze()
+        except Exception as exc:
+            logger.debug(f"[AuditDSLLinter] InvariantEngine skipped: {exc}")
+            invariants = {}
+
         normalized_mode = (contract_mode or "").lower().strip()
         canonical_mode = canonical_pattern(contract_mode)
         skip_token_heavy = normalized_mode in {"vault", "minter", "minting", "parser"} or canonical_mode in {
@@ -1078,9 +1099,15 @@ class AuditDSLLinter:
                 continue
             try:
                 import inspect
+
                 sig = inspect.signature(rule_fn)
+                kwargs: dict[str, Any] = {}
                 if "contract_mode" in sig.parameters:
-                    all_violations.extend(rule_fn(code, contract_mode=contract_mode))
+                    kwargs["contract_mode"] = contract_mode
+                if "invariants" in sig.parameters:
+                    kwargs["invariants"] = invariants
+                if kwargs:
+                    all_violations.extend(rule_fn(code, **kwargs))
                 else:
                     all_violations.extend(rule_fn(code))
             except Exception as exc:

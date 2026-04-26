@@ -10,6 +10,12 @@ import re
 from typing import Any, Dict, List, Optional
 
 from src.utils.cashscript_ast import CashScriptAST, OutputReference
+from src.services.audit_engine.invariant_engine import (
+    should_skip_commitment_rule_for_body,
+    should_skip_input_output_coupling,
+    fixed_output_index_unsafe,
+    report_fixed_output_brief,
+)
 
 
 @dataclass
@@ -43,11 +49,34 @@ class AuditDetector:
 
     id: str = "base"
 
-    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+    def detect(
+        self,
+        ast: CashScriptAST,
+        invariants: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Violation]:
         raise NotImplementedError
 
 
 # ── Module-level helpers ────────────────────────────────────────────────────
+
+
+def _index_subtract_guarded(body: str, k: int) -> bool:
+    """k is int operand of this.activeInputIndex - k (e.g. 1 for ' - 1')."""
+    if k < 0:
+        return False
+    if re.search(
+        rf"require\s*\(\s*this\.activeInputIndex\s*>=\s*{k}\s*\)", body
+    ):
+        return True
+    if k > 0 and re.search(
+        rf"require\s*\(\s*this\.activeInputIndex\s*>\s*{k - 1}\s*\)", body
+    ):
+        return True
+    if k == 1 and re.search(
+        r"require\s*\(\s*this\.activeInputIndex\s*>\s*0\s*\)", body
+    ):
+        return True
+    return False
 
 
 def _has_hash_precondition(code: str) -> bool:
@@ -84,24 +113,39 @@ class IndexUnderflowDetector(AuditDetector):
 
     id = "index_underflow"
 
-    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+    def detect(
+        self,
+        ast: CashScriptAST,
+        invariants: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Violation]:
         risky_functions: List[str] = []
         for fn_name, body in ast._get_function_bodies().items():
+            if re.search(r"this\.activeInputIndex\s*==\s*0\b", body):
+                continue
+            found_risky = False
             for match in re.finditer(r"this\.activeInputIndex\s*-\s*(\d+|\w+)", body):
                 operand = match.group(1)
+                if operand.isdigit():
+                    k = int(operand)
+                    if not _index_subtract_guarded(body, k):
+                        found_risky = True
+                        break
+                    continue
                 guard = re.search(
                     rf"require\s*\(\s*this\.activeInputIndex\s*(>=|>)\s*{re.escape(operand)}\s*\)",
                     body,
                 )
                 if not guard:
-                    risky_functions.append(fn_name)
+                    found_risky = True
                     break
+            if found_risky:
+                risky_functions.append(fn_name)
         if not risky_functions:
             return None
         fn_name = risky_functions[0]
         return Violation(
             rule=self.id,
-            reason=f"Function '{fn_name}' subtracts from this.activeInputIndex without a strict lower-bound guard",
+            reason=f"Function '{fn_name}' subtracts from this.activeInputIndex without a lower-bound guard (e.g. require(this.activeInputIndex > 0) for '- 1', or require(this.activeInputIndex >= k) for '- k')",
             exploit=(
                 "A crafted transaction placing this contract at index 0 can trigger script failure on index "
                 "underflow. This is a denial-of-service/bricking risk for that spend path."
@@ -121,24 +165,33 @@ class PositiveOffsetOOBDetector(AuditDetector):
 
     id = "positive_offset_oob"
 
-    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+    def detect(
+        self,
+        ast: CashScriptAST,
+        invariants: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Violation]:
         for fn_name, body in ast._get_function_bodies().items():
             for m in re.finditer(
                 r'tx\.(inputs|outputs)\[this\.activeInputIndex\s*\+\s*(\d+)\]', body
             ):
                 collection = m.group(1)   # "inputs" or "outputs" — must match guard
                 offset = int(m.group(2))
-                # Guard must reference the same collection, not the other one
+                # Must tie length to placement: global require(tx.x.length == K) is not enough.
                 guard = re.search(
                     rf'tx\.{collection}\.length\s*(>|>=)\s*this\.activeInputIndex\s*\+\s*{offset}',
                     body,
                 )
                 if not guard:
+                    inv_note = report_fixed_output_brief(fn_name, invariants) if invariants else ""
                     return Violation(
                         rule=self.id,
                         reason=(
                             f"Function '{fn_name}' accesses tx.{collection}[this.activeInputIndex+{offset}] "
-                            "without a length guard on the same collection"
+                            "without a per-placement length guard of the form "
+                            f"require(tx.{collection}.length > this.activeInputIndex + {offset}) "
+                            f"(or >= with the same right-hand side).{inv_note} "
+                            "A standalone require(tx.outputs.length == or >= K) does not cap placement, "
+                            "so it is not sufficient for this access pattern by itself."
                         ),
                         exploit=(
                             "Placement-driven script abort if the transaction has fewer "
@@ -153,6 +206,43 @@ class PositiveOffsetOOBDetector(AuditDetector):
         return None
 
 
+class FixedIndexOOBDetector(AuditDetector):
+    """
+    tx.outputs[N] for N>0 must be paired with a length guard in the same function
+    proving tx.outputs.length > N (any require(... length ... K ...) with K > N).
+    """
+
+    id = "fixed_index_oob"
+
+    def detect(
+        self,
+        ast: CashScriptAST,
+        invariants: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Violation]:
+        if not invariants:
+            return None
+        for fn_name in ast._get_function_bodies().keys():
+            if fixed_output_index_unsafe(fn_name, invariants):
+                rbrief = report_fixed_output_brief(fn_name, invariants)
+                return Violation(
+                    rule=self.id,
+                    reason=(
+                        f"Function '{fn_name}' uses fixed tx.outputs[N] with N>0 without a "
+                        "length guard (==, >=, or >) that guarantees enough outputs for the largest index used."
+                        f"{rbrief}"
+                    ),
+                    exploit=(
+                        "If the spend path assumes an output at index N that may not exist, "
+                        "the script can fail at runtime — a grief/DoS risk for that path."
+                    ),
+                    location={"line": 0, "function": fn_name},
+                    severity="medium",
+                    issue_class="contextual",
+                    exploit_severity="griefing",
+                )
+        return None
+
+
 class UnsupportedWhileDetector(AuditDetector):
     """
     Detect a top-level while(...) loop that CashScript v0.13.x does not support.
@@ -162,7 +252,11 @@ class UnsupportedWhileDetector(AuditDetector):
 
     id = "cashscript_unsupported_top_level_while"
 
-    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+    def detect(
+        self,
+        ast: CashScriptAST,
+        invariants: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Violation]:
         # Strip line and block comments before scanning so comment text cannot
         # accidentally look like a standalone while keyword.
         clean = re.sub(r'//.*$', '', ast.code, flags=re.MULTILINE)
@@ -195,11 +289,17 @@ class InputOutputCouplingDetector(AuditDetector):
 
     id = "input_output_coupling"
 
-    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+    def detect(
+        self,
+        ast: CashScriptAST,
+        invariants: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Violation]:
         # If the contract fully expresses active-index coupling via three explicit
         # equality requires (locking + category + commitment), the detector would
         # be a false positive on every minter/manager that self-returns correctly.
         if _has_full_equality_coupling(ast.code):
+            return None
+        if invariants and should_skip_input_output_coupling(invariants):
             return None
 
         violations = [
@@ -229,7 +329,11 @@ class PartialAggregationDetector(AuditDetector):
 
     id = "partial_aggregation_risk"
 
-    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+    def detect(
+        self,
+        ast: CashScriptAST,
+        invariants: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Violation]:
         if ast.contract_mode == "parser":
             return None
         risky_functions = [
@@ -259,7 +363,11 @@ class CommitmentLengthSafetyDetector(AuditDetector):
 
     id = "commitment_length_missing"
 
-    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+    def detect(
+        self,
+        ast: CashScriptAST,
+        invariants: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Violation]:
         if not ast.contains_bytes_parsing():
             return None
         risky_functions = ast.has_bytes_parse_without_length_check()
@@ -271,6 +379,8 @@ class CommitmentLengthSafetyDetector(AuditDetector):
         # hash256(var) == var precondition the bytes are upstream-pinned and the
         # worst-case impact is self-grief (griefing), not direct fund loss.
         risky_fn_body = ast._get_function_bodies().get(fn_name, "")
+        if should_skip_commitment_rule_for_body(risky_fn_body):
+            return None
         if _has_hash_precondition(risky_fn_body):
             severity = "medium"
             issue_class = "contextual"
@@ -296,7 +406,11 @@ class OutputBindingDetector(AuditDetector):
 
     id = "output_binding_missing"
 
-    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+    def detect(
+        self,
+        ast: CashScriptAST,
+        invariants: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Violation]:
         if ast.contract_mode not in {"manager", "stateful", "covenant", "vault"}:
             return None
         refs: List[OutputReference] = []
@@ -352,7 +466,11 @@ class AuthorizationModelClassifierDetector(AuditDetector):
 
     id = "authorization_model_classifier"
 
-    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+    def detect(
+        self,
+        ast: CashScriptAST,
+        invariants: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Violation]:
         has_category_auth = bool(
             "tokenCategory" in ast.code
             and any("tokenCategory" in validation.condition for validation in ast.validations)
@@ -373,6 +491,7 @@ class AuthorizationModelClassifierDetector(AuditDetector):
 AUDIT_DETECTOR_REGISTRY = [
     IndexUnderflowDetector(),
     PositiveOffsetOOBDetector(),
+    FixedIndexOOBDetector(),
     UnsupportedWhileDetector(),
     CommitmentLengthSafetyDetector(),
     OutputBindingDetector(),
