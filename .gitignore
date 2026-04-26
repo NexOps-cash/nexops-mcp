@@ -7,3 +7,5 @@ venv/
 benchmark/results/
 auditcase/
 node_modules/
+AGENTS.md
+.cursor
