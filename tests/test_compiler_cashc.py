@@ -3,7 +3,13 @@
 from pathlib import Path
 
 from src.models import AuditIssue, Severity, IssueClass, ExploitSeverity
-from src.services.compiler import _parse_cashc_error, get_cashc_path, _find_project_root
+from src.services.compiler import (
+    _parse_cashc_error,
+    get_cashc_path,
+    _find_project_root,
+    _iter_cashc_commands,
+    _toolchain_only_failure,
+)
 from src.services.scoring import (
     calculate_audit_report,
     TOOLCHAIN_NEUTRAL_DET_SCORE,
@@ -34,6 +40,22 @@ def test_get_cashc_path_prefers_local_node_modules():
         assert True  # global npm fallback (dev machine)
     else:
         assert p == "cashc"
+
+
+def test_iter_cashc_commands_includes_path_fallback():
+    """After primary, a PATH cashc (or npm global) is available for retry."""
+    p = get_cashc_path()
+    seq = _iter_cashc_commands(p)
+    assert len(seq) >= 1
+    if (Path(p) != Path("cashc") and p != "cashc") or p.endswith("node_modules"):
+        assert any(c == "cashc" or (isinstance(c, str) and "npm" in c) for c, _ in seq[1:]), (
+            "expected a fallback after project-local primary"
+        )
+
+
+def test_toolchain_only_failure_detects_source_tags():
+    assert _toolchain_only_failure("x sourceTags is not iterable y")
+    assert not _toolchain_only_failure("Extraneous input 'while' at line 3")
 
 
 def test_scoring_toolchain_error_uses_neutral_det_not_zero():

@@ -45,6 +45,34 @@ def get_cashc_path() -> str:
     return "cashc"
 
 
+def _iter_cashc_commands(primary: str) -> list[tuple[str, bool]]:
+    """
+    Ordered invocations: (argv0, use_shell) — shell=True for bare 'cashc' on Windows
+    (legacy PATH behavior, often a different working version than local node_modules).
+    """
+    out: list[tuple[str, bool]] = []
+    seen: set[str] = set()
+
+    def add(cmd: str, shell: bool) -> None:
+        key = f"{os.path.normcase(os.path.normpath(cmd)) if cmd != 'cashc' else 'PATH:cashc'}|{shell}"
+        if key in seen:
+            return
+        seen.add(key)
+        out.append((cmd, shell))
+
+    add(primary, os.name == "nt" and primary == "cashc")
+
+    if os.name == "nt":
+        add("cashc", True)
+        g = os.path.join(os.environ.get("APPDATA", ""), "npm", "cashc.cmd")
+        if g and os.path.isfile(g):
+            add(g, False)
+    else:
+        add("cashc", False)
+
+    return out
+
+
 def _parse_cashc_error(stderr: str) -> dict:
     """
     Parse raw cashc stderr into structured JSON.
@@ -126,6 +154,17 @@ def _parse_cashc_error(stderr: str) -> dict:
     return error
 
 
+def _toolchain_only_failure(stderr_stdout: str) -> bool:
+    """
+    If True, try another cashc binary (e.g. PATH) — local pinned cashc can crash
+    with sourceTags while a global install compiles the same .cash.
+    """
+    text = stderr_stdout or ""
+    if "sourceTags is not iterable" in text:
+        return True
+    return _parse_cashc_error(text).get("type") == "ToolchainError"
+
+
 class CompilerService:
     """
     Phase 2C: Compile Gate
@@ -147,37 +186,53 @@ class CompilerService:
             tmp_path = tmp.name
 
         try:
-            cmd = get_cashc_path()
-            logger.debug("[compiler] using cashc at: %s", cmd)
+            primary = get_cashc_path()
+            attempts = _iter_cashc_commands(primary)
+            last_parsed: Optional[dict] = None
+            any_run = False
 
-            # shell=True only when falling back to bare "cashc" on PATH (Windows quirk)
-            use_shell = os.name == "nt" and cmd == "cashc"
-            result = subprocess.run(
-                [cmd, tmp_path, "--hex"],
-                capture_output=True,
-                text=True,
-                shell=use_shell,
-                timeout=10
-            )
-
-            if result.returncode == 0:
-                return {
-                    "success": True,
-                    "error": None,
-                    "hex": result.stdout.strip(),
-                    "toolchain_error": False,
-                }
-            else:
-                # Node may print crashes on stdout or stderr
+            for cmd, use_shell in attempts:
+                logger.debug("[compiler] cashc try: %s (shell=%s)", cmd, use_shell)
+                try:
+                    result = subprocess.run(
+                        [cmd, tmp_path, "--hex"],
+                        capture_output=True,
+                        text=True,
+                        shell=use_shell,
+                        timeout=10,
+                    )
+                except FileNotFoundError:
+                    logger.debug("[compiler] cashc not found, skipping: %s", cmd)
+                    continue
+                any_run = True
+                if result.returncode == 0:
+                    logger.info("[compiler] compile ok via: %s", cmd)
+                    return {
+                        "success": True,
+                        "error": None,
+                        "hex": result.stdout.strip(),
+                        "toolchain_error": False,
+                    }
                 combined = (result.stderr or "") + "\n" + (result.stdout or "")
-                parsed = _parse_cashc_error(combined)
-                is_toolchain = parsed.get("type") == "ToolchainError"
-                return {
-                    "success": False,
-                    "error": parsed,
-                    "hex": None,
-                    "toolchain_error": is_toolchain,
-                }
+                last_parsed = _parse_cashc_error(combined)
+                if not _toolchain_only_failure(combined):
+                    return {
+                        "success": False,
+                        "error": last_parsed,
+                        "hex": None,
+                        "toolchain_error": False,
+                    }
+
+            if not any_run:
+                raise FileNotFoundError("no cashc candidate executed")
+
+            assert last_parsed is not None
+            return {
+                "success": False,
+                "error": last_parsed,
+                "hex": None,
+                "toolchain_error": last_parsed.get("type") == "ToolchainError",
+            }
 
         except subprocess.TimeoutExpired:
             return {
