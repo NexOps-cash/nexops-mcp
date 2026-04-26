@@ -12,7 +12,15 @@ RUN set -e; \
   if [ ! -f node_modules/.bin/cashc ]; then \
     echo "FATAL: expected node_modules/.bin/cashc after npm ci (src/services/compiler.py get_cashc_path)" >&2; \
     exit 1; \
-  fi
+  fi; \
+  { \
+    echo 'pragma cashscript ^0.13.0;'; \
+    echo 'contract S() {'; \
+    echo '  function spend() { require(true); }'; \
+    echo '}'; \
+  } > /tmp/cashc-smoke.cash; \
+  node_modules/.bin/cashc /tmp/cashc-smoke.cash --hex > /dev/null \
+  || (echo "FATAL: cashc must compile a minimal contract at build time" >&2; exit 1)
 
 # Install Python deps
 COPY requirements.txt .

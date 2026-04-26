@@ -190,6 +190,16 @@ class CompilerService:
             attempts = _iter_cashc_commands(primary)
             last_parsed: Optional[dict] = None
             any_run = False
+            project_cwd = str(_find_project_root())
+            npx_timeout = 120
+            npx_versions = [
+                v.strip()
+                for v in os.environ.get(
+                    "CASHC_NPX_FALLBACK_VERSIONS",
+                    "0.13.0-next.7,0.13.0-next.6,0.12.0",
+                ).split(",")
+                if v.strip()
+            ]
 
             for cmd, use_shell in attempts:
                 logger.debug("[compiler] cashc try: %s (shell=%s)", cmd, use_shell)
@@ -207,6 +217,47 @@ class CompilerService:
                 any_run = True
                 if result.returncode == 0:
                     logger.info("[compiler] compile ok via: %s", cmd)
+                    return {
+                        "success": True,
+                        "error": None,
+                        "hex": result.stdout.strip(),
+                        "toolchain_error": False,
+                    }
+                combined = (result.stderr or "") + "\n" + (result.stdout or "")
+                last_parsed = _parse_cashc_error(combined)
+                if not _toolchain_only_failure(combined):
+                    return {
+                        "success": False,
+                        "error": last_parsed,
+                        "hex": None,
+                        "toolchain_error": False,
+                    }
+
+            for ver in npx_versions:
+                argv = [
+                    "npx",
+                    "-y",
+                    "--package",
+                    f"cashc@{ver}",
+                    "cashc",
+                    tmp_path,
+                    "--hex",
+                ]
+                logger.debug("[compiler] npx cashc try: %s", ver)
+                try:
+                    result = subprocess.run(
+                        argv,
+                        capture_output=True,
+                        text=True,
+                        cwd=project_cwd,
+                        timeout=npx_timeout,
+                    )
+                except (FileNotFoundError, subprocess.TimeoutExpired) as ex:
+                    logger.debug("[compiler] npx cashc %s: %s", ver, ex)
+                    continue
+                any_run = True
+                if result.returncode == 0:
+                    logger.info("[compiler] compile ok via npx cashc@%s", ver)
                     return {
                         "success": True,
                         "error": None,

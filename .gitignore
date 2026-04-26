@@ -6,3 +6,4 @@ venv/
 .pytest_cache/
 benchmark/results/
 auditcase/
+node_modules/
