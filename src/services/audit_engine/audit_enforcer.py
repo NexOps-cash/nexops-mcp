@@ -21,6 +21,7 @@ from typing import List, Dict, Any, Optional
 
 from src.utils.cashscript_ast import CashScriptAST
 from src.services.audit_engine.audit_detectors import AUDIT_DETECTOR_REGISTRY, Violation
+from src.services.audit_engine.invariant_engine import InvariantEngine
 from src.services.pattern_profiles import get_pattern_profile
 
 logger = logging.getLogger(__name__)
@@ -195,12 +196,19 @@ class AuditEnforcer:
         profile = get_pattern_profile(contract_mode)
         disabled_detectors = set(profile.get("disable_detectors", []))
 
+        invariants: Dict[str, Any] = {}
+        try:
+            invariants = InvariantEngine(ast).analyze()
+        except Exception as e:
+            logger.warning(f"InvariantEngine analysis failed, continuing without invariants: {e}")
+            invariants = {}
+
         # Run semantic detectors with pattern-scoped filtering
         for detector in self.detectors:
             if detector.id in disabled_detectors:
                 continue
             try:
-                violation = detector.detect(ast)
+                violation = detector.detect(ast, invariants)
                 if violation:
                     violations.append(violation.to_dict())
                     logger.warning(f"Anti-pattern detected: {violation.rule}")
@@ -216,6 +224,7 @@ class AuditEnforcer:
             "valid": len(findings) == 0,
             "violated_rules": [v["rule"] for v in findings],
             "violations": findings,
+            "invariants": invariants,
             "auth_classifier_metadata": auth_metadata,  # metadata only, not surfaced as issues
         }
 

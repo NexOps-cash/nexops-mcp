@@ -107,6 +107,62 @@ def _severity_from_string(raw_severity: str) -> Severity:
         return Severity.HIGH
 
 
+def is_exploitable(
+    reason: str = "",
+    exploit: str = "",
+    message: str = "",
+) -> bool:
+    """
+    Heuristic for deterministic (lint/toll) text: return False when the finding only
+    describes grief/DoS/abort/self-failure and not concrete theft/drain/direct loss.
+    """
+    t = f"{reason} {exploit} {message}".lower()
+    loss_markers = (
+        "drain",
+        "steal",
+        "theft",
+        "direct fund loss",
+        "lose fund",
+        "take fund",
+        "funds to attacker",
+        "funds 'leaked'",
+        "double spend",
+        "redirect",
+        "wrong recipient",
+        "bypass",
+        "unauthorized",
+    )
+    if any(m in t for m in loss_markers):
+        return True
+    grief_markers = (
+        "grief",
+        "griefing",
+        "denial-of-service",
+        "denial of service",
+        " dos",
+        "bricking",
+        "self-grief",
+        "non-deployable",
+        "script failure",
+        "fail at runtime",
+        "script can fail",
+        "placement-driven",
+        "subset processing",
+        "input-order",
+    )
+    if any(m in t for m in grief_markers):
+        return False
+    return True
+
+
+# Compile-time critical finding — never severity-cap via grief-only heuristic
+_NO_GRIEF_CAP_TOLL_RULES = frozenset(
+    {
+        "cashscript_unsupported_top_level_while",
+    }
+)
+
+
 def _build_semantic_user_prompt(code: str, intent: str) -> str:
     if intent:
         return (
@@ -198,6 +254,12 @@ class AuditAgent:
             lint_severity = _severity_from_string(violation.get("severity") or "HIGH")
             issue_class = IssueClass.NOISE if rule_id == "LNC-002" else IssueClass.CONTEXTUAL
             is_info = violation.get("severity", "").lower() == "info"
+            if (
+                lint_severity == Severity.HIGH
+                and not is_exploitable(message=violation.get("message", ""))
+            ):
+                lint_severity = Severity.MEDIUM
+                issue_class = IssueClass.CONTEXTUAL
             issues.append(
                 AuditIssue(
                     title=f"DSL Structure Warning ({rule_id})",
@@ -247,6 +309,17 @@ class AuditAgent:
             if (effective_mode or "").lower() == "parser" and "missing" in rule_id:
                 deferred_validation = True
                 issue_class = IssueClass.CONTEXTUAL
+
+            v_reason = violation.reason or ""
+            v_exploit = violation.exploit or ""
+            if (
+                severity == Severity.HIGH
+                and rule_id not in _NO_GRIEF_CAP_TOLL_RULES
+                and not is_exploitable(v_reason, v_exploit)
+            ):
+                severity = Severity.MEDIUM
+                issue_class = IssueClass.CONTEXTUAL
+                exploit_severity = ExploitSeverity.GRIEFING
 
             issues.append(
                 AuditIssue(
@@ -394,11 +467,9 @@ class AuditAgent:
                         else:
                             semantic_exploit_severity = ExploitSeverity.GRIEFING
 
-                    # ── UTXO guardrail: keyword-based downgrade ────────────
-                    # If the LLM explanation uses phrases that indicate it is
-                    # applying EVM-leaning "category presence is not authorization"
-                    # reasoning, cap severity at MEDIUM and contextualise the finding.
-                    _DOWNGRADE_PHRASES = [
+                    _explanation_lower = (explanation or "").lower()
+                    # Stricter: vague "any input" + "authorization token" multi-input noise.
+                    _UTXO_DOWNGRADE_PHRASES = [
                         "category-based",
                         "token presence",
                         "not signature-bound",
@@ -408,8 +479,12 @@ class AuditAgent:
                         "attacker can include",
                         "attacker-controlled input",
                     ]
-                    _explanation_lower = (explanation or "").lower()
-                    if any(phrase in _explanation_lower for phrase in _DOWNGRADE_PHRASES):
+                    if "any input" in _explanation_lower and "authorization token" in _explanation_lower:
+                        issue_severity = Severity.INFO
+                        semantic_issue_class = IssueClass.NOISE
+                        semantic_exploit_severity = ExploitSeverity.NOT_APPLICABLE
+                    # ── UTXO guardrail: keyword-based downgrade (less exact than special case above)
+                    elif any(phrase in _explanation_lower for phrase in _UTXO_DOWNGRADE_PHRASES):
                         if issue_severity in (Severity.HIGH, Severity.CRITICAL):
                             issue_severity = Severity.MEDIUM
                         semantic_issue_class = IssueClass.CONTEXTUAL
