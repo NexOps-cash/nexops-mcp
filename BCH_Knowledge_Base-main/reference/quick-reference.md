@@ -122,7 +122,7 @@ new LockingBytecodeNullData([chunk1, chunk2, ...])  // inline array literal
 ### Installation
 ```bash
 npm install cashscript  # SDK
-npm install -g cashc    # Compiler
+npm install -g cashc@0.13.0-next.7    # Compiler (pin to NexOps / CashScript next track)
 ```
 
 ### Basic Imports
