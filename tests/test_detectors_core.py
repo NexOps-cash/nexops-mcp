@@ -246,8 +246,8 @@ def test_index_underflow_safe_with_strict_guard_for_minus_one():
 
 def test_index_underflow_weak_guard_greater_zero_still_unsafe_for_minus_one():
     """
-    Guard must dominate the subtracted literal: for `- 1` the implementation
-    requires `require(this.activeInputIndex > 1)`, not merely `> 0`.
+    Anti-pattern / AST heuristics: behavior may differ from the audit-scoped
+    IndexUnderflowDetector. Kept: generator-phase expectation on has_index_underflow_risk().
     """
     code = """
     contract U() {
