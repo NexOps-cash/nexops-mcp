@@ -204,13 +204,20 @@ graph LR
 
 ### Prerequisites
 - Python 3.11+
-- CashScript Compiler (`cashc`)
+- Node.js **20.x** (matches `package.json` `engines`; Docker uses Node 20)
+- CashScript compiler **`cashc@0.13.0-next.7`** (pinned in `package.json`; optional global install below)
 
 ### Installation
 ```powershell
 # Create & Activate Virtual Environment
 python -m venv venv
 .\venv\Scripts\Activate
+
+# Pin cashc for compile gate (same version Docker runs via npm ci)
+npm ci
+
+# Optional: match CLI on PATH to the project pin
+npm install -g cashc@0.13.0-next.7
 
 # Install NexOps Core
 pip install -e .
