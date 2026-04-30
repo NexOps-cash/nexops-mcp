@@ -11,7 +11,7 @@ The CashScript SDK provides a JavaScript/TypeScript interface for interacting wi
 npm install cashscript
 
 # Install the compiler (optional, for compilation)
-npm install -g cashc
+npm install -g cashc@0.13.0-next.7
 ```
 
 ## Basic Contract Instantiation
