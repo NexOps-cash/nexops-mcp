@@ -13,6 +13,9 @@ RUN set -e; \
     echo "FATAL: expected node_modules/.bin/cashc after npm ci (src/services/compiler.py get_cashc_path)" >&2; \
     exit 1; \
   fi; \
+  node_modules/.bin/cashc --version; \
+  test "$(node_modules/.bin/cashc --version)" = "0.13.0-next.7" \
+  || (echo "FATAL: expected cashc 0.13.0-next.7 from package-lock.json" >&2; exit 1); \
   { \
     echo 'pragma cashscript ^0.13.0;'; \
     echo 'contract S() {'; \
