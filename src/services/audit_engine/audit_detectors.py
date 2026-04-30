@@ -245,9 +245,11 @@ class FixedIndexOOBDetector(AuditDetector):
 
 class UnsupportedWhileDetector(AuditDetector):
     """
-    Detect a top-level while(...) loop that CashScript v0.13.x does not support.
-    Valid do-while syntax is: do { ... } while (...); — the while token is always
-    preceded (after stripping whitespace) by a closing brace.
+    Legacy: pre–cashc 0.13.0-next.7, standalone while() was rejected (only
+    `do { ... } while ();` worked). This repo pins cashc@0.13.0-next.7+, which
+    supports normal while loops; enabling this rule caused false CRITICAL audits.
+
+    Detection disabled (always None); class kept for stable detector id / registry.
     """
 
     id = "cashscript_unsupported_top_level_while"
@@ -257,30 +259,6 @@ class UnsupportedWhileDetector(AuditDetector):
         ast: CashScriptAST,
         invariants: Optional[Dict[str, Any]] = None,
     ) -> Optional[Violation]:
-        # Strip line and block comments before scanning so comment text cannot
-        # accidentally look like a standalone while keyword.
-        clean = re.sub(r'//.*$', '', ast.code, flags=re.MULTILINE)
-        clean = re.sub(r'/\*.*?\*/', '', clean, flags=re.DOTALL)
-
-        for m in re.finditer(r'\bwhile\s*\(', clean):
-            prefix = clean[:m.start()]
-            # A valid do-while has } (possibly followed by whitespace) immediately
-            # before the while keyword.  Use re.search so multi-line gaps are handled.
-            if not re.search(r'\}\s*$', prefix):
-                lineno = prefix.count('\n') + 1
-                return Violation(
-                    rule=self.id,
-                    reason="Top-level while() loop detected (not a valid do-while closing)",
-                    exploit=(
-                        "CashScript v0.13.x only supports do { } while () loops. "
-                        "A standalone while() causes a compile-time ExtraneousInputError "
-                        "and makes the contract non-deployable."
-                    ),
-                    location={"line": lineno, "function": "any"},
-                    severity="critical",
-                    issue_class="real_issue",
-                    exploit_severity="direct_fund_loss",
-                )
         return None
 
 
