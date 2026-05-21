@@ -58,7 +58,12 @@ def _cashtoken_alias_pool(
             "token_category_check": cat_in and cat_out,
             "token_amount_check": amt_ok or bool(re.search(r"tokenAmount\s*==\s*0", code)),
             "nftcommitment_preservation": commitment_ok,
+            "token_nft_commitment": commitment_ok,
             "locking_bytecode": "locking_bytecode" in detected,
+            "output_lockingbytecode_check": (
+                "locking_bytecode" in detected
+                or bool(re.search(r"tx\.outputs\[\d+\]\.lockingBytecode\s*==", code))
+            ),
         },
         "nft_mutable": {
             "valid_signature_check": sig_ok,
