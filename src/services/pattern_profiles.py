@@ -5,6 +5,10 @@ def canonical_pattern(contract_mode: str) -> str:
     mode = (contract_mode or "").lower().strip()
     alias_map = {
         "escrow_2of3_nft": "escrow",
+        "ft_transfer": "token_ft",
+        "nft_transfer_immutable": "nft_immutable",
+        "nft_mutable_state_update": "nft_mutable",
+        "nft_minting_authority": "nft_minting",
         "refundable_crowdfund": "refundable_payment",
         "dutch_auction": "decay",
         "linear_vesting": "decay",
@@ -13,8 +17,13 @@ def canonical_pattern(contract_mode: str) -> str:
         "swap": "conditional_spend",
         "stateful": "covenant",
         "token": "token",
+        "token_ft": "token_ft",
+        "nft_immutable": "nft_immutable",
+        "nft_mutable": "nft_mutable",
+        "nft_minting": "nft_minting",
         "minting": "minting",
         "minter": "minting",
+        "hybrid_token": "hybrid_token",
         "parser": "parser",
         "manager": "manager",
         "hybrid": "hybrid",
@@ -77,6 +86,37 @@ PATTERN_PROFILES: Dict[str, Dict[str, List[str]]] = {
         "knowledge_files": ["covenant_rules.yaml", "cashtokens_rules.yaml", "nft_rules.yaml"],
         "disable_lint_rules": [],
         "disable_detectors": [],
+    },
+    "token_ft": {
+        "knowledge_files": ["covenant_rules.yaml", "cashtokens_rules.yaml", "ft_transfer_rules.yaml"],
+        "disable_lint_rules": [],
+        "disable_detectors": [],
+    },
+    "nft_immutable": {
+        "knowledge_files": ["covenant_rules.yaml", "cashtokens_rules.yaml", "nft_rules.yaml"],
+        "disable_lint_rules": [],
+        "disable_detectors": [],
+    },
+    "nft_mutable": {
+        "knowledge_files": ["covenant_rules.yaml", "cashtokens_rules.yaml", "nft_mutable_rules.yaml"],
+        "disable_lint_rules": [],
+        "disable_detectors": [],
+    },
+    "nft_minting": {
+        "knowledge_files": ["covenant_rules.yaml", "cashtokens_rules.yaml", "nft_minting_rules.yaml"],
+        "disable_lint_rules": ["LNC-005", "LNC-014"],
+        "disable_detectors": [
+            "missing_output_limit",
+            "missing_value_enforcement",
+            "missing_token_amount_validation",
+            "output_binding_missing",
+            "empty_function_body",
+        ],
+    },
+    "hybrid_token": {
+        "knowledge_files": ["covenant_rules.yaml", "cashtokens_rules.yaml", "hybrid_token_rules.yaml"],
+        "disable_lint_rules": [],
+        "disable_detectors": ["output_binding_missing"],
     },
     "minting": {
         "knowledge_files": ["covenant_rules.yaml", "cashtokens_rules.yaml", "nft_rules.yaml"],

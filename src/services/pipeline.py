@@ -43,6 +43,10 @@ _golden_registry.load_pattern("escrow_2of3_nft",     "escrow_2of3_nft.cash")
 _golden_registry.load_pattern("refundable_crowdfund", "refundable_crowdfund.cash")
 _golden_registry.load_pattern("dutch_auction",        "dutch_auction.cash")
 _golden_registry.load_pattern("linear_vesting",       "linear_vesting.cash")
+_golden_registry.load_pattern("ft_transfer",            "ft_transfer.cash")
+_golden_registry.load_pattern("nft_transfer_immutable", "nft_transfer_immutable.cash")
+_golden_registry.load_pattern("nft_mutable_state_update", "nft_mutable_state_update.cash")
+_golden_registry.load_pattern("nft_minting_authority",  "nft_minting_authority.cash")
 
 # Mapping from Phase 1 contract_type → Golden pattern_id
 # Phase 1 now outputs exact IDs — this is a direct set membership check
@@ -51,6 +55,11 @@ _GOLDEN_TYPE_MAP = {
     "refundable_crowdfund": "refundable_crowdfund",
     "dutch_auction":        "dutch_auction",
     "linear_vesting":       "linear_vesting",
+    "ft_transfer":            "ft_transfer",
+    "nft_transfer_immutable": "nft_transfer_immutable",
+    "nft_mutable_state_update": "nft_mutable_state_update",
+    "nft_minting_authority":  "nft_minting_authority",
+    "nft_minting":            "nft_minting_authority",
 }
 
 # Required constructor parameters per pattern (Guard 4 enforcement)
@@ -59,6 +68,10 @@ _GOLDEN_REQUIRED_PARAMS = {
     "refundable_crowdfund": ["beneficiary", "goalAmount", "deadline"],
     "dutch_auction":        ["seller", "startBlock", "endBlock", "startPrice", "endPrice"],
     "linear_vesting":       ["beneficiary", "cliffBlock", "endBlock", "unlockAmount"],
+    "ft_transfer":            ["owner", "recipientLockingBytecode"],
+    "nft_transfer_immutable": ["owner", "expectedCategory", "recipientLockingBytecode"],
+    "nft_mutable_state_update": ["owner", "baseCategory", "newCommitment"],
+    "nft_minting_authority":  ["mintAuthority", "baseCategory"],
 }
 
 MAX_GOLDEN_RETRIES = 2
@@ -188,6 +201,38 @@ _NFT_RAIL = """
 - If burning: the tokenCategory MUST NOT appear in any tx.outputs.
 """
 
+_FT_RAIL = """
+[RAIL: FT TRANSFER MODE]
+- require(tx.outputs.length == 1); // or exact N for splits
+- require(tx.outputs[0].tokenCategory == tx.inputs[this.activeInputIndex].tokenCategory);
+- require(tx.outputs[0].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount);
+- For change outputs: require(tx.outputs[changeIndex].tokenCategory == 0x);
+- Pair tokenCategory and tokenAmount in every function that touches tokens.
+"""
+
+_NFT_IMMUTABLE_RAIL = """
+[RAIL: NFT IMMUTABLE MODE]
+- require(tx.outputs[0].tokenCategory == expectedCategory); // 32-byte category, no capability suffix
+- require(tx.outputs[0].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount);
+- require(tx.outputs[0].nftCommitment == tx.inputs[this.activeInputIndex].nftCommitment);
+"""
+
+_NFT_MUTABLE_RAIL = """
+[RAIL: NFT MUTABLE MODE]
+- require(tx.outputs[0].tokenCategory == baseCategory + 0x01);
+- require(tx.outputs[0].nftCommitment == newCommitment);
+- May require(tx.outputs[0].lockingBytecode == this.activeBytecode) when state stays in-contract.
+"""
+
+_NFT_MINTING_RAIL = """
+[RAIL: NFT MINTING MODE — CRITICAL]
+- Minting authority MUST stay in contract: require(tx.outputs[authIndex].lockingBytecode == this.activeBytecode);
+- Input/output minting NFT uses tokenCategory == baseCategory + 0x02;
+- require(checkSig(mintSig, mintAuthority)) on mint/issue paths;
+- require(tx.outputs.length <= N) as first guard in mint functions;
+- NEVER release 0x02 capability to external wallets.
+"""
+
 _ESCROW_RAIL = """
 [RAIL: ESCROW MODE]
 - Release branch: require(checkSig(sigA, A)); require(checkSig(sigB, B));
@@ -248,8 +293,17 @@ TOKEN SAFETY (Vault hardening):
     on relevant outputs.
 """
 
-def build_pattern_rails(tags: List[str], contract_type: str = "") -> str:
+def build_pattern_rails(tags: List[str], contract_type: str = "", effective_mode: str = "") -> str:
     rails = []
+    mode = (effective_mode or contract_type or "").lower()
+    if mode == "token_ft" or "ft" in tags:
+        rails.append(_FT_RAIL)
+    if mode in ("nft_immutable", "token") and "nft" in tags:
+        rails.append(_NFT_IMMUTABLE_RAIL)
+    if mode == "nft_mutable":
+        rails.append(_NFT_MUTABLE_RAIL)
+    if mode in ("nft_minting", "minting"):
+        rails.append(_NFT_MINTING_RAIL)
     if "split" in tags: rails.append(_SPLIT_RAIL)
     if "tokens" in tags or "nft" in tags: rails.append(_NFT_RAIL)
     if "escrow" in tags: rails.append(_ESCROW_RAIL)
@@ -261,7 +315,7 @@ def build_pattern_rails(tags: List[str], contract_type: str = "") -> str:
 
 # Tags that require covenant/output/token validation rules
 # Tags that require covenant/output/token validation rules
-_COVENANT_TAGS = {"covenant", "stateful", "vesting", "vault", "streaming"}
+_COVENANT_TAGS = {"covenant", "stateful", "vesting", "vault", "streaming", "tokens", "minting", "nft"}
 
 # YAML file cache: filename -> parsed dict
 _yaml_cache: dict = {}
@@ -281,11 +335,108 @@ def _load_yaml(filename: str) -> dict:
         return {}
 
 
+def resolve_effective_mode(intent_model: Optional[IntentModel]) -> str:
+    """Map Phase 1 intent to Phase 2 / lint / toll-gate mode."""
+    if not intent_model:
+        return "unknown"
+    base = (intent_model.contract_type or "unknown").lower().strip()
+    tc = (intent_model.token_class or "").lower().strip()
+    if base in _GOLDEN_TYPE_MAP:
+        return base
+    if base == "minting" or tc == "nft_minting":
+        return "nft_minting"
+    if tc == "ft":
+        return "token_ft"
+    if tc == "nft_immutable":
+        return "nft_immutable"
+    if tc == "nft_mutable":
+        return "nft_mutable"
+    if tc == "hybrid":
+        return "hybrid_token"
+    if base == "token" and tc:
+        return tc
+    if base == "distribution":
+        tags = set(intent_model.features or [])
+        if "split" in tags:
+            return "split"
+        if "tokens" in tags:
+            return "token"
+    return base
+
+
+def apply_cashtoken_intent_routing(intent_model: IntentModel, intent_lower: str) -> None:
+    """Deterministic CashTokens class routing (before generic golden upgrades)."""
+    if "failure" in intent_lower and "must not" in intent_lower:
+        return
+    ct = (intent_model.contract_type or "").lower()
+    locked = {
+        "escrow_2of3_nft", "refundable_crowdfund", "dutch_auction",
+        "linear_vesting", "vault", "streaming",
+    }
+    if ct in locked:
+        return
+
+    if any(
+        w in intent_lower
+        for w in (
+            "open edition", "genesis drop", "nft drop", "collection mint",
+            "minting nft", "pfp drop", "mint authority", "minting authority",
+        )
+    ):
+        intent_model.contract_type = "nft_minting_authority"
+        intent_model.token_class = "nft_minting"
+        intent_model.nft_capability = "minting"
+        if "minting" not in intent_model.features:
+            intent_model.features = list(intent_model.features) + ["minting"]
+        return
+
+    if any(
+        w in intent_lower
+        for w in ("evolving nft", "leveling", "mutable nft", "state nft", "domain registry", "update commitment")
+    ):
+        intent_model.contract_type = "nft_mutable_state_update"
+        intent_model.token_class = "nft_mutable"
+        intent_model.nft_capability = "mutable"
+        intent_model.requires_commitment = True
+        return
+
+    if any(
+        w in intent_lower
+        for w in ("collectible", "art nft", "membership badge", "dao badge", "immutable nft", "digital collectible")
+    ):
+        intent_model.contract_type = "nft_transfer_immutable"
+        intent_model.token_class = "nft_immutable"
+        intent_model.nft_capability = "none"
+        intent_model.requires_commitment = True
+        if "nft" not in intent_model.features:
+            intent_model.features = list(intent_model.features) + ["nft"]
+        return
+
+    if any(
+        w in intent_lower
+        for w in (
+            "loyalty", "in-game gold", "fungible", "game currency", "points token",
+            "pre-minted", "ft transfer", "token transfer",
+        )
+    ):
+        intent_model.contract_type = "ft_transfer"
+        intent_model.token_class = "ft"
+        if "tokens" not in intent_model.features:
+            intent_model.features = list(intent_model.features) + ["tokens"]
+        return
+
+    if any(w in intent_lower for w in ("stablecoin", "parityusd", "sidecar", "hybrid token", "oracle state")):
+        intent_model.contract_type = "hybrid_token"
+        intent_model.token_class = "hybrid"
+        if "tokens" not in intent_model.features:
+            intent_model.features = list(intent_model.features) + ["tokens"]
+
+
 def build_structured_knowledge(ir: ContractIR) -> str:
     """Build YAML knowledge with pattern-specific overlays for generation."""
     intent_model = ir.metadata.intent_model if ir.metadata else None
     tags = set(intent_model.features if intent_model else [])
-    contract_mode = intent_model.contract_type if intent_model else ""
+    contract_mode = resolve_effective_mode(intent_model) if intent_model else ""
     pattern_name = canonical_pattern(contract_mode)
     pattern_profile = get_pattern_profile(contract_mode)
 
@@ -382,6 +533,9 @@ class Phase1:
         if ir.metadata.intent_model:
             current_type = ir.metadata.intent_model.contract_type
             intent_lower = intent.lower()
+
+            apply_cashtoken_intent_routing(ir.metadata.intent_model, intent_lower)
+            current_type = ir.metadata.intent_model.contract_type
 
             # Escrow: Upgrade to golden NFT pattern ONLY if NFT/token/custody context exists.
             # Otherwise, general escrows stay as 'escrow' (triggers free generation).
@@ -642,15 +796,9 @@ async def _free_phase2(
     needs_covenant = bool(set(tags) & _COVENANT_TAGS)
     # Determine effective mode for Logic Injection
     # "distribution" is broad. Refine it based on tags.
-    base_mode = intent_model.contract_type if intent_model else "unknown"
-    effective_mode = base_mode
-    if base_mode == "distribution":
-        if "split" in tags:
-            effective_mode = "split"
-        elif "tokens" in tags:
-            effective_mode = "token"
+    effective_mode = resolve_effective_mode(intent_model)
     ir.metadata.effective_mode = effective_mode
-    logger.info(f"[Phase2] Effective Mode: {effective_mode} (base={base_mode}, tags={tags})")
+    logger.info(f"[Phase2] Effective Mode: {effective_mode} (tags={tags})")
     # Build layered system + user prompt
     system_prompt, user_prompt = _build_phase2_prompt(
         intent_model=intent_model,
@@ -771,7 +919,13 @@ Rules:
    - "distribution"          → funds are released/paid to an external recipient permanently
                                 triggers: "release", "payout", "send to", "pay to", "transfer to", "bounty", "claim"
    - "swap"                  → atomic exchange, hashlock or HTLC
-   - "token"                 → CashTokens fungible/NFT logic
+   - "token"                 → CashTokens fungible/NFT logic (set token_class: ft | nft_immutable | nft_mutable | hybrid)
+   - "minting"               → NFT minting authority / open edition (set token_class: nft_minting)
+   - "ft_transfer"           → golden: fungible token transfer
+   - "nft_transfer_immutable" → golden: immutable NFT transfer
+   - "nft_mutable_state_update" → golden: mutable NFT state update
+   - "nft_minting_authority" → golden: minting NFT custody covenant
+   - "hybrid_token"          → multi-property covenant (stablecoin / sidecar style)
    - "covenant"              → stateful self-continuing contract
    - "stateful"              → generic state-preserving contract
    - "timelock"              → single-beneficiary time-gated release
@@ -781,6 +935,11 @@ Rules:
 4. Extract `threshold` if multisig is implied.
 5. Extract `timeout_days` if a temporal constraint is mentioned.
 6. Summarize the technical `purpose` in one sentence.
+7. For CashTokens intents, set optional fields:
+   - `token_class`: "ft" | "nft_immutable" | "nft_mutable" | "nft_minting" | "hybrid"
+   - `nft_capability`: "none" | "mutable" | "minting"
+   - `requires_commitment`: true when NFT commitment must be preserved
+   - `is_genesis`: true only for genesis / category creation intents
 
 User Request: "{intent}"
 
@@ -791,6 +950,10 @@ Output ONLY valid JSON:
   "signers": ["...", "..."],
   "threshold": N,
   "timeout_days": N,
+  "token_class": null,
+  "nft_capability": null,
+  "requires_commitment": false,
+  "is_genesis": false,
   "purpose": "..."
 }}
 
@@ -834,6 +997,41 @@ def _build_phase2_prompt(
             "require(tx.outputs[0].value + tx.outputs[1].value == tx.inputs[this.activeInputIndex].value); "
             "require(tx.outputs[0].tokenAmount + tx.outputs[1].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount); "
         )
+    elif effective_mode == "token_ft":
+        covenant_rule = (
+            "FT TRANSFER MODE: "
+            "require(tx.outputs.length >= 1); "
+            "require(tx.outputs[0].tokenCategory == tx.inputs[this.activeInputIndex].tokenCategory); "
+            "require(tx.outputs[0].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount); "
+            "BCH-only change outputs: require(tx.outputs[N].tokenCategory == 0x); "
+        )
+    elif effective_mode == "nft_immutable":
+        covenant_rule = (
+            "NFT IMMUTABLE MODE: "
+            "require(tx.outputs.length == 1); "
+            "require(tx.outputs[0].tokenCategory == expectedCategory); "
+            "require(tx.outputs[0].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount); "
+            "require(tx.outputs[0].nftCommitment == tx.inputs[this.activeInputIndex].nftCommitment); "
+        )
+    elif effective_mode == "nft_mutable":
+        covenant_rule = (
+            "NFT MUTABLE MODE: "
+            "require(tx.outputs[0].tokenCategory == baseCategory + 0x01); "
+            "require(tx.outputs[0].nftCommitment == newCommitment); "
+        )
+    elif effective_mode == "nft_minting":
+        covenant_rule = (
+            "NFT MINTING MODE: "
+            "require(tx.outputs[mintAuth].lockingBytecode == this.activeBytecode); "
+            "require(tx.outputs[mintAuth].tokenCategory == baseCategory + 0x02); "
+            "require(checkSig(mintSig, mintAuthority)); "
+            "require(tx.outputs.length <= maxOutputs); "
+        )
+    elif effective_mode == "hybrid_token":
+        covenant_rule = (
+            "HYBRID TOKEN MODE: validate lockingBytecode, tokenCategory, value, "
+            "tokenAmount, and nftCommitment on state transitions. "
+        )
     elif effective_mode == "token":
         covenant_rule = (
             "TOKEN MODE: "
@@ -851,7 +1049,8 @@ def _build_phase2_prompt(
     unified_rules = build_unified_dsl_rules()
     pattern_rails = build_pattern_rails(
         intent_model.features if intent_model else [],
-        contract_type=intent_model.contract_type if intent_model else ""
+        contract_type=intent_model.contract_type if intent_model else "",
+        effective_mode=effective_mode,
     )
 
     system_prompt = f"""You are a Secure CashScript Code Generator. Output ONLY compilable CashScript ^0.13.0 code.
@@ -900,14 +1099,21 @@ def _parse_phase1_response(raw: str, intent: str, security_level: str) -> Contra
         try:
             data = json.loads(json_str)
             # Ensure critical keys exist even if LLM omitted them
-            for key in ["contract_type", "features", "signers", "purpose"]:
+            for key in [
+                "contract_type", "features", "signers", "purpose",
+                "token_class", "nft_capability", "expected_category",
+            ]:
                 if key not in data or data[key] is None:
-                    if key == "features" or key == "signers":
+                    if key in ("features", "signers"):
                         data[key] = []
                     elif key == "contract_type":
                         data[key] = "generic"
                     else:
-                        data[key] = ""
+                        data[key] = None if key != "purpose" else ""
+            if "requires_commitment" not in data:
+                data["requires_commitment"] = False
+            if "is_genesis" not in data:
+                data["is_genesis"] = False
             # Pre-coerce range-like timeouts so Pydantic does not fall back to generic intent.
             td = data.get("timeout_days")
             if isinstance(td, list) and td:
