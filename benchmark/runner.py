@@ -59,7 +59,12 @@ class BenchmarkRunner:
         print(f"Loaded {len(self.cases)} cases from {self.yaml_path.name}")
         print(f"Dataset Hash: {self.dataset_hash[:12]}...")
 
-    async def run_all(self, model_override: str = None, on_progress: callable = None):
+    async def run_all(
+        self,
+        model_override: str = None,
+        on_progress: callable = None,
+        disable_golden: bool = True,
+    ):
         from benchmark.evaluator import BenchmarkEvaluator
         from benchmark.reporter import BenchmarkReporter
         
@@ -78,7 +83,11 @@ class BenchmarkRunner:
         
         results = []
         for i, case in enumerate(self.cases):
-            res = await evaluator.evaluate(case, model_override=model_override)
+            res = await evaluator.evaluate(
+                case,
+                model_override=model_override,
+                disable_golden=disable_golden,
+            )
             results.append(res)
             
             # Immediate feedback per case (ASCII to avoid Windows console encoding issues)
@@ -124,6 +133,11 @@ async def main():
     parser.add_argument("--tags", help="Comma-separated tags to filter", default="")
     parser.add_argument("--ids", help="Comma-separated case ids to run (subset)", default="")
     parser.add_argument("--model", help="Model override", default=None)
+    parser.add_argument(
+        "--use-golden",
+        action="store_true",
+        help="Enable golden pattern adaptation (default: free synthesis only)",
+    )
     
     args = parser.parse_args()
     
@@ -132,7 +146,10 @@ async def main():
     
     runner = BenchmarkRunner(args.suite, tags=tags, case_ids=case_ids)
     runner.load_suite()
-    await runner.run_all(model_override=args.model)
+    await runner.run_all(
+        model_override=args.model,
+        disable_golden=not args.use_golden,
+    )
 
 if __name__ == "__main__":
     asyncio.run(main())

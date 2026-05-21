@@ -25,7 +25,12 @@ class BenchmarkEvaluator:
         with open(self.weights_path, "r", encoding="utf-8") as f:
             self.weights = yaml.safe_load(f)
 
-    async def evaluate(self, case: BenchmarkCase, model_override: str = None) -> CaseResult:
+    async def evaluate(
+        self,
+        case: BenchmarkCase,
+        model_override: str = None,
+        disable_golden: bool = True,
+    ) -> CaseResult:
         start_time = time.time()
         
         # Determine failure layer and state
@@ -46,10 +51,10 @@ class BenchmarkEvaluator:
             # Note: generate_guarded handles inner retry loops
             result = await asyncio.wait_for(
                 self.engine.generate_guarded(
-                    case.intent, 
+                    case.intent,
                     security_level="high",
-                    disable_golden=True,
-                    disable_fallbacks=True
+                    disable_golden=disable_golden,
+                    disable_fallbacks=True,
                 ),
                 timeout=300  # 5 min — token treasury paths can spend retries in compile/lint loops
             )
@@ -141,6 +146,36 @@ class BenchmarkEvaluator:
                             re.search(
                                 r"tokenAmount\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenAmount",
                                 code,
+                            )
+                        ),
+                        "nftcommitment_preservation": (
+                            "token_nft_commitment" in detected
+                            or bool(re.search(r"\.nftCommitment\s*==\s*", code))
+                        ),
+                        "capability_byte_match": (
+                            "capability_mutable" in detected
+                            or "capability_minting" in detected
+                            or bool(re.search(r"tokenCategory\s*\+\s*0x0[12]", code))
+                        ),
+                        "minting_authority_custody": bool(
+                            re.search(
+                                r"lockingBytecode\s*==\s*this\.activeBytecode",
+                                code,
+                            )
+                            and (
+                                "capability_minting" in detected
+                                or re.search(r"0x02", code)
+                            )
+                        ),
+                        "bch_only_change_guard": "bch_only_output" in detected,
+                        "must_fail_capability_leak": not bool(
+                            re.search(
+                                r"lockingBytecode\s*==\s*this\.activeBytecode",
+                                code,
+                            )
+                            and (
+                                "capability_minting" in detected
+                                or re.search(r"0x02", code)
                             )
                         ),
                     }
