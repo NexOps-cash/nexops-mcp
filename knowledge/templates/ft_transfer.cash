@@ -1,0 +1,22 @@
+// TEMPLATE: Fungible token transfer (mirrors golden ft_transfer)
+pragma cashscript ^0.13.0;
+
+contract FungibleTokenTransfer(
+    pubkey owner,
+    bytes recipientLockingBytecode
+) {
+    function transfer(sig ownerSig) {
+        require(checkSig(ownerSig, owner));
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].lockingBytecode == recipientLockingBytecode);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+        require(
+            tx.outputs[0].tokenCategory ==
+            tx.inputs[this.activeInputIndex].tokenCategory
+        );
+        require(
+            tx.outputs[0].tokenAmount ==
+            tx.inputs[this.activeInputIndex].tokenAmount
+        );
+    }
+}
