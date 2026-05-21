@@ -57,6 +57,16 @@ class LanguageGuard:
     ]
 
     @staticmethod
+    def _allows_hardcoded_input_index(code: str, index: int) -> bool:
+        """Allow tx.inputs[N] when N is a named sidecar/cross-contract anchor input."""
+        return bool(
+            re.search(
+                rf"tx\.inputs\[\s*{index}\s*\]\.outpointTransactionHash",
+                code,
+            )
+        )
+
+    @staticmethod
     def validate(code: str) -> Optional[str]:
         """
         Scan code for forbidden patterns.
@@ -66,13 +76,21 @@ class LanguageGuard:
         - tx.outputs[n].lockingBytecode (covenant validation)
         - tx.inputs[this.activeInputIndex].* (position-safe access)
         - tokenCategory/tokenAmount validation
+        - tx.inputs[1].outpointTransactionHash (cross-contract sidecar auth)
         
         It only blocks UNSAFE patterns like hardcoded indices and EVM syntax.
         """
         for pattern, reason in LanguageGuard.FORBIDDEN.items():
-            if re.search(pattern, code):
-                logger.warning(f"Language Guard Triggered: {pattern}")
-                return reason
+            m = re.search(pattern, code)
+            if not m:
+                continue
+            idx_match = re.search(r"tx\.inputs\[\s*(\d+)\s*\]", m.group(0))
+            if idx_match and LanguageGuard._allows_hardcoded_input_index(
+                code, int(idx_match.group(1))
+            ):
+                continue
+            logger.warning(f"Language Guard Triggered: {pattern}")
+            return reason
         return None
 
 def get_language_guard() -> LanguageGuard:
