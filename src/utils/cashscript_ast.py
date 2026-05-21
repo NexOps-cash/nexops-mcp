@@ -86,6 +86,8 @@ class ValidationCheck:
     validates_token_category: Optional[int] = None
     validates_token_amount: Optional[int] = None
     validates_value: Optional[int] = None
+    validates_nft_commitment: bool = False
+    validates_capability_match: bool = False
     is_time_check: bool = False
     comparisons: List[Comparison] = None
 
@@ -223,6 +225,14 @@ class CashScriptAST:
                         token_amt_match = re.search(r'tx\.outputs\[(\d+)\]\.tokenAmount', condition)
                         if token_amt_match:
                             validation.validates_token_amount = int(token_amt_match.group(1))
+
+                        if re.search(r'\.nftCommitment\s*==\s*', condition):
+                            validation.validates_nft_commitment = True
+                        if re.search(r'tokenCategory', condition) and re.search(
+                            r'0x0[12]|\.split\s*\(\s*32\s*\)',
+                            condition,
+                        ):
+                            validation.validates_capability_match = True
 
                         if any(x in condition for x in ['tx.time', 'tx.age', 'tx.blockHeight']):
                             validation.is_time_check = True
@@ -368,6 +378,16 @@ class CashScriptAST:
                 if '>' in v.condition and '>=' not in v.condition: return True
                 if '<=' in v.condition: return True
         return False
+
+    @property
+    def has_validates_nft_commitment(self) -> bool:
+        """True if any require() compares nftCommitment (preservation or update)."""
+        return any(v.validates_nft_commitment for v in self.validations)
+
+    @property
+    def has_validates_capability_match(self) -> bool:
+        """True if capability suffix (+0x01/+0x02) or split(32) handling appears."""
+        return any(v.validates_capability_match for v in self.validations)
 
     def references_output_by_index_without_semantic_validation(self) -> List[OutputReference]:
         """Find output references that use index without validating semantic role.
