@@ -63,9 +63,9 @@ contract CovenantValidation(
         // WHY: Without this, an attacker could place this contract at a
         // different input index and spend a completely different UTXO
         // while this contract validates the wrong input.
-        require(tx.inputs[this.activeInputIndex].lockingBytecode == this.lockingBytecode);
-        
-        // SECURITY NOTE: this.lockingBytecode is the bytecode of THIS contract
+        require(tx.inputs[this.activeInputIndex].lockingBytecode == this.activeBytecode);
+
+        // SECURITY NOTE: this.activeBytecode is the bytecode of THIS contract
         // tx.inputs[this.activeInputIndex].lockingBytecode is the input being spent
         // These MUST match to ensure we're validating the correct input
 
@@ -168,7 +168,8 @@ contract CovenantValidation(
         // SEVERITY: Critical
         
         int inputValue = tx.inputs[this.activeInputIndex].value;
-        
+        require(inputValue >= minValue);
+
         // DESIGN DECISION: Use >= for value validation
         // We validate: outputValue >= minValue
         require(outputValue >= minValue);

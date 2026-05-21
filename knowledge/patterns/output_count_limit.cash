@@ -50,7 +50,7 @@ pragma cashscript ^0.13.0;
 
 contract OutputCountExactOne() {
     function validate(
-        pubkeyhash recipient,  // Typed P2PKH destination — no raw bytes
+        pubkey recipient,  // Typed P2PKH destination — no raw bytes
         int outputValue        // Output value (untrusted — bound below)
     ) {
         // TOKEN CATEGORY CONSTANT
@@ -59,7 +59,7 @@ contract OutputCountExactOne() {
         // ACTIVE INPUT VALIDATION
         // Verify this contract is the input being spent
         // Prevents UTXO position attacks
-        require(tx.inputs[this.activeInputIndex].lockingBytecode == this.lockingBytecode);
+        require(tx.inputs[this.activeInputIndex].lockingBytecode == this.activeBytecode);
 
         // INPUT TOKEN VALIDATION
         // Covenant must be BCH-only — reject any token-carrying input
@@ -90,7 +90,7 @@ contract OutputCountExactOne() {
 
         // DESTINATION: Typed P2PKH construction — prevents raw bytes injection
         // Caller controls WHICH address, not the script type
-        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(recipient));
+        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(hash160(recipient)));
 
         // VALUE: Bind untrusted outputValue to consensus-enforced output value
         // outputValue is UNTRUSTED (caller-provided)
@@ -119,7 +119,7 @@ contract OutputCountExactOne() {
 
 contract OutputCountExactTwo() {
     function validate(
-        pubkeyhash recipient,   // Typed P2PKH destination for output 0
+        pubkey recipient,   // Typed P2PKH destination for output 0
         int output0Value,       // Value for output 0 (untrusted — bound below)
         int output1Value        // Value for output 1 (untrusted — bound below)
     ) {
@@ -127,7 +127,7 @@ contract OutputCountExactTwo() {
         bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
 
         // ACTIVE INPUT VALIDATION
-        require(tx.inputs[this.activeInputIndex].lockingBytecode == this.lockingBytecode);
+        require(tx.inputs[this.activeInputIndex].lockingBytecode == this.activeBytecode);
 
         // INPUT TOKEN VALIDATION
         require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
@@ -162,7 +162,7 @@ contract OutputCountExactTwo() {
 
         // OUTPUT 0: PAYMENT TO RECIPIENT
         // Typed P2PKH destination — no raw bytes
-        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(recipient));
+        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(hash160(recipient)));
 
         // output0Value is UNTRUSTED — bound to consensus data here
         require(tx.outputs[0].value == output0Value);
@@ -205,7 +205,7 @@ contract OutputCountExactTwo() {
 
 contract OutputCountBounded() {
     function validate(
-        pubkeyhash recipient,   // Typed P2PKH destination for withdrawal
+        pubkey recipient,   // Typed P2PKH destination for withdrawal
         int withdrawalValue,    // Withdrawal amount (untrusted — bound below)
         int continuationValue   // Remaining value for continuation (0 if full drain)
     ) {
@@ -213,7 +213,7 @@ contract OutputCountBounded() {
         bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
 
         // ACTIVE INPUT VALIDATION
-        require(tx.inputs[this.activeInputIndex].lockingBytecode == this.lockingBytecode);
+        require(tx.inputs[this.activeInputIndex].lockingBytecode == this.activeBytecode);
 
         // INPUT TOKEN VALIDATION
         require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
@@ -246,7 +246,7 @@ contract OutputCountBounded() {
         // OUTPUT 0: WITHDRAWAL TO RECIPIENT
         // This output exists in BOTH the 1-output and 2-output cases
         // Typed P2PKH destination — no raw bytes
-        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(recipient));
+        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(hash160(recipient)));
 
         // withdrawalValue is UNTRUSTED — bound to consensus data here
         require(tx.outputs[0].value == withdrawalValue);
@@ -258,23 +258,18 @@ contract OutputCountBounded() {
         // Only exists in the 2-output case (partial withdrawal)
         // If tx.outputs.length == 1: full drain, no continuation needed
         // If tx.outputs.length == 2: partial drain, covenant continues
-        if (tx.outputs.length == 2) {
-            // CONTINUATION VALUE POSITIVITY
-            // Continuation must have economic value (not zero/dust trap)
-            require(continuationValue > 0);
-
-            // SELF-REFERENCE DESTINATION
-            // Continuation MUST be this exact contract — no substitution
-            require(
-                tx.outputs[1].lockingBytecode ==
-                tx.inputs[this.activeInputIndex].lockingBytecode
-            );
-
-            // continuationValue is UNTRUSTED — bound to consensus data here
-            require(tx.outputs[1].value == continuationValue);
-            require(tx.outputs[1].tokenCategory == NO_TOKEN);
-            require(tx.outputs[1].tokenAmount == 0);
-        }
+        // CashScript ^0.13.0: no if — implication guards for output[1]:
+        // CONTINUATION VALUE POSITIVITY
+        require(tx.outputs.length != 2 || continuationValue > 0);
+        // SELF-REFERENCE DESTINATION
+        require(
+            tx.outputs.length != 2 ||
+            tx.outputs[1].lockingBytecode ==
+            tx.inputs[this.activeInputIndex].lockingBytecode
+        );
+        require(tx.outputs.length != 2 || tx.outputs[1].value == continuationValue);
+        require(tx.outputs.length != 2 || tx.outputs[1].tokenCategory == NO_TOKEN);
+        require(tx.outputs.length != 2 || tx.outputs[1].tokenAmount == 0);
 
         // FEE MODEL: IMPLICIT (INTERNAL)
         // inputValue - (withdrawalValue + continuationValue) = miningFee

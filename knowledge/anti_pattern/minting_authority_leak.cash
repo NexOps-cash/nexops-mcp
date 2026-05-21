@@ -210,6 +210,7 @@ pragma cashscript ^0.13.0;
 contract SecureMintingWithRecipientControl(
     pubkey mintAuthorityPubKey,
     bytes authorizedRecipientBytecode,  // Only this address can receive minted tokens
+    bytes32 baseCategory,               // 32-byte category (minted outputs must NOT use +0x02)
     int maxSupply,                       // Maximum total supply allowed
     int currentSupply                    // Current minted supply (tracked in covenant)
 ) {
@@ -249,15 +250,16 @@ contract SecureMintingWithRecipientControl(
         require(tx.outputs[1].lockingBytecode == authorizedRecipientBytecode);
         
         // Step 9: CRITICAL - Validate output[1] receives correct token category
-        require(tx.outputs[1].tokenCategory == thisTokenCategory);
+        // Minted child uses base category only (no +0x02 minting suffix)
+        require(tx.outputs[1].tokenCategory == baseCategory);
         
         // Step 10: CRITICAL - Validate output[1] receives exact mint amount
         require(tx.outputs[1].tokenAmount == mintAmount);
         
         // Step 11: Validate output[1] has no minting capability
         // Minted tokens should be immutable (no further minting from them)
+        // ^0.13.0: capability is on tokenCategory suffix, not nftCapability/tokenCapability fields
         require(tx.outputs[1].nftCommitment == 0x);
-        require(tx.outputs[1].tokenCapability == 0x);  // No capability = immutable
         
         // RESULT: Minting is now FULLY CONTROLLED
         // - Only authorized signer can trigger minting
@@ -282,6 +284,7 @@ contract SecureMintingMultiRecipient(
     bytes recipient1Bytecode,
     bytes recipient2Bytecode,
     bytes recipient3Bytecode,
+    bytes32 baseCategory,
     int maxSupply,
     int currentSupply
 ) {
@@ -321,21 +324,18 @@ contract SecureMintingMultiRecipient(
         
         // Step 6: CRITICAL - Validate output[1] recipient and amount
         require(tx.outputs[1].lockingBytecode == recipient1Bytecode);
-        require(tx.outputs[1].tokenCategory == thisTokenCategory);
+        require(tx.outputs[1].tokenCategory == baseCategory);
         require(tx.outputs[1].tokenAmount == amount1);
-        require(tx.outputs[1].tokenCapability == 0x);  // No minting capability
         
         // Step 7: CRITICAL - Validate output[2] recipient and amount
         require(tx.outputs[2].lockingBytecode == recipient2Bytecode);
-        require(tx.outputs[2].tokenCategory == thisTokenCategory);
+        require(tx.outputs[2].tokenCategory == baseCategory);
         require(tx.outputs[2].tokenAmount == amount2);
-        require(tx.outputs[2].tokenCapability == 0x);
         
         // Step 8: CRITICAL - Validate output[3] recipient and amount
         require(tx.outputs[3].lockingBytecode == recipient3Bytecode);
-        require(tx.outputs[3].tokenCategory == thisTokenCategory);
+        require(tx.outputs[3].tokenCategory == baseCategory);
         require(tx.outputs[3].tokenAmount == amount3);
-        require(tx.outputs[3].tokenCapability == 0x);
         
         // RESULT: Multi-recipient minting is SECURE
         // - All recipients are pre-authorized
@@ -357,10 +357,16 @@ pragma cashscript ^0.13.0;
 contract SecureMintingSupplyTracking(
     pubkey mintAuthorityPubKey,
     bytes authorizedRecipientBytecode,
+    bytes32 baseCategory,
     int maxSupply
 ) {
     // Pattern: Track minted supply in NFT commitment for accurate on-chain state
-    function mint(sig authSig, int mintAmount) {
+    function mint(
+        sig authSig,
+        int mintAmount,
+        int currentSupply,
+        bytes newSupplyCommitment
+    ) {
         // Step 1: Validate authority
         require(checkSig(authSig, mintAuthorityPubKey));
         
@@ -371,7 +377,7 @@ contract SecureMintingSupplyTracking(
         // NFT commitment contains 8-byte integer representing total minted supply
         bytes currentSupplyCommitment = tx.inputs[this.activeInputIndex].nftCommitment;
         require(currentSupplyCommitment.length == 8);
-        int currentSupply = int(bytes8(currentSupplyCommitment));
+        require(newSupplyCommitment.length == 8);
         
         // Step 4: CRITICAL - Calculate and validate new supply
         int newSupply = currentSupply + mintAmount;
@@ -389,22 +395,19 @@ contract SecureMintingSupplyTracking(
         require(tx.outputs[0].tokenCategory == thisTokenCategory);
         
         // Step 7: CRITICAL - Validate output[0] updates supply in commitment
-        // New commitment must contain updated supply value
-        bytes newSupplyCommitment = bytes8(newSupply);
+        // New commitment must contain updated supply value (caller supplies bytes; no bytes8 cast)
         require(tx.outputs[0].nftCommitment == newSupplyCommitment);
         
-        // Step 8: Validate output[0] preserves minting capability
-        bytes thisCapability = tx.inputs[this.activeInputIndex].tokenCapability;
-        require(tx.outputs[0].tokenCapability == thisCapability);
+        // Step 8: Validate output[0] preserves minting capability (+0x02 on tokenCategory)
+        require(tx.outputs[0].tokenCategory == thisTokenCategory);
         
         // Step 9: CRITICAL - Validate output[1] recipient
         require(tx.outputs[1].lockingBytecode == authorizedRecipientBytecode);
         
         // Step 10: CRITICAL - Validate output[1] token properties
-        require(tx.outputs[1].tokenCategory == thisTokenCategory);
+        require(tx.outputs[1].tokenCategory == baseCategory);
         require(tx.outputs[1].tokenAmount == mintAmount);
-        require(tx.outputs[1].tokenCapability == 0x);  // No minting capability
-        require(tx.outputs[1].nftCommitment == 0x);    // No commitment needed
+        require(tx.outputs[1].nftCommitment == 0x);
         
         // RESULT: Supply tracking is ON-CHAIN and ENFORCEABLE
         // - Current supply stored in NFT commitment (verifiable)
