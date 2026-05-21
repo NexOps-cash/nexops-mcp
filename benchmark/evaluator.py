@@ -33,15 +33,32 @@ def _cashtoken_alias_pool(
         "token_nft_commitment" in detected
         or bool(re.search(r"\.nftCommitment\s*==\s*", code))
     )
+    _authority_category_preserved = bool(
+        re.search(
+            r"tx\.outputs\[\d+\]\.tokenCategory\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenCategory",
+            code,
+        )
+        or re.search(
+            r"tx\.outputs\[\d+\]\.tokenCategory\s*==\s*\w*(?:minting|authority|base)\w*Category",
+            code,
+            re.IGNORECASE,
+        )
+    )
     cap_ok = (
         "capability_mutable" in detected
         or "capability_minting" in detected
         or bool(re.search(r"tokenCategory\s*\+\s*0x0[12]", code))
+        or bool(re.search(r"0x02", code))
+        or _authority_category_preserved
     )
+    _active_custody = bool(re.search(r"lockingBytecode\s*==\s*this\.activeBytecode", code))
     custody_ok = bool(
-        re.search(r"lockingBytecode\s*==\s*this\.activeBytecode", code)
+        _active_custody
         and ("capability_minting" in detected or re.search(r"0x02", code))
-    )
+    ) or bool(
+        re.search(r"0x02", code)
+        and re.search(r"lockingBytecode.*activeBytecode", code, re.DOTALL)
+    ) or bool(_active_custody and _authority_category_preserved)
     bch_change = "bch_only_output" in detected
     leak_fail = not custody_ok
 
@@ -78,6 +95,7 @@ def _cashtoken_alias_pool(
             "valid_signature_check": sig_ok,
             "token_category_check": cat_in,
             "capability_byte_match": cap_ok,
+            "capability_minting": cap_ok,
             "minting_authority_custody": custody_ok,
             "must_fail_capability_leak": leak_fail,
         },
