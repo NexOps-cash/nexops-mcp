@@ -364,6 +364,8 @@ def resolve_effective_mode(intent_model: Optional[IntentModel]) -> str:
     tc = (intent_model.token_class or "").lower().strip()
     if base in _GOLDEN_TYPE_MAP:
         return base
+    if base == "nft_minting_failure":
+        return "nft_minting_failure"
     if base == "minting" or tc == "nft_minting":
         return "nft_minting"
     if tc == "ft":
@@ -387,7 +389,14 @@ def resolve_effective_mode(intent_model: Optional[IntentModel]) -> str:
 
 def apply_cashtoken_intent_routing(intent_model: IntentModel, intent_lower: str) -> None:
     """Deterministic CashTokens class routing (before generic golden upgrades)."""
-    if "failure" in intent_lower and "must not" in intent_lower:
+    if "failure" in intent_lower and (
+        "must not" in intent_lower
+        or "capability leak" in intent_lower
+        or "failure case" in intent_lower
+    ):
+        intent_model.contract_type = "nft_minting_failure"
+        intent_model.token_class = "nft_minting"
+        intent_model.nft_capability = "minting"
         return
     ct = (intent_model.contract_type or "").lower()
     locked = {
@@ -395,6 +404,25 @@ def apply_cashtoken_intent_routing(intent_model: IntentModel, intent_lower: str)
         "linear_vesting", "vault", "streaming",
     }
     if ct in locked:
+        return
+
+    # Immutable before mutable/minting — "immutable" must not lose to LLM "mutable" types.
+    if (
+        "immutable" in intent_lower
+        or any(
+            w in intent_lower
+            for w in (
+                "collectible", "art nft", "membership badge", "dao badge",
+                "immutable nft", "digital collectible",
+            )
+        )
+    ):
+        intent_model.contract_type = "nft_transfer_immutable"
+        intent_model.token_class = "nft_immutable"
+        intent_model.nft_capability = "none"
+        intent_model.requires_commitment = True
+        if "nft" not in intent_model.features:
+            intent_model.features = list(intent_model.features) + ["nft"]
         return
 
     if any(
@@ -423,14 +451,16 @@ def apply_cashtoken_intent_routing(intent_model: IntentModel, intent_lower: str)
 
     if any(
         w in intent_lower
-        for w in ("collectible", "art nft", "membership badge", "dao badge", "immutable nft", "digital collectible")
+        for w in (
+            "stablecoin", "parityusd", "sidecar", "hybrid token", "oracle state",
+            "oracle price", "stateful token", "token vault", "five-point",
+            "nft commitment", "five-point covenant",
+        )
     ):
-        intent_model.contract_type = "nft_transfer_immutable"
-        intent_model.token_class = "nft_immutable"
-        intent_model.nft_capability = "none"
-        intent_model.requires_commitment = True
-        if "nft" not in intent_model.features:
-            intent_model.features = list(intent_model.features) + ["nft"]
+        intent_model.contract_type = "hybrid_token"
+        intent_model.token_class = "hybrid"
+        if "tokens" not in intent_model.features:
+            intent_model.features = list(intent_model.features) + ["tokens"]
         return
 
     if any(
@@ -442,13 +472,6 @@ def apply_cashtoken_intent_routing(intent_model: IntentModel, intent_lower: str)
     ):
         intent_model.contract_type = "ft_transfer"
         intent_model.token_class = "ft"
-        if "tokens" not in intent_model.features:
-            intent_model.features = list(intent_model.features) + ["tokens"]
-        return
-
-    if any(w in intent_lower for w in ("stablecoin", "parityusd", "sidecar", "hybrid token", "oracle state")):
-        intent_model.contract_type = "hybrid_token"
-        intent_model.token_class = "hybrid"
         if "tokens" not in intent_model.features:
             intent_model.features = list(intent_model.features) + ["tokens"]
 
@@ -557,6 +580,11 @@ class Phase1:
 
             apply_cashtoken_intent_routing(ir.metadata.intent_model, intent_lower)
             current_type = ir.metadata.intent_model.contract_type
+            tc = (ir.metadata.intent_model.token_class or "").strip()
+            cashtoken_routed = bool(tc) or current_type in {
+                "ft_transfer", "nft_transfer_immutable", "nft_mutable_state_update",
+                "nft_minting_authority", "nft_minting_failure", "hybrid_token",
+            }
 
             # Escrow: Upgrade to golden NFT pattern ONLY if NFT/token/custody context exists.
             # Otherwise, general escrows stay as 'escrow' (triggers free generation).
@@ -577,7 +605,11 @@ class Phase1:
                 or "arbiter" in intent_lower
             )
             
-            if current_type in ("escrow", "multisig", "generic", "unknown") and is_escrow_intent:
+            if (
+                not cashtoken_routed
+                and current_type in ("escrow", "multisig", "generic", "unknown")
+                and is_escrow_intent
+            ):
                 # Gated: Only upgrade to golden if NFT/Tokens are mentioned
                 if any(s in intent_lower for s in _NFT_SIGNALS):
                     ir.metadata.intent_model.contract_type = "escrow_2of3_nft"
@@ -587,32 +619,53 @@ class Phase1:
                         ir.metadata.intent_model.contract_type = "escrow"
 
             # Crowdfunding: keyword signals
-            elif current_type in ("crowdfunding", "crowdfund", "generic") and any(
+            elif (
+                not cashtoken_routed
+                and current_type in ("crowdfunding", "crowdfund", "generic")
+                and any(
                 w in intent_lower for w in ("crowdfund", "fundrais", "goal", "backers", "pledge")
+                )
             ):
                 ir.metadata.intent_model.contract_type = "refundable_crowdfund"
 
             # Auction: keyword signals
-            elif current_type in ("auction", "generic") and any(
+            elif (
+                not cashtoken_routed
+                and current_type in ("auction", "generic")
+                and any(
                 w in intent_lower for w in ("auction", "bid", "dutch", "price decay", "declining price")
+                )
             ):
                 ir.metadata.intent_model.contract_type = "dutch_auction"
 
             # Vesting: keyword signals
-            elif current_type in ("vesting", "stateful", "covenant", "generic") and any(
+            elif (
+                not cashtoken_routed
+                and current_type in ("vesting", "stateful", "covenant", "generic")
+                and any(
                 w in intent_lower for w in ("vest", "vesting", "cliff", "unlock over time", "linear release", "salary")
+                )
             ):
                 ir.metadata.intent_model.contract_type = "linear_vesting"
 
             # Streaming: keyword signals (must be before generic vesting)
-            elif current_type in ("streaming", "vesting", "generic") and any(
+            elif (
+                not cashtoken_routed
+                and current_type in ("streaming", "vesting", "generic")
+                and any(
                 w in intent_lower for w in ("stream", "streaming", "decay", "linear decay", "block-by-block")
+                )
             ):
                 ir.metadata.intent_model.contract_type = "streaming"
 
-            # Vault: keyword signals
-            elif current_type in ("vault", "covenant", "generic", "stateful") and any(
-                w in intent_lower for w in ("vault", "cold storage", "withdrawal limit", "controlled release")
+            # Vault: keyword signals (skip when CashTokens routing already set class/mode)
+            elif (
+                not cashtoken_routed
+                and current_type in ("vault", "covenant", "generic", "stateful")
+                and any(
+                    w in intent_lower
+                    for w in ("vault", "cold storage", "withdrawal limit", "controlled release")
+                )
             ):
                 ir.metadata.intent_model.contract_type = "vault"
 
