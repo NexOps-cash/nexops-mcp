@@ -1,0 +1,32 @@
+name: Test
+
+on:
+  push:
+    branches: [main, cashtokenupgrade]
+  pull_request:
+    branches: [main]
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Pytest (exclude CashTokens E2E)
+        run: pytest tests/ -q --ignore=tests/cashtokens/test_generation_e2e.py
+
+  kb-compile-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: KB CashScript compile check
+        run: python scripts/check_cash_compile.py

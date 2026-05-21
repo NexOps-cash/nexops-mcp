@@ -29,7 +29,9 @@ def test_lnc008_skips_ft_transfer_mode():
 
 
 def test_lnc008_requires_minting_self_anchor():
-    violations = _check_covenant_self_anchor(MINTING_AUTHORITY, "nft_minting")
+    # Non-terminal spend path (not named mint/transfer) must self-anchor.
+    code = MINTING_AUTHORITY.replace("function mint", "function continueAuthority")
+    violations = _check_covenant_self_anchor(code, "nft_minting")
     assert any(v["rule_id"] == "LNC-008" for v in violations)
 
 
