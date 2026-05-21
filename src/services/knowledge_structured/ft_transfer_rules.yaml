@@ -1,0 +1,12 @@
+family: ft_transfer
+description: "Fungible CashToken transfer and split invariants."
+must:
+  - id: FT-CATEGORY
+    rule: "require(tx.outputs[N].tokenCategory == tx.inputs[this.activeInputIndex].tokenCategory);"
+  - id: FT-AMOUNT
+    rule: "require(tx.outputs[N].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount); // or sum split"
+  - id: FT-BCH-CHANGE
+    rule: "require(tx.outputs[changeIndex].tokenCategory == 0x); // BCH-only change output"
+split:
+  - id: FT-SPLIT-SUM
+    rule: "require(tx.outputs[0].tokenAmount + tx.outputs[1].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount);"

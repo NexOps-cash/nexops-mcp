@@ -1,0 +1,10 @@
+family: nft_mutable
+description: "Mutable NFT (category + 0x01) state update rules."
+must:
+  - id: MUT-CAPABILITY
+    rule: "require(tx.outputs[0].tokenCategory == baseCategory + 0x01);"
+  - id: MUT-COMMITMENT
+    rule: "require(tx.outputs[0].nftCommitment == newCommitment);"
+continuation:
+  - id: MUT-REANCHOR
+    rule: "require(tx.outputs[0].lockingBytecode == this.activeBytecode); // when state stays in contract"

@@ -1,0 +1,13 @@
+family: hybrid_token
+description: "Five-point covenant for stateful CashToken + NFT hybrids."
+five_point:
+  - id: HYB-LOCK
+    rule: "require(tx.outputs[N].lockingBytecode == expectedLockingBytecode);"
+  - id: HYB-CATEGORY
+    rule: "require(tx.outputs[N].tokenCategory == tx.inputs[this.activeInputIndex].tokenCategory);"
+  - id: HYB-VALUE
+    rule: "require(tx.outputs[N].value == expectedValue);"
+  - id: HYB-AMOUNT
+    rule: "require(tx.outputs[N].tokenAmount == expectedTokenAmount);"
+  - id: HYB-COMMITMENT
+    rule: "require(tx.outputs[N].nftCommitment == newCommitment);"
