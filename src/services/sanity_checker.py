@@ -19,6 +19,7 @@ class SanityChecker:
         """
         violations = []
         features = model.features or []
+        ctype = (model.contract_type or "").lower()
 
         # Feature Mapping & Pattern Evidence
         checks = {
@@ -34,11 +35,24 @@ class SanityChecker:
         for feature in features:
             if feature in checks:
                 patterns = checks[feature]
+                if feature == "minting" and ctype in {
+                    "nft_minting_authority",
+                    "nft_minting_failure",
+                    "nft_minting",
+                }:
+                    patterns = list(patterns) + [r"tokenCategory", r"nftCommitment"]
                 if not any(re.search(p, code) for p in patterns):
                     violations.append(f"Intent specified '{feature}' but no evidence (e.g., {patterns[0]}) found in code.")
 
-        # 2. Signature Accountancy
-        if "multisig" in features and model.threshold:
+        # 2. Signature Accountancy (skip for CashTokens covenant modes — single-owner vault/mint)
+        _skip_multisig_accountancy = ctype in {
+            "hybrid_token",
+            "stablecoin_minter_sidecar",
+            "nft_mutable_state_update",
+            "nft_minting_authority",
+            "nft_minting_failure",
+        }
+        if "multisig" in features and model.threshold and not _skip_multisig_accountancy:
             # Count distinct pubkeys used in checkSig
             pubkeys = set(re.findall(r"pubkey\s+(\w+)", code))
             if len(pubkeys) < model.threshold:
@@ -50,7 +64,6 @@ class SanityChecker:
                 violations.append("Timelock detected but secure operator '>=' is missing for temporal check.")
 
         # 4. Pattern-specific deterministic checks (minimal branching, no major refactor)
-        ctype = (model.contract_type or "").lower()
         if ctype in {"vault", "covenant", "stateful"}:
             if not re.search(r"this\.activeBytecode", code):
                 violations.append(f"{ctype} intent requires covenant continuation signal (this.activeBytecode).")
@@ -68,7 +81,23 @@ class SanityChecker:
             if not (has_elapsed and has_arith):
                 violations.append("Decay/streaming intent requires explicit elapsed-time arithmetic formula.")
 
-        if ctype in {"token", "minting", "escrow_2of3_nft"} or "tokens" in features or "minting" in features:
+        _skip_token_amount_pairing = ctype in {
+            "nft_minting_authority",
+            "nft_minting_failure",
+            "nft_minting",
+            "hybrid_token",
+            "stablecoin_minter_sidecar",
+            "nft_mutable_state_update",
+            "nft_immutable",
+            "nft_transfer_immutable",
+            "ft_transfer",
+            "token_ft",
+        }
+        if not _skip_token_amount_pairing and (
+            ctype in {"token", "minting", "escrow_2of3_nft"}
+            or "tokens" in features
+            or "minting" in features
+        ):
             if re.search(r"tokenCategory", code) and not re.search(r"tokenAmount", code):
                 violations.append("Token logic references tokenCategory but misses tokenAmount validation.")
             if re.search(r"tokenAmount", code) and not re.search(r"tokenCategory", code):

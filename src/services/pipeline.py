@@ -248,10 +248,24 @@ Omitting any line below is a generation error.
 1. require(tx.outputs.length <= maxOutputs);  // first guard
 2. require(checkSig(mintSig, mintAuthority));
 3. require(tx.inputs[this.activeInputIndex].tokenCategory == baseCategory + 0x02);
-4. require(tx.outputs[authIdx].tokenCategory == baseCategory + 0x02);
+4. require(tx.outputs[authIdx].tokenCategory == baseCategory + 0x02);  // authority self-anchor — ALWAYS required even when minting immutable child NFTs
 5. require(tx.outputs[authIdx].lockingBytecode == this.activeBytecode);  // custody — HARD
 6. Child NFT outputs use baseCategory or baseCategory + 0x01 only — NEVER release 0x02 externally.
 7. require(totalMinted + mintAmount <= maxSupply);  // when supply cap applies
+"""
+
+_HYBRID_RAIL = """
+[RAIL: HYBRID TOKEN MODE — REQUIRED CHECKS (ALL MUST APPEAR IN EVERY SPENDING FUNCTION)]
+Omitting any line below is a generation error.
+1. require(checkSig(ownerSig, vaultOwner));
+2. require(tx.inputs[this.activeInputIndex].tokenCategory == stateCategory + 0x01);
+3. require(tx.outputs.length == N);  // exact count — first guard before any tx.outputs[i]
+4. require(tx.outputs[0].lockingBytecode == this.activeBytecode);
+5. require(tx.outputs[0].tokenCategory == stateCategory + 0x01);
+6. require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+7. require(tx.outputs[0].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount);
+8. require(tx.outputs[0].nftCommitment == newCommitment);
+9. Optional sidecar: require(tx.inputs[sidecarIdx].outpointTransactionHash == expectedSidecarTxHash);
 """
 
 _ESCROW_RAIL = """
@@ -323,8 +337,10 @@ def build_pattern_rails(tags: List[str], contract_type: str = "", effective_mode
         rails.append(_NFT_IMMUTABLE_RAIL)
     if mode == "nft_mutable":
         rails.append(_NFT_MUTABLE_RAIL)
-    if mode in ("nft_minting", "minting"):
+    if mode in ("nft_minting", "minting", "nft_minting_authority"):
         rails.append(_NFT_MINTING_RAIL)
+    if mode in ("hybrid_token", "stablecoin_minter_sidecar"):
+        rails.append(_HYBRID_RAIL)
     if "split" in tags: rails.append(_SPLIT_RAIL)
     if "tokens" in tags or "nft" in tags: rails.append(_NFT_RAIL)
     if "escrow" in tags: rails.append(_ESCROW_RAIL)
