@@ -47,6 +47,7 @@ _golden_registry.load_pattern("ft_transfer",            "ft_transfer.cash")
 _golden_registry.load_pattern("nft_transfer_immutable", "nft_transfer_immutable.cash")
 _golden_registry.load_pattern("nft_mutable_state_update", "nft_mutable_state_update.cash")
 _golden_registry.load_pattern("nft_minting_authority",  "nft_minting_authority.cash")
+_golden_registry.load_pattern("stablecoin_minter_sidecar", "stablecoin_minter_sidecar.cash")
 
 # Mapping from Phase 1 contract_type → Golden pattern_id
 # Phase 1 now outputs exact IDs — this is a direct set membership check
@@ -60,6 +61,8 @@ _GOLDEN_TYPE_MAP = {
     "nft_mutable_state_update": "nft_mutable_state_update",
     "nft_minting_authority":  "nft_minting_authority",
     "nft_minting":            "nft_minting_authority",
+    "stablecoin_minter_sidecar": "stablecoin_minter_sidecar",
+    "hybrid_token":           "stablecoin_minter_sidecar",
 }
 
 # Required constructor parameters per pattern (Guard 4 enforcement)
@@ -72,6 +75,9 @@ _GOLDEN_REQUIRED_PARAMS = {
     "nft_transfer_immutable": ["owner", "expectedCategory", "recipientLockingBytecode"],
     "nft_mutable_state_update": ["owner", "baseCategory", "newCommitment"],
     "nft_minting_authority":  ["mintAuthority", "baseCategory"],
+    "stablecoin_minter_sidecar": [
+        "vaultOwner", "stateCategory", "ftCategory", "expectedSidecarTxHash",
+    ],
 }
 
 MAX_GOLDEN_RETRIES = 2
@@ -202,35 +208,50 @@ _NFT_RAIL = """
 """
 
 _FT_RAIL = """
-[RAIL: FT TRANSFER MODE]
-- require(tx.outputs.length == 1); // or exact N for splits
-- require(tx.outputs[0].tokenCategory == tx.inputs[this.activeInputIndex].tokenCategory);
-- require(tx.outputs[0].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount);
-- For change outputs: require(tx.outputs[changeIndex].tokenCategory == 0x);
-- Pair tokenCategory and tokenAmount in every function that touches tokens.
+[RAIL: FT TRANSFER MODE — REQUIRED CHECKS (ALL MUST APPEAR IN EVERY SPENDING FUNCTION)]
+Omitting any line below is a generation error.
+1. require(checkSig(ownerSig, owner));
+2. require(tx.inputs[this.activeInputIndex].tokenCategory == tokenCategory);
+3. require(tx.outputs.length == N);  // exact count — first guard before any tx.outputs[i]
+4. require(tx.outputs[recipientIdx].tokenCategory == tx.inputs[this.activeInputIndex].tokenCategory);
+5. require(tx.outputs[recipientIdx].tokenAmount <= tx.inputs[this.activeInputIndex].tokenAmount);
+6. For BCH change output: require(tx.outputs[changeIdx].tokenCategory == 0x);
+7. Pair tokenCategory and tokenAmount on every output that carries tokens.
 """
 
 _NFT_IMMUTABLE_RAIL = """
-[RAIL: NFT IMMUTABLE MODE]
-- require(tx.outputs[0].tokenCategory == expectedCategory); // 32-byte category, no capability suffix
-- require(tx.outputs[0].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount);
-- require(tx.outputs[0].nftCommitment == tx.inputs[this.activeInputIndex].nftCommitment);
+[RAIL: NFT IMMUTABLE MODE — REQUIRED CHECKS (ALL MUST APPEAR IN EVERY SPENDING FUNCTION)]
+Omitting any line below is a generation error.
+1. require(checkSig(ownerSig, owner));
+2. require(tx.inputs[this.activeInputIndex].tokenCategory == expectedCategory);
+3. require(tx.inputs[this.activeInputIndex].tokenAmount == 0);
+4. require(tx.outputs.length == N);
+5. require(tx.outputs[0].tokenCategory == expectedCategory);
+6. require(tx.outputs[0].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount);
+7. require(tx.outputs[0].nftCommitment == tx.inputs[this.activeInputIndex].nftCommitment);
 """
 
 _NFT_MUTABLE_RAIL = """
-[RAIL: NFT MUTABLE MODE]
-- require(tx.outputs[0].tokenCategory == baseCategory + 0x01);
-- require(tx.outputs[0].nftCommitment == newCommitment);
-- May require(tx.outputs[0].lockingBytecode == this.activeBytecode) when state stays in-contract.
+[RAIL: NFT MUTABLE MODE — REQUIRED CHECKS (ALL MUST APPEAR IN EVERY SPENDING FUNCTION)]
+Omitting any line below is a generation error.
+1. require(checkSig(ownerSig, owner));
+2. require(tx.inputs[this.activeInputIndex].tokenCategory == baseCategory + 0x01);
+3. require(tx.outputs.length == N);
+4. require(tx.outputs[0].tokenCategory == baseCategory + 0x01);
+5. require(tx.outputs[0].nftCommitment == newCommitment);
+6. When state stays in-contract: require(tx.outputs[0].lockingBytecode == this.activeBytecode);
 """
 
 _NFT_MINTING_RAIL = """
-[RAIL: NFT MINTING MODE — CRITICAL]
-- Minting authority MUST stay in contract: require(tx.outputs[authIndex].lockingBytecode == this.activeBytecode);
-- Input/output minting NFT uses tokenCategory == baseCategory + 0x02;
-- require(checkSig(mintSig, mintAuthority)) on mint/issue paths;
-- require(tx.outputs.length <= N) as first guard in mint functions;
-- NEVER release 0x02 capability to external wallets.
+[RAIL: NFT MINTING MODE — REQUIRED CHECKS (ALL MUST APPEAR IN EVERY MINT/ISSUE FUNCTION)]
+Omitting any line below is a generation error.
+1. require(tx.outputs.length <= maxOutputs);  // first guard
+2. require(checkSig(mintSig, mintAuthority));
+3. require(tx.inputs[this.activeInputIndex].tokenCategory == baseCategory + 0x02);
+4. require(tx.outputs[authIdx].tokenCategory == baseCategory + 0x02);
+5. require(tx.outputs[authIdx].lockingBytecode == this.activeBytecode);  // custody — HARD
+6. Child NFT outputs use baseCategory or baseCategory + 0x01 only — NEVER release 0x02 externally.
+7. require(totalMinted + mintAmount <= maxSupply);  // when supply cap applies
 """
 
 _ESCROW_RAIL = """
@@ -296,9 +317,9 @@ TOKEN SAFETY (Vault hardening):
 def build_pattern_rails(tags: List[str], contract_type: str = "", effective_mode: str = "") -> str:
     rails = []
     mode = (effective_mode or contract_type or "").lower()
-    if mode == "token_ft" or "ft" in tags:
+    if mode in ("token_ft", "ft_transfer") or "ft" in tags:
         rails.append(_FT_RAIL)
-    if mode in ("nft_immutable", "token") and "nft" in tags:
+    if mode in ("nft_immutable", "nft_transfer_immutable", "token") and "nft" in tags:
         rails.append(_NFT_IMMUTABLE_RAIL)
     if mode == "nft_mutable":
         rails.append(_NFT_MUTABLE_RAIL)
@@ -997,15 +1018,16 @@ def _build_phase2_prompt(
             "require(tx.outputs[0].value + tx.outputs[1].value == tx.inputs[this.activeInputIndex].value); "
             "require(tx.outputs[0].tokenAmount + tx.outputs[1].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount); "
         )
-    elif effective_mode == "token_ft":
+    elif effective_mode in ("token_ft", "ft_transfer"):
         covenant_rule = (
-            "FT TRANSFER MODE: "
-            "require(tx.outputs.length >= 1); "
+            "FT TRANSFER MODE — REQUIRED: checkSig; "
+            "require(tx.inputs[this.activeInputIndex].tokenCategory == tokenCategory); "
+            "require(tx.outputs.length == N) first; "
             "require(tx.outputs[0].tokenCategory == tx.inputs[this.activeInputIndex].tokenCategory); "
             "require(tx.outputs[0].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount); "
-            "BCH-only change outputs: require(tx.outputs[N].tokenCategory == 0x); "
+            "BCH change: require(tx.outputs[changeIdx].tokenCategory == 0x); "
         )
-    elif effective_mode == "nft_immutable":
+    elif effective_mode in ("nft_immutable", "nft_transfer_immutable"):
         covenant_rule = (
             "NFT IMMUTABLE MODE: "
             "require(tx.outputs.length == 1); "
@@ -1029,8 +1051,10 @@ def _build_phase2_prompt(
         )
     elif effective_mode == "hybrid_token":
         covenant_rule = (
-            "HYBRID TOKEN MODE: validate lockingBytecode, tokenCategory, value, "
-            "tokenAmount, and nftCommitment on state transitions. "
+            "HYBRID TOKEN MODE — REQUIRED five-point checks on every state output: "
+            "lockingBytecode, tokenCategory, value, tokenAmount, nftCommitment. "
+            "Multi-contract: bind sidecar via "
+            "require(tx.inputs[sidecarIdx].outpointTransactionHash == expectedSidecarTxHash); "
         )
     elif effective_mode == "token":
         covenant_rule = (

@@ -1,5 +1,21 @@
 family: ft_transfer
 description: "Fungible CashToken transfer and split invariants."
+concrete_expressions:
+  - check: "require(tx.inputs[this.activeInputIndex].tokenCategory == tokenCategory);"
+    prevents: "wrong token category accepted (category spoofing)"
+    mode: [token_ft, ft_transfer]
+  - check: "require(tx.outputs[0].tokenCategory == tx.inputs[this.activeInputIndex].tokenCategory);"
+    prevents: "output category mismatch (token substitution)"
+    mode: [token_ft, ft_transfer]
+  - check: "require(tx.outputs[0].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount);"
+    prevents: "token inflation or silent burn"
+    mode: [token_ft, ft_transfer]
+  - check: "require(tx.outputs[changeIdx].tokenCategory == 0x);"
+    prevents: "BCH change output carrying unintended tokens"
+    mode: [token_ft, ft_transfer]
+  - check: "require(checkSig(ownerSig, owner));"
+    prevents: "unauthorized spend"
+    mode: [token_ft, ft_transfer]
 must:
   - id: FT-CATEGORY
     rule: "require(tx.outputs[N].tokenCategory == tx.inputs[this.activeInputIndex].tokenCategory);"
