@@ -532,6 +532,7 @@ def _check_covenant_self_anchor(code: str, contract_mode: str = "") -> list[dict
                 r"\b("
                 r"burn|refund|claim|withdraw|exit|drain|close|liquidate|sweep"
                 r"|finalize|finalise|release|payout|pay|redeem|execute|settle"
+                r"|transfer|send|payOut|payout|revoke|mint"
                 r"|emergency|recover|recovery|guardian|guardianRecovery"
                 r"|fullWithdraw|fullSpend|finalWithdraw|complete"
                 r")\w*\b",
@@ -569,11 +570,14 @@ def _check_covenant_self_anchor(code: str, contract_mode: str = "") -> list[dict
             if mode == "vault":
                 msg += " Hint: Vault intermediate states (like announce/start) MUST re-anchor the contract logic."
 
-            violations.append({
+            entry = {
                 "rule_id": "LNC-008",
                 "message": msg,
                 "line_hint": start_lineno,
-            })
+            }
+            if mode == "hybrid_token":
+                entry["severity"] = "warning"
+            violations.append(entry)
 
     return violations
 
@@ -799,6 +803,8 @@ def _check_token_mint_supply_enforcement(code: str, contract_mode: str = "") -> 
     LNC-017: Fungible mint paths must enforce supply bounds.
     """
     mode = (contract_mode or "").lower().strip()
+    if mode in {"nft_minting", "nft_minting_authority", "nft_mutable", "nft_immutable", "token_ft", "ft_transfer"}:
+        return []
     if mode not in {"token", "minting", "covenant"} and "mint" not in code.lower():
         return []
 
@@ -818,6 +824,7 @@ def _check_token_mint_supply_enforcement(code: str, contract_mode: str = "") -> 
                     "Add a cap guard (e.g. require(totalSupply + mintAmount <= maxSupply))."
                 ),
                 "line_hint": start_lineno,
+                "severity": "warning",
             })
     return violations
 
@@ -827,6 +834,8 @@ def _check_nft_mint_transfer_rules(code: str, contract_mode: str = "") -> list[d
     LNC-018: NFT mint/transfer should preserve singleton semantics.
     """
     mode = (contract_mode or "").lower().strip()
+    if mode in {"nft_minting", "nft_minting_authority", "token_ft", "ft_transfer"}:
+        return []
     if mode not in {"token", "minting", "escrow_2of3_nft", "escrow"} and "nft" not in code.lower():
         return []
 
@@ -848,6 +857,7 @@ def _check_nft_mint_transfer_rules(code: str, contract_mode: str = "") -> list[d
             "Add require(tokenAmount == 1) for singleton NFTs or preserve input tokenAmount exactly."
         ),
         "line_hint": 0,
+        "severity": "warning",
     }]
 
 

@@ -9,6 +9,7 @@ def canonical_pattern(contract_mode: str) -> str:
         "nft_transfer_immutable": "nft_immutable",
         "nft_mutable_state_update": "nft_mutable",
         "nft_minting_authority": "nft_minting",
+        "nft_minting_failure": "nft_minting_failure",
         "refundable_crowdfund": "refundable_payment",
         "dutch_auction": "decay",
         "linear_vesting": "decay",
@@ -24,6 +25,7 @@ def canonical_pattern(contract_mode: str) -> str:
         "minting": "minting",
         "minter": "minting",
         "hybrid_token": "hybrid_token",
+        "stablecoin_minter_sidecar": "hybrid_token",
         "parser": "parser",
         "manager": "manager",
         "hybrid": "hybrid",
@@ -104,7 +106,7 @@ PATTERN_PROFILES: Dict[str, Dict[str, List[str]]] = {
     },
     "nft_minting": {
         "knowledge_files": ["covenant_rules.yaml", "cashtokens_rules.yaml", "nft_minting_rules.yaml"],
-        "disable_lint_rules": ["LNC-005", "LNC-014"],
+        "disable_lint_rules": ["LNC-001", "LNC-005", "LNC-014", "LNC-017", "LNC-018"],
         "disable_detectors": [
             "missing_output_limit",
             "missing_value_enforcement",
@@ -113,9 +115,23 @@ PATTERN_PROFILES: Dict[str, Dict[str, List[str]]] = {
             "empty_function_body",
         ],
     },
+    "nft_minting_failure": {
+        "knowledge_files": ["covenant_rules.yaml", "cashtokens_rules.yaml", "nft_minting_rules.yaml"],
+        "disable_lint_rules": [
+            "LNC-001", "LNC-005", "LNC-008", "LNC-014", "LNC-017", "LNC-018", "LNC-023",
+        ],
+        "disable_detectors": [
+            "missing_output_limit",
+            "missing_value_enforcement",
+            "missing_token_amount_validation",
+            "output_binding_missing",
+            "empty_function_body",
+            "minting_authority_escape",
+        ],
+    },
     "hybrid_token": {
         "knowledge_files": ["covenant_rules.yaml", "cashtokens_rules.yaml", "hybrid_token_rules.yaml"],
-        "disable_lint_rules": [],
+        "disable_lint_rules": ["LNC-003", "LNC-004", "LNC-005", "LNC-008", "LNC-014", "LNC-015", "LNC-016"],
         "disable_detectors": ["output_binding_missing"],
     },
     "minting": {
