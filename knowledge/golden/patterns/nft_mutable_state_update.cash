@@ -1,0 +1,28 @@
+// GOLDEN TEMPLATE — Pattern-ID: nft_mutable_state_update
+pragma cashscript ^0.13.0;
+
+contract NFTMutableStateUpdate(
+    // === MUTABLE_CONSTRUCTOR_START ===
+    pubkey owner,
+    bytes32 baseCategory,
+    bytes newCommitment
+    // === MUTABLE_CONSTRUCTOR_END ===
+) {
+    function updateState(sig ownerSig) {
+        // === INVARIANT_ANCHOR_START ===
+        require(checkSig(ownerSig, owner));
+        require(tx.outputs.length == 1);
+        require(
+            tx.inputs[this.activeInputIndex].tokenCategory == baseCategory + 0x01
+        );
+        require(tx.outputs[0].tokenCategory == baseCategory + 0x01);
+        require(
+            tx.outputs[0].tokenAmount ==
+            tx.inputs[this.activeInputIndex].tokenAmount
+        );
+        require(tx.outputs[0].nftCommitment == newCommitment);
+        require(tx.outputs[0].lockingBytecode == this.activeBytecode);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+        // === INVARIANT_ANCHOR_END ===
+    }
+}

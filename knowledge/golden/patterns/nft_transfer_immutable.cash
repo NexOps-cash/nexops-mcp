@@ -1,0 +1,31 @@
+// GOLDEN TEMPLATE — Pattern-ID: nft_transfer_immutable
+pragma cashscript ^0.13.0;
+
+contract NFTTransferImmutable(
+    // === MUTABLE_CONSTRUCTOR_START ===
+    pubkey owner,
+    bytes32 expectedCategory,
+    bytes recipientLockingBytecode
+    // === MUTABLE_CONSTRUCTOR_END ===
+) {
+    function transfer(sig ownerSig) {
+        // === INVARIANT_ANCHOR_START ===
+        require(checkSig(ownerSig, owner));
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].lockingBytecode == recipientLockingBytecode);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+        require(
+            tx.inputs[this.activeInputIndex].tokenCategory == expectedCategory
+        );
+        require(tx.outputs[0].tokenCategory == expectedCategory);
+        require(
+            tx.outputs[0].tokenAmount ==
+            tx.inputs[this.activeInputIndex].tokenAmount
+        );
+        require(
+            tx.outputs[0].nftCommitment ==
+            tx.inputs[this.activeInputIndex].nftCommitment
+        );
+        // === INVARIANT_ANCHOR_END ===
+    }
+}

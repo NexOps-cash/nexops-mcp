@@ -1,0 +1,26 @@
+// GOLDEN TEMPLATE — Pattern-ID: nft_minting_authority
+pragma cashscript ^0.13.0;
+
+contract NFTMintingAuthority(
+    // === MUTABLE_CONSTRUCTOR_START ===
+    pubkey mintAuthority,
+    bytes32 baseCategory
+    // === MUTABLE_CONSTRUCTOR_END ===
+) {
+    function mint(sig mintSig, bytes commitment) {
+        // === INVARIANT_ANCHOR_START ===
+        require(checkSig(mintSig, mintAuthority));
+        require(tx.outputs.length <= 2);
+        require(
+            tx.inputs[this.activeInputIndex].tokenCategory == baseCategory + 0x02
+        );
+        require(tx.outputs[0].lockingBytecode == this.activeBytecode);
+        require(tx.outputs[0].tokenCategory == baseCategory + 0x02);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+        require(commitment.length > 0);
+        require(commitment.length <= 40);
+        require(tx.outputs[1].tokenCategory == baseCategory);
+        require(tx.outputs[1].nftCommitment == commitment);
+        // === INVARIANT_ANCHOR_END ===
+    }
+}
