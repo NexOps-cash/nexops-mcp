@@ -904,7 +904,10 @@ class MintingAuthorityEscapeDetector(AntiPatternDetector):
     def detect(self, ast: CashScriptAST) -> Optional[Violation]:
         import re
         mode = ast.contract_mode
-        if mode not in {"nft_minting", "minting", "token", "token_ft", ""} and "0x02" not in ast.code:
+        mint_modes = {
+            "nft_minting", "nft_minting_authority", "minting", "token", "token_ft", "",
+        }
+        if mode not in mint_modes and "0x02" not in ast.code:
             return None
         if not re.search(r"0x02", ast.code):
             return None

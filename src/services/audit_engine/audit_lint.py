@@ -520,18 +520,20 @@ def _check_covenant_self_anchor(code: str, contract_mode: str = "") -> list[dict
     # These modes don't care about self-anchoring (or use unrelated logic).
     SKIP_MODES = {
         "multisig", "multisig_simple_spend", "p2pkh", "stateless",
-        "timelock", "escrow", "token", "minting",
-        # Golden pattern IDs — these are terminal payout contracts, not perpetuating covenants.
-        # The SELF_ANCHOR is intentionally absent from golden release functions.
+        "timelock", "escrow",
         "escrow_2of3_nft", "escrow_2of3", "linear_vesting",
+        "token_ft", "ft_transfer",
+        "nft_immutable", "nft_transfer_immutable",
         ""
     }
     if mode in SKIP_MODES:
         return []
 
-    # 3. REQUIRE SELF-ANCHOR MODES (Continuation Patterns)
-    # vesting, stateful, covenant, vault
-    REQUIRE_MODES = {"vesting", "stateful", "covenant", "vault"}
+    REQUIRE_MODES = {
+        "vesting", "stateful", "covenant", "vault",
+        "nft_mutable", "nft_minting", "nft_minting_authority",
+        "nft_mutable_state_update", "hybrid_token", "minting",
+    }
 
     # If unknown mode, infer from code content (conservative fallback)
     if mode not in REQUIRE_MODES:
