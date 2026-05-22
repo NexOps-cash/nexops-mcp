@@ -24,7 +24,6 @@
     Soulbound identity NFT that can update metadata commitment but cannot transfer ownership.
   required_features:
     - signature_verification
-    - covenant_continuation
   critical_features:
     - valid_signature_check
     - soulbound_no_external_transfer

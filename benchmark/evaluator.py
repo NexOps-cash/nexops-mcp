@@ -176,10 +176,12 @@ def _semantic_alias_pool(
         and ("checkMultiSig" in code or "checkSig" in code)
     )
 
+    cov_ref = anchor or capabilities.get("covenant_continuation", False)
     base = {
         "valid_signature_check": sig_ok,
         "token_category_check": bool(re.search(r"tokenCategory\s*==", code)),
-        "covenant_self_reference": anchor or capabilities.get("covenant_continuation", False),
+        "covenant_continuation": cov_ref,
+        "covenant_self_reference": cov_ref,
         "soulbound_no_external_transfer": anchor and not bool(
             re.search(r"lockingBytecode\s*==\s*(?!this\.activeBytecode)(?:recipient|buyer|external)", code)
         ),
