@@ -1,0 +1,53 @@
+# Minting authority family — example prompts
+# python -m benchmark.runner benchmark/suites/cashtokens_nft_minting.yaml
+
+- id: ct_mint_family_001
+  pattern: nft_minting
+  difficulty: hard
+  intent: |
+    Open edition NFT collection: minter authority stays in the contract covenant. Minting capability 0x02 must remain on this.activeBytecode, never released to buyers.
+  required_features:
+    - signature_verification
+    - token_category_check
+  critical_features:
+    - minting_authority_custody
+    - valid_signature_check
+  tags: ["cashtokens", "nft_minting", "family_suite"]
+
+- id: ct_mint_family_002
+  pattern: nft_minting
+  difficulty: hard
+  intent: |
+    Collection genesis contract with minting authority. Only mintAuthority can create new NFTs. The minting capability UTXO must self-anchor.
+  required_features:
+    - signature_verification
+    - token_category_check
+  critical_features:
+    - minting_authority_custody
+  tags: ["cashtokens", "nft_minting", "family_suite"]
+
+- id: ct_mint_family_003
+  pattern: nft_minting
+  difficulty: hard
+  intent: |
+    PFP drop contract: buyers receive newly minted immutable NFTs while the minting authority NFT (0x02) remains locked in the contract bytecode.
+  required_features:
+    - signature_verification
+    - token_category_check
+  critical_features:
+    - minting_authority_custody
+    - capability_minting
+  tags: ["cashtokens", "nft_minting", "family_suite"]
+
+- id: ct_mint_family_fail_001
+  pattern: nft_minting
+  difficulty: hard
+  intent: |
+    FAILURE CASE: NFT mint shop that pays the 0x02 minting authority NFT out to the buyer (capability leak).
+  required_features:
+    - signature_verification
+  critical_features:
+    - must_fail_capability_leak
+  expected_structure:
+    require_count_min: 2
+  tags: ["cashtokens", "nft_minting", "family_suite", "failure", "vulnerability"]

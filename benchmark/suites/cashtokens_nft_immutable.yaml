@@ -1,0 +1,45 @@
+# Immutable NFT family — example prompts
+# python -m benchmark.runner benchmark/suites/cashtokens_nft_immutable.yaml
+
+- id: ct_imm_family_001
+  pattern: nft_immutable
+  difficulty: medium
+  intent: |
+    Create an art NFT transfer contract. Preserve tokenCategory, tokenAmount, and nftCommitment from input to output.
+  required_features:
+    - signature_verification
+    - token_category_check
+    - token_amount_check
+  critical_features:
+    - valid_signature_check
+    - nftcommitment_preservation
+    - token_category_check
+  tags: ["cashtokens", "nft_immutable", "family_suite"]
+
+- id: ct_imm_family_002
+  pattern: nft_immutable
+  difficulty: medium
+  intent: |
+    DAO membership badge as an immutable NFT. Only the owner can transfer it. Preserve nftCommitment and tokenCategory on the single output.
+  required_features:
+    - signature_verification
+    - token_category_check
+  critical_features:
+    - nftcommitment_preservation
+    - token_nft_commitment
+  tags: ["cashtokens", "nft_immutable", "family_suite"]
+
+- id: ct_imm_family_003
+  pattern: nft_immutable
+  difficulty: hard
+  intent: |
+    Digital collectible NFT custody: owner signs to move the NFT to a new lockingBytecode destination while preserving category, amount, and commitment.
+  required_features:
+    - signature_verification
+    - token_category_check
+    - token_amount_check
+    - locking_bytecode
+  critical_features:
+    - nftcommitment_preservation
+    - output_lockingbytecode_check
+  tags: ["cashtokens", "nft_immutable", "family_suite"]

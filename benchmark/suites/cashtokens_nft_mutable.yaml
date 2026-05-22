@@ -1,0 +1,41 @@
+# Mutable NFT family — example prompts
+# python -m benchmark.runner benchmark/suites/cashtokens_nft_mutable.yaml
+
+- id: ct_mut_family_001
+  pattern: nft_mutable
+  difficulty: hard
+  intent: |
+    Evolving NFT that levels up: owner updates nftCommitment on spend. Mutable capability (category + 0x01).
+  required_features:
+    - signature_verification
+    - token_category_check
+  critical_features:
+    - capability_byte_match
+    - nftcommitment_preservation
+  tags: ["cashtokens", "nft_mutable", "family_suite"]
+
+- id: ct_mut_family_002
+  pattern: nft_mutable
+  difficulty: hard
+  intent: |
+    Domain registry stored in NFT commitment. Owner may change commitment. Use mutable NFT (0x01 capability suffix).
+  required_features:
+    - signature_verification
+    - token_category_check
+  critical_features:
+    - capability_byte_match
+  tags: ["cashtokens", "nft_mutable", "family_suite"]
+
+- id: ct_mut_family_003
+  pattern: nft_mutable
+  difficulty: hard
+  intent: |
+    DEX vault state in a mutable NFT commitment. Owner updates state while re-anchoring with this.activeBytecode on the change output.
+  required_features:
+    - signature_verification
+    - covenant
+    - token_category_check
+  critical_features:
+    - capability_byte_match
+    - covenant_self_reference
+  tags: ["cashtokens", "nft_mutable", "family_suite", "stateful"]
