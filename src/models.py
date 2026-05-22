@@ -35,6 +35,11 @@ class IntentModel(BaseModel):
     requires_commitment: bool = False
     is_genesis: bool = False
     purpose: str = ""
+    # Semantic constraint layers (v1 — minimal enums)
+    ownership_mode: str = "transferable"
+    lifecycle_mode: str = "persistent"
+    supply_mode: str = "fixed"
+    commitment_schema: str = "opaque"
 
     @field_validator("contract_type", "purpose", mode="before")
     @classmethod
@@ -75,6 +80,34 @@ class IntentModel(BaseModel):
             return int(v)
         except (TypeError, ValueError):
             return None
+
+    @field_validator(
+        "ownership_mode", "lifecycle_mode", "supply_mode", "commitment_schema",
+        mode="before",
+    )
+    @classmethod
+    def validate_semantic_enum(cls, v: Any, info) -> str:
+        allowed = {
+            "ownership_mode": {
+                "transferable", "soulbound", "covenant_retained", "delegated",
+            },
+            "lifecycle_mode": {
+                "persistent", "terminating", "state_transition", "migratory",
+            },
+            "supply_mode": {"fixed", "capped_mint", "burnable", "redeemable"},
+            "commitment_schema": {"opaque", "expiry", "governance"},
+        }
+        field = info.field_name
+        default = {
+            "ownership_mode": "transferable",
+            "lifecycle_mode": "persistent",
+            "supply_mode": "fixed",
+            "commitment_schema": "opaque",
+        }[field]
+        if v is None or v == "":
+            return default
+        val = str(v).lower().strip().replace("-", "_")
+        return val if val in allowed[field] else default
 
 
 # ─── Contract IR (Intermediate Representation) ───────────────────────
