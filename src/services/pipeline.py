@@ -23,6 +23,11 @@ from src.services.llm.factory import LLMFactory
 from src.services.anti_pattern_enforcer import get_anti_pattern_enforcer
 from src.services.rule_engine import get_rule_engine
 from src.services.pattern_profiles import get_pattern_profile, canonical_pattern
+from src.services.semantic_normalization import (
+    apply_semantic_normalization,
+    check_pure_bch_escrow_mismatch,
+)
+from src.services.semantic_profiles import resolve_semantic_profile, semantic_rail_blocks
 from knowledge.golden.registry import GoldenRegistry
 from knowledge.golden.golden_adaptation import verify_anchor_integrity
 from knowledge.golden.golden_prompt import (
@@ -328,7 +333,12 @@ TOKEN SAFETY (Vault hardening):
     on relevant outputs.
 """
 
-def build_pattern_rails(tags: List[str], contract_type: str = "", effective_mode: str = "") -> str:
+def build_pattern_rails(
+    tags: List[str],
+    contract_type: str = "",
+    effective_mode: str = "",
+    intent_model: Optional[IntentModel] = None,
+) -> str:
     rails = []
     mode = (effective_mode or contract_type or "").lower()
     if mode in ("token_ft", "ft_transfer") or "ft" in tags:
@@ -346,6 +356,9 @@ def build_pattern_rails(tags: List[str], contract_type: str = "", effective_mode
     if "escrow" in tags: rails.append(_ESCROW_RAIL)
     if "swap" in tags or "htlc" in tags: rails.append(_SWAP_RAIL)
     if contract_type == "vault": rails.append(_VAULT_RAIL)
+    sem_rails = semantic_rail_blocks(intent_model)
+    if sem_rails:
+        rails.append(sem_rails)
     return "\n".join(rails)
 
 # ─── Structured Knowledge Loader ─────────────────────────────────────
@@ -518,6 +531,15 @@ def build_structured_knowledge(ir: ContractIR) -> str:
     if pattern_layers:
         knowledge["pattern_overlays"] = pattern_layers
 
+    if intent_model and (intent_model.commitment_schema or "opaque") != "opaque":
+        try:
+            schemas = _load_yaml("commitment_schemas.yaml")
+            key = intent_model.commitment_schema
+            if isinstance(schemas, dict) and key in schemas:
+                knowledge["commitment_schema"] = {key: schemas[key]}
+        except Exception:
+            pass
+
     injected_layers = list(knowledge.keys())
     logger.info(
         f"[Phase2] Injected knowledge layers: {injected_layers} "
@@ -689,6 +711,20 @@ class Phase1:
             if normalized_type != current_type:
                 logger.info(f"[Phase1] Golden normalization: '{current_type}' → '{normalized_type}'")
 
+            # Semantic constraint layers (deterministic, post golden/CashToken routing)
+            apply_semantic_normalization(ir.metadata.intent_model, intent_lower)
+            if check_pure_bch_escrow_mismatch(ir.metadata.intent_model, intent_lower):
+                ir.metadata.intent_model.contract_type = "semantic_unsupported"
+                logger.warning("[Phase1] Pure BCH escrow mismatch with token_class — semantic_unsupported")
+            else:
+                profile = resolve_semantic_profile(ir.metadata.intent_model)
+                ir.metadata.effective_mode = resolve_effective_mode(ir.metadata.intent_model)
+                logger.info(
+                    f"[Phase1] Semantic: ownership={profile.ownership_mode} "
+                    f"lifecycle={profile.lifecycle_mode} supply={profile.supply_mode} "
+                    f"commitment={profile.commitment_schema}"
+                )
+
         logger.info(f"Phase 1 complete: type={ir.metadata.intent_model.contract_type if ir.metadata.intent_model else 'unknown'}, tags={tags}")
 
         # Diagnostic log for Phase 1 output
@@ -718,6 +754,11 @@ class Phase2:
 
         intent_model = ir.metadata.intent_model
         contract_type = intent_model.contract_type if intent_model else ""
+
+        if contract_type == "semantic_unsupported":
+            raise ValueError(
+                "semantic_unsupported: token intent conflicts with pure BCH escrow wording"
+            )
 
         # ─── Routing Bridge ────────────────────────────────────────────
         disable_golden = ir.metadata.disable_golden if ir.metadata else False
@@ -1030,6 +1071,11 @@ Rules:
    - `nft_capability`: "none" | "mutable" | "minting"
    - `requires_commitment`: true when NFT commitment must be preserved
    - `is_genesis`: true only for genesis / category creation intents
+8. Semantic constraints (use exact values):
+   - `ownership_mode`: "transferable" | "soulbound" | "covenant_retained" | "delegated"
+   - `lifecycle_mode`: "persistent" | "terminating" | "state_transition" | "migratory"
+   - `supply_mode`: "fixed" | "capped_mint" | "burnable" | "redeemable"
+   - `commitment_schema`: "opaque" | "expiry" | "governance"
 
 User Request: "{intent}"
 
@@ -1044,6 +1090,10 @@ Output ONLY valid JSON:
   "nft_capability": null,
   "requires_commitment": false,
   "is_genesis": false,
+  "ownership_mode": "transferable",
+  "lifecycle_mode": "persistent",
+  "supply_mode": "fixed",
+  "commitment_schema": "opaque",
   "purpose": "..."
 }}
 
@@ -1139,11 +1189,40 @@ def _build_phase2_prompt(
             "DO NOT add lockingBytecode continuity checks."
         )
 
+    if intent_model:
+        lm = (intent_model.lifecycle_mode or "").lower()
+        om = (intent_model.ownership_mode or "").lower()
+        if lm == "terminating":
+            covenant_rule += (
+                " LIFECYCLE=terminating: payout functions MUST NOT use this.activeBytecode; "
+                "enforce exact BCH payout to seller/recipient."
+            )
+        elif lm == "migratory":
+            covenant_rule += (
+                " LIFECYCLE=migratory: transfer uses recipient lockingBytecode; "
+                "no self-anchor on sole output."
+            )
+        elif lm in ("persistent", "state_transition"):
+            covenant_rule += (
+                " LIFECYCLE=state: continuation outputs require "
+                "lockingBytecode == this.activeBytecode."
+            )
+        if om == "soulbound":
+            covenant_rule += (
+                " OWNERSHIP=soulbound: forbid external NFT transfer; "
+                "only commitment updates with self-anchor."
+            )
+        if intent_model.supply_mode in ("burnable", "redeemable"):
+            covenant_rule += (
+                f" SUPPLY={intent_model.supply_mode}: burn path zeros token; no mint."
+            )
+
     unified_rules = build_unified_dsl_rules()
     pattern_rails = build_pattern_rails(
         intent_model.features if intent_model else [],
         contract_type=intent_model.contract_type if intent_model else "",
         effective_mode=effective_mode,
+        intent_model=intent_model,
     )
 
     system_prompt = f"""You are a Secure CashScript Code Generator. Output ONLY compilable CashScript ^0.13.0 code.
@@ -1207,6 +1286,14 @@ def _parse_phase1_response(raw: str, intent: str, security_level: str) -> Contra
                 data["requires_commitment"] = False
             if "is_genesis" not in data:
                 data["is_genesis"] = False
+            for sk, default in (
+                ("ownership_mode", "transferable"),
+                ("lifecycle_mode", "persistent"),
+                ("supply_mode", "fixed"),
+                ("commitment_schema", "opaque"),
+            ):
+                if sk not in data or data[sk] is None:
+                    data[sk] = default
             # Pre-coerce range-like timeouts so Pydantic does not fall back to generic intent.
             td = data.get("timeout_days")
             if isinstance(td, list) and td:

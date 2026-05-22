@@ -76,6 +76,18 @@ class GuardedPipelineEngine:
         if not intent_model:
             return {"type": "error", "error": {"code": "intent_parse_failed", "message": "Failed to parse intent model."}}
 
+        if intent_model.contract_type == "semantic_unsupported":
+            return {
+                "type": "error",
+                "error": {
+                    "code": "semantic_unsupported",
+                    "message": (
+                        "Prompt mixes CashToken class with pure BCH escrow — "
+                        "add explicit NFT/token custody or remove token_class."
+                    ),
+                },
+            }
+
         await _notify("phase1_complete", f"Intent parsed: {intent_model.contract_type} with features {intent_model.features}")
 
         # PHASE 2: Constrained Generation Loop
@@ -118,7 +130,17 @@ class GuardedPipelineEngine:
             max_lint_retries = 3
             for lint_attempt in range(max_lint_retries):
                 await _notify("phase2_linting", f"Running DSL linter (attempt {lint_attempt + 1})...", gen_attempt + 1)
-                lint_result = self.dsl_linter.lint(code, contract_mode=contract_mode)
+                semantic_ctx = None
+                if intent_model:
+                    semantic_ctx = {
+                        "ownership_mode": intent_model.ownership_mode,
+                        "lifecycle_mode": intent_model.lifecycle_mode,
+                        "supply_mode": intent_model.supply_mode,
+                        "commitment_schema": intent_model.commitment_schema,
+                    }
+                lint_result = self.dsl_linter.lint(
+                    code, contract_mode=contract_mode, semantic=semantic_ctx
+                )
                 if lint_result["passed"]:
                     lint_violation_context = ""
                     break

@@ -1,0 +1,19 @@
+opaque:
+  description: Default NFT commitment handling
+  rules:
+    - Preserve nftCommitment on immutable transfers
+    - Mutable paths assign newCommitment explicitly
+
+expiry:
+  description: Time-bound subscription / streaming state in nftCommitment
+  rules:
+    - Store expiry timestamp in nftCommitment or constructor param
+    - Renewal requires require(tx.time >= ...) or commitment compare
+    - Continuation output self-anchors with updated commitment
+
+governance:
+  description: Treasury or governance state in nftCommitment
+  rules:
+    - require(checkSig) or checkMultiSig before commitment update
+    - require(tx.outputs[0].nftCommitment == newTreasuryState)
+    - Self-anchor authority output when state persists in covenant
