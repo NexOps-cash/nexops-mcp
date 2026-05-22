@@ -1,0 +1,6 @@
+pragma cashscript ^0.13.0;
+contract BadP2PKH(bytes20 buyerPkh) {
+    function buy(sig s) {
+        require(tx.outputs[0].lockingBytecode == LockingBytecodeP2PKH(buyerPkh));
+    }
+}

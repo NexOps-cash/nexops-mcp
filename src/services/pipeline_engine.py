@@ -13,6 +13,12 @@ from src.services.language_guard import get_language_guard
 from src.services.compiler import get_compiler_service
 from src.services.sanity_checker import get_sanity_checker
 from src.services.dsl_lint import get_dsl_linter
+from src.services.structural_integrity import (
+    apply_deterministic_micro_fixes,
+    diagnose_structure,
+    is_structurally_valid,
+    save_repair_cycle,
+)
 from pathlib import Path
 from datetime import datetime
 
@@ -29,6 +35,11 @@ class GuardedPipelineEngine:
         self.compiler = get_compiler_service()
         self.sanity_checker = get_sanity_checker()
         self.dsl_linter = get_dsl_linter()
+
+    @staticmethod
+    def _reset_generation_context() -> tuple:
+        """Clear retry state when forcing full regeneration."""
+        return None, ""
 
     async def generate_guarded(
         self, 
@@ -164,6 +175,15 @@ class GuardedPipelineEngine:
                     f"Injecting into Phase2 retry..."
                 )
                 if stuck_lint_repeats >= 2:
+                    if not is_structurally_valid(code):
+                        logger.warning(
+                            "[DSLLint] Stuck lint + structurally invalid code — hard regen"
+                        )
+                        previous_violations, lint_violation_context = (
+                            self._reset_generation_context()
+                        )
+                        lint_proceed_to_compile = False
+                        break
                     logger.warning(
                         "[DSLLint] Same violations repeated — breaking lint loop to compile gate"
                     )
@@ -194,12 +214,31 @@ class GuardedPipelineEngine:
                 else:
                     logger.error("[DSLLint] Lint loop exhausted — forcing full regeneration.")
                     await _notify("phase2_lint_exhausted", "DSL Linting failed to converge. Forcing full regeneration...", gen_attempt + 1, "error")
-                    previous_violations = None
-                    lint_violation_context = ""
+                    previous_violations, lint_violation_context = (
+                        self._reset_generation_context()
+                    )
                     break  # Exit lint loop and trigger full generation retry
 
             # If lint failed after retries, restart generation attempt
             if lint_result and not lint_result["passed"] and not lint_proceed_to_compile:
+                continue
+
+            if lint_proceed_to_compile and not is_structurally_valid(code):
+                logger.warning(
+                    "[DSLLint] Proceed-to-compile blocked: structurally invalid code"
+                )
+                previous_violations, lint_violation_context = (
+                    self._reset_generation_context()
+                )
+                continue
+
+            if not is_structurally_valid(code):
+                logger.warning(
+                    "[StructuralIntegrity] Post-lint code invalid — skipping compile, regen"
+                )
+                previous_violations, lint_violation_context = (
+                    self._reset_generation_context()
+                )
                 continue
 
             # Step 2C: Compile Gate (Internal Fix Loop)
@@ -207,7 +246,21 @@ class GuardedPipelineEngine:
             compile_success = False
             last_error = ""
             
+            case_label = (
+                (intent_model.contract_type or "unknown")
+                if intent_model
+                else "unknown"
+            )
+            compile_aborted_structural = False
+
             for fix_attempt in range(max_fix_retries):
+                if not is_structurally_valid(code):
+                    logger.warning(
+                        "[StructuralIntegrity] Pre-compile structure invalid — abort fix loop"
+                    )
+                    compile_aborted_structural = True
+                    break
+
                 await _notify("phase2_compiling", f"Compiling CashScript (fix attempt {fix_attempt + 1})...", gen_attempt + 1)
                 compile_result = self.compiler.compile(code)
                 
@@ -224,14 +277,33 @@ class GuardedPipelineEngine:
                 logger.warning(f"Compile failed [{error_obj.get('type', 'UnknownError')}]: {raw_error[:120]}. Attempting fix...")
                 await _notify("phase2_compile_fix", f"Syntax error: {raw_error[:60]}... Attempting repair.", gen_attempt + 1, "warning")
 
-                code = await self._request_syntax_fix(
+                pre_code = code
+                diag_pre = diagnose_structure(pre_code)
+                code, aborted = await self._request_syntax_fix(
                     code=code,
                     error_obj=error_obj,
                     ir=ir,
                     api_key=api_key,
                     provider=provider,
-                    openrouter_key=openrouter_key
+                    openrouter_key=openrouter_key,
+                    gen_attempt=gen_attempt,
+                    fix_attempt=fix_attempt,
+                    case_label=case_label,
                 )
+                if aborted:
+                    compile_aborted_structural = True
+                    break
+
+            if compile_aborted_structural or (
+                not compile_success and not is_structurally_valid(code)
+            ):
+                logger.error(
+                    "Compile repair aborted due to structural corruption — full regeneration"
+                )
+                previous_violations, lint_violation_context = (
+                    self._reset_generation_context()
+                )
+                continue
 
             if not compile_success:
                 logger.error(f"Compile loop exhausted after {max_fix_retries} attempts. Retrying full generation...")
@@ -364,77 +436,52 @@ class GuardedPipelineEngine:
         ir: ContractIR,
         api_key: Optional[str] = None,
         provider: Optional[str] = None,
-        openrouter_key: Optional[str] = None
-    ) -> str:
-        """Helper to fix syntax errors. Tries deterministic fixes first, then LLM."""
-        import re as _re
+        openrouter_key: Optional[str] = None,
+        gen_attempt: int = 0,
+        fix_attempt: int = 0,
+        case_label: str = "unknown",
+    ) -> tuple[str, bool]:
+        """
+        Syntax repair: deterministic micro-fixes, then LLM only on structurally valid code.
+        Returns (code, aborted_structural). When aborted, caller must force full regen.
+        """
         import json
-        
-        # Extract fields from structured error dict
-        error_type  = error_obj.get("type", "UnknownError")
-        error_raw   = error_obj.get("raw", "")
-        error_token = error_obj.get("token", "")
-        error_hint  = error_obj.get("hint", "")
-        # ── Deterministic: UnusedVariableError ───────────────────────────────────
-        if error_type == "UnusedVariableError" and error_token:
-            var_name = error_token
-            fixed = _re.sub(
-                rf"^\s*\w[\w\[\]]*\s+{_re.escape(var_name)}\s*=.*?;\s*$",
-                "",
-                code,
-                flags=_re.MULTILINE,
-            )
-            if fixed != code:
-                logger.info(f"[Fix] Deterministic: stripped unused variable '{var_name}' (no LLM call)")
-                return fixed.strip()
-        # ── Deterministic: ExtraneousInputError — missing closing brace ──────────
-        if error_type == "ExtraneousInputError" and error_token == "<EOF>":
-            if code.count("{") > code.count("}"):
-                logger.info("[Fix] Deterministic: adding missing closing brace")
-                return (code + "\n}").strip()
-        # ── Deterministic: Extraneous tx.time / tx.age (malformed timelock) ──────
-        if error_type == "ExtraneousInputError" and error_token in ("tx.time", "tx.age"):
-            fixed = _re.sub(
-                r"require\s*\(\s*(.*?)tx\.(time|age)\s*>=\s*(.*?)&&.*?\);",
-                r"require(tx.\2 >= \3);",
-                code,
-            )
-            if fixed != code:
-                logger.info("[Fix] Deterministic: normalized malformed timelock usage")
-                return fixed.strip()
-        # ── Deterministic: TypeMismatchError — bytes → bytes32 ───────────────────
-        if error_type == "TypeMismatchError" and "bytes32" in error_raw:
-            fixed = _re.sub(r"\bbytes\s+(\w+)", r"bytes32 \1", code)
-            if fixed != code:
-                logger.info("[Fix] Deterministic: upgraded bytes → bytes32")
-                return fixed.strip()
-        # ── Deterministic: ParseError — stray ternary '?' ────────────────────────
-        if error_type == "ParseError" and error_token == "?":
-            fixed = code.replace("?", "")
-            logger.info("[Fix] Deterministic: stripped unsupported ternary '?' token")
-            return fixed.strip()
-        # ── Deterministic: 'Token recognition error at .a' ──────────────────────
-        # AI confuses this.activeBytecode (self-reference) with tx.outputs[N].activeBytecode
-        # (which doesn't exist). The correct output field is .lockingBytecode.
-        # ALSO: The environment (cashc 0.13.0-next.3) often fails on 'tx.age' with '.a' error.
-        if "Token recognition error" in error_raw and ".a" in error_raw:
-            # Fix 1: .activeBytecode misuse on tx objects
-            fixed = _re.sub(r"(\btx\.(?:outputs|inputs)\[[^\]]*\])\s*\.\s*activeBytecode", r"\1.lockingBytecode", code)
-            
-            # Fix 2: tx.age -> this.age (Environment compatibility for 0.13.0-next.3)
-            if "age" in fixed:
-                logger.warning("[Fix] Deterministic: Mapping tx.age -> this.age for environment compatibility")
-                fixed = _re.sub(r"\btx\s*\.\s*age\b", "this.age", fixed)
 
-            if fixed != code:
-                logger.info("[Fix] Deterministic: Replaced .activeBytecode/tx.age with .lockingBytecode/this.age")
-                return fixed.strip()
-        # ── LLM fallback for non-deterministic errors ────────────────────────────
+        pre_code = code
+        diag_pre = diagnose_structure(pre_code)
+        code, repairs = apply_deterministic_micro_fixes(code, error_obj)
+        diag_after_micro = diagnose_structure(code)
+
+        if repairs:
+            logger.info("[Fix] Deterministic micro-fixes: %s", repairs)
+
+        if not diag_after_micro.valid:
+            save_repair_cycle(
+                case_label=case_label,
+                gen_attempt=gen_attempt,
+                fix_attempt=fix_attempt,
+                pre_code=pre_code,
+                post_code=code,
+                diagnostics_pre=diag_pre,
+                diagnostics_post=diag_after_micro,
+                repairs=repairs,
+                error_obj=error_obj,
+                aborted_llm=True,
+            )
+            return pre_code, True
+
+        error_raw = error_obj.get("raw", "")
+        # LockingBytecodeP2PKH undefined — often fixed by micro-fix; if compile still fails, try LLM
+        if "LockingBytecodeP2PKH" in error_raw and "undefined" in error_raw:
+            if diag_after_micro.valid:
+                return code, False
+
         from src.services.llm.factory import LLMFactory
         from src.services.pipeline import build_pattern_rails, build_unified_dsl_rules
-        tags = ir.metadata.intent_model.features if ir.metadata.intent_model else []
-        contract_type = ir.metadata.intent_model.contract_type if ir.metadata.intent_model else ""
-        pattern_rails = build_pattern_rails(tags, contract_type=contract_type)
+        intent_model = ir.metadata.intent_model
+        tags = intent_model.features if intent_model else []
+        contract_type = intent_model.contract_type if intent_model else ""
+        pattern_rails = build_pattern_rails(tags, contract_type=contract_type, intent_model=intent_model)
         unified_rules = build_unified_dsl_rules()
 
         system = f"""You are performing CashScript syntax repair ONLY.
@@ -466,7 +513,26 @@ Return ONLY the complete fixed .cash source."""
         raw_response = await llm.complete(user, system=system)
 
         from src.services.pipeline import _extract_cash_code
-        return _extract_cash_code(raw_response)
+        post_code = _extract_cash_code(raw_response)
+        diag_post = diagnose_structure(post_code)
+        save_repair_cycle(
+            case_label=case_label,
+            gen_attempt=gen_attempt,
+            fix_attempt=fix_attempt,
+            pre_code=pre_code,
+            post_code=post_code,
+            diagnostics_pre=diag_pre,
+            diagnostics_post=diag_post,
+            repairs=repairs + ["llm_syntax_fix"],
+            error_obj=error_obj,
+            aborted_llm=not diag_post.valid,
+        )
+        if not diag_post.valid:
+            logger.warning(
+                "[StructuralIntegrity] LLM repair produced invalid structure — rejecting"
+            )
+            return pre_code, True
+        return post_code, False
 
 def get_guarded_pipeline_engine() -> GuardedPipelineEngine:
     return GuardedPipelineEngine()

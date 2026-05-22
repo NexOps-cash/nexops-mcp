@@ -1,0 +1,9 @@
+pragma cashscript ^0.13.0;
+contract BadTrunc(pubkey buyer, pubkey seller, pubkey arbiter) {
+    function purchase(sig buyerSig, sig sellerSig) {
+        require(checkSig(buyerSig, buyer));
+    }
+
+    function dispute(sig buyerSig, sig arbiterSig) {
+        require(buyer != seller);
+        require(

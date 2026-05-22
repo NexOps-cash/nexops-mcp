@@ -1,0 +1,5 @@
+pragma cashscript ^0.13.0;
+contract BadRequire(pubkey buyer, pubkey seller) {
+    function purchase(sig buyerSig, sig sellerSig) {
+        require(checkSig(buyerSig, buyer));
+        require(
