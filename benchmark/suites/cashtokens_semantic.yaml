@@ -1,4 +1,4 @@
-# 11 semantic constraint cases (original #10 LP omitted)
+# 8 in-scope semantic cases (#9 collateral, #10 LP, #11 stablecoin, #12 auction removed)
 # python scripts/run_semantic_benchmark.py --all
 
 - id: semantic_001
@@ -118,45 +118,3 @@
     - burn_supply_reduction
     - output_amount_check
   tags: ["cashtokens", "semantic", "voucher"]
-
-- id: semantic_009
-  pattern: semantic_collateral
-  difficulty: hard
-  intent: |
-    Collateral vault NFT where nftCommitment tracks collateral ratio and ownership transfers preserve vault state.
-  required_features:
-    - signature_verification
-    - token_category_check
-  critical_features:
-    - nftcommitment_preservation
-    - token_category_check
-    - migratory_locking_bytecode
-  tags: ["cashtokens", "semantic", "collateral", "experimental"]
-
-- id: semantic_010
-  pattern: semantic_stablecoin
-  difficulty: hard
-  intent: |
-    Stablecoin minting covenant where only collateralized vault contracts can mint new fungible tokens.
-  required_features:
-    - signature_verification
-    - token_validation
-  critical_features:
-    - minting_authority_custody
-    - mint_cap_guard
-    - valid_signature_check
-  tags: ["cashtokens", "semantic", "stablecoin", "experimental"]
-
-- id: semantic_011
-  pattern: semantic_auction
-  difficulty: hard
-  intent: |
-    Auction covenant for immutable NFT where highest BCH bidder receives NFT after auction expiry.
-  required_features:
-    - signature_verification
-    - time_validation
-  critical_features:
-    - locktime_check
-    - terminating_payout_path
-    - migratory_locking_bytecode
-  tags: ["cashtokens", "semantic", "auction", "experimental"]

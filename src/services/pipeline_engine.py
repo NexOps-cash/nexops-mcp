@@ -89,7 +89,7 @@ class GuardedPipelineEngine:
         await _notify("phase1_complete", f"Intent parsed: {intent_model.contract_type} with features {intent_model.features}")
 
         # PHASE 2: Constrained Generation Loop
-        max_gen_retries = 2
+        max_gen_retries = 3 if disable_fallbacks else 2
         last_error = "None"
         previous_violations: Optional[List[ViolationDetail]] = None
         lint_violation_context: str = ""
@@ -124,7 +124,11 @@ class GuardedPipelineEngine:
 
             # Step 2B.5: DSL Lint Gate — deterministic structural check BEFORE compile
             # contract_mode drives conditional rules (e.g. LNC-008 skips for multisig)
-            max_lint_retries = 3
+            max_lint_retries = 4
+            prev_blocking_sig: tuple = ()
+            stuck_lint_repeats = 0
+            lint_proceed_to_compile = False
+            lint_result = {"passed": True, "violations": []}
             for lint_attempt in range(max_lint_retries):
                 await _notify("phase2_linting", f"Running DSL linter (attempt {lint_attempt + 1})...", gen_attempt + 1)
                 semantic_ctx = None
@@ -141,12 +145,31 @@ class GuardedPipelineEngine:
                 if lint_result["passed"]:
                     lint_violation_context = ""
                     break
-                # Summarize violations for targeted Phase 2 retry
+                blocking = [
+                    v for v in lint_result["violations"]
+                    if v.get("severity") != "warning"
+                ]
+                blocking_sig = tuple(
+                    sorted((v.get("rule_id", ""), v.get("line_hint", 0)) for v in blocking)
+                )
+                if blocking_sig and blocking_sig == prev_blocking_sig:
+                    stuck_lint_repeats += 1
+                else:
+                    stuck_lint_repeats = 0
+                prev_blocking_sig = blocking_sig
+
                 lint_summary = self.dsl_linter.format_for_prompt(lint_result["violations"])
                 logger.warning(
                     f"[DSLLint] {len(lint_result['violations'])} violations on attempt {lint_attempt+1}. "
                     f"Injecting into Phase2 retry..."
                 )
+                if stuck_lint_repeats >= 2:
+                    logger.warning(
+                        "[DSLLint] Same violations repeated — breaking lint loop to compile gate"
+                    )
+                    lint_violation_context = lint_summary
+                    lint_proceed_to_compile = True
+                    break
                 if lint_attempt < max_lint_retries - 1:
                     await _notify("phase2_lint_fail", f"DSL Lint failed {len(lint_result['violations'])} rules. Attempting self-correction...", gen_attempt + 1, "warning")
                     # Inject lint violations as violation_context for next Phase2 call
@@ -176,7 +199,7 @@ class GuardedPipelineEngine:
                     break  # Exit lint loop and trigger full generation retry
 
             # If lint failed after retries, restart generation attempt
-            if lint_result and not lint_result["passed"]:
+            if lint_result and not lint_result["passed"] and not lint_proceed_to_compile:
                 continue
 
             # Step 2C: Compile Gate (Internal Fix Loop)

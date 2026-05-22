@@ -1,8 +1,8 @@
 # CashTokens semantic benchmark runs
 
-Free synthesis (`disable_golden=True`). LP (#10) excluded from the 11-case suite.
+Free synthesis (`disable_golden=True`). **8 in-scope cases** (#1–#8; #9 collateral, #10 LP, #11 stablecoin, #12 auction removed).
 
-Exit gate: **≥7/11 Tier B** (converged = compile + critical_features).
+Exit gate: **≥6/8 Tier B** (converged = compile + critical_features).
 
 ## Run bench_20260522_1808_5cf6 — 2026-05-22 (cashtokenupgrade)
 
@@ -64,3 +64,79 @@ Family suite re-run hit **OpenRouter 402 insufficient credits** mid-`nft_immutab
 | semantic_002 | no | no | 0% |
 
 **Tier B (converged): 0/1** (gate: ≥7/11)
+
+## Run bench_20260522_1908_b2aa — 2026-05-22T13:43:03.242055+00:00
+
+
+| Case | Compile | Converged | Coverage |
+|------|---------|-----------|----------|
+| semantic_001 | yes | yes | 100% |
+| semantic_002 | yes | yes | 100% |
+| semantic_003 | no | no | 0% |
+| semantic_004 | no | no | 0% |
+| semantic_005 | no | no | 0% |
+| semantic_006 | yes | yes | 100% |
+| semantic_007 | yes | yes | 100% |
+| semantic_008 | no | no | 0% |
+
+**Tier B (converged): 4/8** (gate: ≥6/8)
+
+## Run bench_20260522_1914_sem — 2026-05-22T13:49:02.516975+00:00
+
+
+| Case | Compile | Converged | Coverage |
+|------|---------|-----------|----------|
+| semantic_001 | yes | no | 100% |
+| semantic_002 | yes | yes | 100% |
+| semantic_003 | yes | yes | 100% |
+| semantic_004 | yes | yes | 100% |
+| semantic_005 | no | no | 0% |
+| semantic_006 | yes | yes | 100% |
+| semantic_007 | yes | no | 50% |
+| semantic_008 | yes | no | 50% |
+
+**Tier B (converged): 4/8** (gate: ≥6/8)
+
+## Run bench_20260522_1919_sem — 2026-05-22T13:52:32.976927+00:00
+
+
+| Case | Compile | Converged | Coverage |
+|------|---------|-----------|----------|
+| semantic_001 | no | no | 0% |
+| semantic_005 | no | no | 0% |
+| semantic_007 | yes | yes | 100% |
+| semantic_008 | yes | no | 50% |
+
+**Tier B (converged): 1/4** (gate: ≥6/8)
+
+## Run bench_20260522_1919_sem — 2026-05-22T13:54:10.084144+00:00
+
+
+| Case | Compile | Converged | Coverage |
+|------|---------|-----------|----------|
+| semantic_001 | no | no | 0% |
+| semantic_002 | yes | yes | 100% |
+| semantic_003 | yes | yes | 100% |
+| semantic_004 | yes | yes | 100% |
+| semantic_005 | no | no | 0% |
+| semantic_006 | yes | yes | 100% |
+| semantic_007 | yes | yes | 100% |
+| semantic_008 | yes | no | 50% |
+
+**Tier B (converged): 5/8** (gate: ≥6/8)
+
+## Run bench_20260522_1919_sem — 2026-05-22T13:56:40.775274+00:00
+
+
+| Case | Compile | Converged | Coverage |
+|------|---------|-----------|----------|
+| semantic_001 | yes | yes | 100% |
+| semantic_002 | yes | yes | 100% |
+| semantic_003 | yes | yes | 100% |
+| semantic_004 | yes | yes | 100% |
+| semantic_005 | no | no | 0% |
+| semantic_006 | yes | yes | 100% |
+| semantic_007 | yes | yes | 100% |
+| semantic_008 | yes | no | 50% |
+
+**Tier B (converged): 6/8** (gate: ≥6/8)

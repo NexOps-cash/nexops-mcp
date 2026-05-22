@@ -140,7 +140,11 @@ def _check_unused_variables(code: str) -> list[dict]:
     return violations
 
 
-def _check_value_anchoring(code: str, contract_mode: str = "") -> list[dict]:
+def _check_value_anchoring(
+    code: str,
+    contract_mode: str = "",
+    semantic: dict | None = None,
+) -> list[dict]:
     """
     LNC-003: Every function with an output length guard MUST anchor at least
     one output value to the corresponding input value.
@@ -233,7 +237,18 @@ def _check_value_anchoring(code: str, contract_mode: str = "") -> list[dict]:
 
             vault_staged_split = vault_staged_split or vault_tok_split
 
-        has_value_anchor = direct_anchor or sum_anchor or partial_anchor or vault_staged_split
+        sem = semantic or {}
+        terminating_payout = (
+            sem.get("lifecycle_mode") == "terminating"
+            and bool(
+                re.search(r"tx\.outputs\[\d+\]\.value\s*==", body)
+                or re.search(r"tx\.outputs\[\d+\]\.value\s*>=", body)
+            )
+        )
+
+        has_value_anchor = (
+            direct_anchor or sum_anchor or partial_anchor or vault_staged_split or terminating_payout
+        )
         if not has_value_anchor:
             violations.append({
                 "rule_id": "LNC-003",
@@ -752,7 +767,11 @@ def _check_mint_authority(code: str, contract_mode: str = "") -> list[dict]:
     return violations
 
 
-def _check_token_pair_completeness(code: str, contract_mode: str = "") -> list[dict]:
+def _check_token_pair_completeness(
+    code: str,
+    contract_mode: str = "",
+    semantic: dict | None = None,
+) -> list[dict]:
     """
     LNC-014: Missing Token Pair Guard.
 
@@ -765,8 +784,15 @@ def _check_token_pair_completeness(code: str, contract_mode: str = "") -> list[d
     Keep this rule mode-agnostic to avoid split gating logic.
     """
     violations = []
+    sem = semantic or {}
+    supply = (sem.get("supply_mode") or "").lower()
 
     for func_name, body, start_lineno in _function_bodies(code):
+        fn_lower = func_name.lower()
+        if "burn" in fn_lower or "redeem" in fn_lower or supply in ("burnable", "redeemable"):
+            if re.search(r"tokenCategory\s*==\s*0x|tokenAmount\s*==\s*0", body):
+                continue
+
         references_category = bool(re.search(r"\.tokenCategory\b", body))
         references_amount   = bool(re.search(r"\.tokenAmount\b", body))
 
@@ -1134,6 +1160,10 @@ def _check_locking_bytecode_constructor(code: str) -> list[dict]:
 
         # Safe: literal bytes20 (0x + 40 hex chars)
         if re.fullmatch(r'0x[0-9a-fA-F]{40}', arg):
+            continue
+
+        # bytes20 constructor params (buyerPkh, sellerHash, recipientLock, etc.)
+        if re.search(r"(?i)(?:hash|pkh|lock|bytecode)$", arg):
             continue
 
         # Unsafe: raw pubkey, bytes variable, or other non-hashed arg

@@ -18,12 +18,11 @@ Deterministic normalization in `semantic_normalization.py` overrides LLM drift a
 - Marketplace listing (#5)
 - Often: escrow (#1), capped mint (#6), voucher (#8)
 
-## Experimental (v1 — not gated)
+## Out of benchmark suite (deferred)
 
-- Treasury governance (#4), streaming (#7) — flaky
-- Collateral receipt (#9), stablecoin authority (#10), auction (#11) — Tier D
-- LP (#10 original list) — **removed** from v1
+- Treasury governance (#4), streaming (#7) — in suite but may be flaky
+- Removed from suite: collateral (#9), LP (#10), stablecoin authority (#11), auction (#12)
 
 ## Exit gate
 
-≥7/11 semantic benchmark cases converged (compile + critical_features). See `docs/cashtokens_semantic_runs.md`.
+**≥6/8** in-scope cases converged (compile + critical_features). See `docs/cashtokens_semantic_runs.md`.

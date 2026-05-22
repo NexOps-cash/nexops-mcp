@@ -95,6 +95,7 @@ def semantic_rail_blocks(intent_model: Optional[IntentModel]) -> str:
             "[RAIL: TERMINATING LIFECYCLE]\n"
             "- Payout/claim functions: DO NOT use this.activeBytecode on payout output;\n"
             "- Require BCH value checks to seller/recipient;\n"
+            "- LockingBytecodeP2PKH: use hash160(pubkey) OR bytes20 param (buyerPkh/sellerPkh);\n"
         )
     if lm == "migratory":
         blocks.append(
