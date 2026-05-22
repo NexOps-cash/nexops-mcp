@@ -26,14 +26,15 @@ def test_soulbound_keywords():
     assert m.token_class == "nft_mutable"
 
 
-def test_markplace_terminating():
+def test_marketplace_migratory():
     m = _model()
     apply_semantic_normalization(
         m,
         "marketplace covenant that locks immutable nft until buyer pays exact bch amount to seller",
     )
-    assert m.lifecycle_mode in ("terminating", "migratory")
+    assert m.lifecycle_mode == "migratory"
     assert m.ownership_mode == "transferable"
+    assert "marketplace" in m.features
 
 
 def test_burnable_ft():

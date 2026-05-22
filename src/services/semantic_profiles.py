@@ -119,6 +119,16 @@ def semantic_rail_blocks(intent_model: Optional[IntentModel]) -> str:
         blocks.append(
             "[RAIL: REDEEMABLE]\n"
             "- Redeem: burn token + BCH payout; terminating lifecycle;\n"
+            "- require(tx.inputs[...].tokenCategory == expectedCategory);\n"
+            "- Burn: require(tx.outputs[0].tokenCategory == 0x); prefer tokenAmount == 0;\n"
+        )
+    if intent_model.features and "marketplace" in intent_model.features:
+        blocks.append(
+            "[RAIL: MARKETPLACE 2-PARTY]\n"
+            "- Simple purchase: buyer pays seller exact BCH; NFT migrates to buyer locking bytecode;\n"
+            "- FORBID arbiter, dispute, or 2-of-3 escrow branches unless intent explicitly requests them;\n"
+            "- Use bytes20 buyerPkh and sellerPkh constructor params;\n"
+            "- Prefer require(tx.outputs[N].lockingBytecode == new LockingBytecodeP2PKH(buyerPkh));\n"
         )
     if sm == "capped_mint":
         blocks.append(

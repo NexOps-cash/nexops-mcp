@@ -290,6 +290,13 @@ class BenchmarkEvaluator:
                     or "timelock_refund" in detected
                     or ("this.age" in code)
                 )
+                def _redeemable_category_burn_validation(src: str) -> bool:
+                    """FT redeem via output tokenCategory == 0x with constrained input category."""
+                    return bool(
+                        re.search(r"tx\.inputs\[[^\]]+\]\.tokenCategory\s*==", src)
+                        and re.search(r"tx\.outputs\[\d+\]\.tokenCategory\s*==\s*0x", src)
+                    )
+
                 capabilities = {
                     "signature_verification": any("_signature" in f or f == "multisig" for f in detected),
                     "covenant_continuation": any(f.get("has_anchor") and f.get("has_value_check") for f in functions if f["role"] == "INTERMEDIATE"),
@@ -308,6 +315,8 @@ class BenchmarkEvaluator:
                 def requirement_satisfied(req: str) -> bool:
                     # Direct capability or feature hit first.
                     if capabilities.get(req) or req in detected:
+                        return True
+                    if req == "token_validation" and _redeemable_category_burn_validation(code):
                         return True
 
                     pattern_key = (case.pattern or "").strip()

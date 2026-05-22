@@ -51,6 +51,13 @@ def apply_lifecycle_semantics(intent_model: IntentModel, intent_lower: str) -> N
     if any(w in intent_lower for w in ("vault", "covenant retains", "stays in covenant", "self-anchor")):
         if intent_model.lifecycle_mode == "persistent" or intent_model.ownership_mode == "covenant_retained":
             intent_model.lifecycle_mode = "persistent"
+    # Marketplace immutable NFT purchase → migratory (NFT to buyer after payment)
+    if (
+        "marketplace" in intent_lower
+        and "immutable" in intent_lower
+        and ("buyer pays" in intent_lower or "until buyer pays" in intent_lower)
+    ):
+        intent_model.lifecycle_mode = "migratory"
 
 
 def apply_supply_semantics(intent_model: IntentModel, intent_lower: str) -> None:
@@ -106,6 +113,9 @@ def _semantic_cashtoken_adjust(intent_model: IntentModel, intent_lower: str) -> 
             intent_model.features = list(intent_model.features) + ["burn"]
         return
 
+    if "marketplace" in intent_lower:
+        if "marketplace" not in intent_model.features:
+            intent_model.features = list(intent_model.features) + ["marketplace"]
     if any(w in intent_lower for w in ("marketplace", "nft escrow", "escrow")) and any(
         s in intent_lower for s in _NFT_SIGNALS
     ):
