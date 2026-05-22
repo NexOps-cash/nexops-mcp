@@ -26,3 +26,13 @@ Deterministic normalization in `semantic_normalization.py` overrides LLM drift a
 ## Exit gate
 
 **≥6/8** in-scope cases converged (compile + critical_features). See `docs/cashtokens_semantic_runs.md`.
+
+## Wave 1 freeze (stabilization)
+
+Semantic expansion is **paused**. No new semantic fields, LP/proportional supply, authority-model expansion, or cross-contract reasoning until:
+
+- `semantic_005` compiles consistently (structural repair + marketplace rail)
+- `semantic_008` reaches Tier B (evaluator redeem burn calibration)
+- Family benchmarks show no regression
+
+Pipeline focus: `structural_integrity.py`, compile-repair observability under `benchmark/results/repair_debug/`, and `tests/test_structural_integrity.py`. See `docs/semantic_005_008_investigation.md`.
