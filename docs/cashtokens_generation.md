@@ -31,6 +31,18 @@ Routing is deterministic in `apply_cashtoken_intent_routing()` (immutable → hy
 - **Minting / hybrid** may need retries on hard intents; use `security_level="high"` and golden templates when available.
 - **Golden adaptation** applies only to registered templates under `knowledge/golden/patterns/`.
 
+## CLI: prompt → generated contract
+
+From `nexops-mcp/` with API keys in `.env`:
+
+```powershell
+python scripts/generate.py "PFP drop: minting authority 0x02 must stay in this.activeBytecode"
+python scripts/generate.py -p "loyalty points fungible token transfer" --out Loyalty.cash
+python scripts/generate.py -p "stateful token vault five-point covenant" --code-only
+```
+
+Use `--golden` to enable golden templates (default is free synthesis, same as the benchmark).
+
 ## Reproduce benchmark numbers
 
 From `nexops-mcp/` with API keys in `.env` (`OPENROUTER_API_KEY` or `GROQ_API_KEY`):
