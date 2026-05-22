@@ -30,7 +30,6 @@ class EditAgent:
         # BYOK Extraction
         api_key = request.context.get("api_key") if request.context else None
         provider = request.context.get("provider") if request.context else None
-        groq_key = request.context.get("groq_key") if request.context else None
         openrouter_key = request.context.get("openrouter_key") if request.context else None
 
         # ── 1. Build the strict system prompt ──
@@ -69,7 +68,6 @@ Apply the edit according to the constraints and return the complete raw code."""
             "edit", 
             api_key=api_key, 
             provider_type=provider,
-            groq_key=groq_key,
             openrouter_key=openrouter_key
         )
 
@@ -87,7 +85,6 @@ Apply the edit according to the constraints and return the complete raw code."""
                 effective_mode=effective_mode, 
                 api_key=api_key, 
                 provider=provider,
-                groq_key=groq_key,
                 openrouter_key=openrouter_key
             )
             return EditResponse(
@@ -104,7 +101,6 @@ Apply the edit according to the constraints and return the complete raw code."""
                 effective_mode=effective_mode, 
                 api_key=api_key, 
                 provider=provider,
-                groq_key=groq_key,
                 openrouter_key=openrouter_key
             )
             return EditResponse(
@@ -129,7 +125,6 @@ Apply the edit according to the constraints and return the complete raw code."""
             effective_mode=effective_mode, 
             api_key=api_key, 
             provider=provider,
-            groq_key=groq_key,
             openrouter_key=openrouter_key
         )
 

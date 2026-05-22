@@ -22,7 +22,7 @@ async def test_byok_propagation_generate():
             request_id="test-gen",
             action="generate",
             payload={"user_request": "test", "session_id": "s1"},
-            context={"api_key": "key123", "provider": "groq"}
+            context={"api_key": "key123", "provider": "openrouter"}
         )
         with patch("src.services.pipeline.Phase1.run", new_callable=AsyncMock) as p1, \
              patch("src.services.pipeline.Phase2.run", new_callable=AsyncMock) as p2, \
@@ -39,7 +39,7 @@ async def test_byok_propagation_generate():
             controller.session_mgr = MagicMock()
             await controller.generate(req)
             
-            p1.assert_called_with("test", "high", api_key="key123", provider="groq")
+            p1.assert_called_with("test", "high", api_key="key123", provider="openrouter")
             p2.assert_called()
             assert p2.call_args.kwargs["api_key"] == "key123"
 
@@ -89,5 +89,5 @@ async def test_byok_propagation_fix_loop():
     
     with patch("src.services.llm.factory.LLMFactory.get_provider", return_value=mock_provider) as mock_get_provider:
         ir = ContractIR()
-        await engine._request_syntax_fix(code="err", error_obj={"type": "ParseError"}, ir=ir, api_key="fix-key", provider="groq")
-        mock_get_provider.assert_called_with("fix", api_key="fix-key", provider_type="groq")
+        await engine._request_syntax_fix(code="err", error_obj={"type": "ParseError"}, ir=ir, api_key="fix-key", provider="openrouter")
+        mock_get_provider.assert_called_with("fix", api_key="fix-key", provider_type="openrouter")

@@ -10,7 +10,7 @@ Exit gate: **≥7/11 Tier B** (converged = compile + critical_features).
 |------|---------|-----------|----------|-------|
 | semantic_001 | yes | no | 100% | Tier B: missing critical payout/migratory checks in codegen |
 | semantic_002 | yes | no | 50% | Soulbound path; evaluator tightened post-run |
-| semantic_003–011 | no | no | 0% | LLM fallback exhaustion (OpenRouter 402 / Groq) after case 2 |
+| semantic_003–011 | no | no | 0% | OpenRouter 402 insufficient credits after case 2 |
 
 **Tier B (converged): 0/11** on this run — infrastructure-limited, not semantic-layer complete.
 
@@ -31,7 +31,7 @@ Exit gate: **≥7/11 Tier B** (converged = compile + critical_features).
 | 11 | Stablecoin | Not v1 | API fail |
 | 12 | Auction | Not v1 | API fail |
 
-Re-run when OpenRouter/Groq credits are available: `python scripts/run_semantic_benchmark.py --all`
+Re-run when OpenRouter credits are available: `python scripts/run_semantic_benchmark.py --all`
 
 ### Family regression (same session)
 

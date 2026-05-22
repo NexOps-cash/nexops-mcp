@@ -561,7 +561,6 @@ class Phase1:
         security_level: str = "high",
         api_key: Optional[str] = None,
         provider: Optional[str] = None,
-        groq_key: Optional[str] = None,
         openrouter_key: Optional[str] = None,
         disable_golden: bool = False,
         disable_fallbacks: bool = False
@@ -574,7 +573,6 @@ class Phase1:
             "phase1",
             api_key=api_key,
             provider_type=provider,
-            groq_key=groq_key,
             openrouter_key=openrouter_key
         )
         raw_response = await llm.complete(prompt)
@@ -747,7 +745,6 @@ class Phase2:
         temperature: float = 0.3,
         api_key: Optional[str] = None,
         provider: Optional[str] = None,
-        groq_key: Optional[str] = None,
         openrouter_key: Optional[str] = None
     ) -> str:
         """Stage 2A: Generate .cash code from structured IntentModel."""
@@ -770,7 +767,6 @@ class Phase2:
                 contract_type=contract_type,
                 api_key=api_key,
                 openrouter_key=openrouter_key,
-                groq_key=groq_key,
             )
         else:
             logger.info(f"[Phase 2] Routing: FREE_SYNTHESIS (type={contract_type})")
@@ -781,7 +777,6 @@ class Phase2:
                 temperature=temperature,
                 api_key=api_key,
                 provider=provider,
-                groq_key=groq_key,
                 openrouter_key=openrouter_key
             )
 
@@ -796,7 +791,6 @@ async def _golden_phase2(
     contract_type: str,
     api_key: Optional[str] = None,
     openrouter_key: Optional[str] = None,
-    groq_key: Optional[str] = None,
 ) -> str:
     """
     Golden adaptation branch.
@@ -837,7 +831,6 @@ async def _golden_phase2(
         "golden",
         api_key=api_key,
         openrouter_key=openrouter_key,
-        groq_key=groq_key,
     )
 
     last_raw   = ""
@@ -907,7 +900,6 @@ async def _free_phase2(
     temperature: float,
     api_key: Optional[str],
     provider: Optional[str],
-    groq_key: Optional[str],
     openrouter_key: Optional[str],
 ) -> str:
     """Free synthesis branch. Uses LLM to generate from scratch."""
@@ -945,8 +937,7 @@ async def _free_phase2(
         "phase2",
         api_key=api_key,
         provider_type=provider,
-        groq_key=groq_key,
-        openrouter_key=openrouter_key
+        openrouter_key=openrouter_key,
     )
     raw_response = await llm.complete(user_prompt, system=system_prompt, temperature=temperature)
 

@@ -38,9 +38,9 @@ async def main():
     intent = sys.argv[1] if len(sys.argv) > 1 else "Create a 2-of-2 escrow with timeout"
     
     # 2. Check for API keys
-    if not os.getenv("OPENROUTER_API_KEY") and not os.getenv("GROQ_API_KEY"):
+    if not os.getenv("OPENROUTER_API_KEY"):
         print("[FAIL] ERROR: No API keys found.")
-        print("Please set OPENROUTER_API_KEY or GROQ_API_KEY in your environment.")
+        print("Please set OPENROUTER_API_KEY in your environment.")
         return
 
     print(f"\n[START] Starting Generation Pipeline for:")

@@ -37,7 +37,6 @@ class GuardedPipelineEngine:
         on_update: Optional[Any] = None,
         api_key: Optional[str] = None,
         provider: Optional[str] = None,
-        groq_key: Optional[str] = None,
         openrouter_key: Optional[str] = None,
         disable_golden: bool = False,
         disable_fallbacks: bool = False
@@ -63,7 +62,6 @@ class GuardedPipelineEngine:
             security_level, 
             api_key=api_key, 
             provider=provider,
-            groq_key=groq_key,
             openrouter_key=openrouter_key,
             disable_golden=disable_golden,
             disable_fallbacks=disable_fallbacks
@@ -105,7 +103,6 @@ class GuardedPipelineEngine:
                 retry_count=gen_attempt, 
                 api_key=api_key, 
                 provider=provider,
-                groq_key=groq_key,
                 openrouter_key=openrouter_key
             )
 
@@ -169,7 +166,6 @@ class GuardedPipelineEngine:
                         retry_count=gen_attempt, 
                         api_key=api_key, 
                         provider=provider,
-                        groq_key=groq_key,
                         openrouter_key=openrouter_key
                     )
                 else:
@@ -211,7 +207,6 @@ class GuardedPipelineEngine:
                     ir=ir,
                     api_key=api_key,
                     provider=provider,
-                    groq_key=groq_key,
                     openrouter_key=openrouter_key
                 )
 
@@ -346,7 +341,6 @@ class GuardedPipelineEngine:
         ir: ContractIR,
         api_key: Optional[str] = None,
         provider: Optional[str] = None,
-        groq_key: Optional[str] = None,
         openrouter_key: Optional[str] = None
     ) -> str:
         """Helper to fix syntax errors. Tries deterministic fixes first, then LLM."""
@@ -444,7 +438,6 @@ Return ONLY the complete fixed .cash source."""
             "fix", 
             api_key=api_key, 
             provider_type=provider,
-            groq_key=groq_key,
             openrouter_key=openrouter_key
         )
         raw_response = await llm.complete(user, system=system)

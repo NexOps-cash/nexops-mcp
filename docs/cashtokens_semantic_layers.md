@@ -9,7 +9,7 @@ NexOps Phase 1 extracts four composable fields on `IntentModel`:
 | `supply_mode` | fixed, capped_mint, burnable, redeemable |
 | `commitment_schema` | opaque, expiry, governance |
 
-Deterministic normalization in `semantic_normalization.py` overrides LLM drift after CashToken class routing. `resolve_semantic_constraints()` in `semantic_profiles.py` resolves known conflicts (e.g. soulbound + migratory → state_transition).
+Deterministic normalization in `semantic_normalization.py` overrides LLM drift after CashToken class routing. Phase 1 uses **Claude Haiku 4.5** on OpenRouter by default for sharper tag/semantic JSON. `resolve_semantic_constraints()` in `semantic_profiles.py` resolves known conflicts (e.g. soulbound + migratory → state_transition).
 
 ## Supported for demos (target Tier B)
 
