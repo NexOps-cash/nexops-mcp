@@ -896,6 +896,38 @@ class MultisigSignatureReuseDetector(AntiPatternDetector):
         return None
 
 
+class MintingAuthorityEscapeDetector(AntiPatternDetector):
+    """Detect minting NFT (0x02) outputs not bound to this.activeBytecode."""
+
+    id = "minting_authority_escape"
+
+    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        import re
+        mode = ast.contract_mode
+        mint_modes = {
+            "nft_minting", "nft_minting_authority", "minting", "token", "token_ft", "",
+        }
+        if mode not in mint_modes and "0x02" not in ast.code:
+            return None
+        if not re.search(r"0x02", ast.code):
+            return None
+        if re.search(
+            r"lockingBytecode\s*==\s*this\.activeBytecode",
+            ast.code,
+        ):
+            return None
+        return Violation(
+            rule=self.id,
+            reason="Minting capability (0x02) present without lockingBytecode custody on this.activeBytecode",
+            exploit="If the minting authority NFT leaves the contract, anyone holding it can mint "
+                    "unlimited child NFTs for the category — total token system compromise.",
+            location={"line": 0, "function": "all"},
+            severity="critical",
+            issue_class="real_issue",
+            exploit_severity="direct_fund_loss",
+        )
+
+
 # Registry of all detectors
 DETECTOR_REGISTRY = [
     ImplicitOutputOrderingDetector(),
@@ -919,7 +951,8 @@ DETECTOR_REGISTRY = [
     WeakOutputLimitDetector(),
     TautologicalGuardDetector(),
     InvalidLockingBytecodeSelfComparisonDetector(),
-    MultisigSignatureReuseDetector()
+    MultisigSignatureReuseDetector(),
+    MintingAuthorityEscapeDetector(),
 ]
 
 

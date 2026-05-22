@@ -1,0 +1,230 @@
+# CashTokens generation benchmark — run before/after cashtokenupgrade
+# python -m benchmark.runner benchmark/suites/cashtokens.yaml
+
+- id: ct_ft_001
+  pattern: token_ft
+  difficulty: medium
+  intent: |
+    Create a loyalty points transfer contract. Users hold pre-minted fungible tokens
+    and can send tokens to a recipient with their owner signature. Preserve token
+    category and amount from the active input to the payout output.
+  required_features:
+    - signature_verification
+    - token_category_check
+    - token_amount_check
+    - output_destination_validation
+  critical_features:
+    - valid_signature_check
+    - token_category_check
+    - token_amount_check
+  expected_structure:
+    require_count_min: 4
+  tags: ["cashtokens", "ft"]
+
+- id: ct_ft_002
+  pattern: token_ft
+  difficulty: medium
+  intent: |
+    Build a contract to transfer in-game gold (fungible CashTokens) to another player.
+    Require owner signature and enforce tokenCategory and tokenAmount preservation
+    on the recipient output.
+  required_features:
+    - signature_verification
+    - token_category_check
+    - token_amount_check
+  critical_features:
+    - valid_signature_check
+    - token_category_check
+  tags: ["cashtokens", "ft"]
+
+- id: ct_ft_003
+  pattern: token_ft
+  difficulty: hard
+  intent: |
+    Split a fungible token UTXO into two outputs: half to recipient A and half to
+    recipient B. Sum of output tokenAmounts must equal the input tokenAmount.
+    Owner must sign.
+  required_features:
+    - signature_verification
+    - token_category_check
+    - token_amount_check
+  critical_features:
+    - token_category_check
+    - token_amount_check
+  tags: ["cashtokens", "ft", "split"]
+
+- id: ct_nft_imm_001
+  pattern: nft_immutable
+  difficulty: medium
+  intent: |
+    Create an art NFT transfer contract. The buyer receives the exact NFT:
+    preserve tokenCategory, tokenAmount, and nftCommitment from input to output.
+  required_features:
+    - signature_verification
+    - token_category_check
+    - token_amount_check
+  critical_features:
+    - valid_signature_check
+    - nftcommitment_preservation
+    - token_category_check
+  tags: ["cashtokens", "nft_immutable"]
+
+- id: ct_nft_imm_002
+  pattern: nft_immutable
+  difficulty: medium
+  intent: |
+    DAO membership badge as an immutable NFT. Only the owner can transfer it.
+    Preserve nftCommitment and tokenCategory on the single output.
+  required_features:
+    - signature_verification
+    - token_category_check
+  critical_features:
+    - nftcommitment_preservation
+    - token_nft_commitment
+  tags: ["cashtokens", "nft_immutable"]
+
+- id: ct_nft_imm_003
+  pattern: nft_immutable
+  difficulty: hard
+  intent: |
+    Digital collectible NFT custody: owner signs to move the NFT to a new
+    lockingBytecode destination while preserving category, amount, and commitment.
+  required_features:
+    - signature_verification
+    - token_category_check
+    - token_amount_check
+    - locking_bytecode
+  critical_features:
+    - nftcommitment_preservation
+    - output_lockingbytecode_check
+  tags: ["cashtokens", "nft_immutable"]
+
+- id: ct_nft_mut_001
+  pattern: nft_mutable
+  difficulty: hard
+  intent: |
+    Evolving NFT that levels up: owner updates nftCommitment on spend.
+    Mutable capability (category + 0x01). Preserve mutable tokenCategory on output.
+  required_features:
+    - signature_verification
+    - token_category_check
+  critical_features:
+    - capability_byte_match
+    - nftcommitment_preservation
+  tags: ["cashtokens", "nft_mutable"]
+
+- id: ct_nft_mut_002
+  pattern: nft_mutable
+  difficulty: hard
+  intent: |
+    Domain registry stored in NFT commitment. Owner may change commitment to
+    point to a new domain name. Use mutable NFT (0x01 capability suffix).
+  required_features:
+    - signature_verification
+    - token_category_check
+  critical_features:
+    - capability_byte_match
+  tags: ["cashtokens", "nft_mutable"]
+
+- id: ct_nft_mut_003
+  pattern: nft_mutable
+  difficulty: hard
+  intent: |
+    DEX vault state in a mutable NFT commitment. Owner updates state commitment
+    while re-anchoring the contract with this.activeBytecode on the change output.
+  required_features:
+    - signature_verification
+    - covenant
+    - token_category_check
+  critical_features:
+    - capability_byte_match
+    - covenant_self_reference
+  tags: ["cashtokens", "nft_mutable", "stateful"]
+
+- id: ct_minting_001
+  pattern: nft_minting
+  difficulty: hard
+  intent: |
+    Open edition NFT collection: minter authority stays in the contract covenant.
+    Minting NFT capability 0x02 must remain on this.activeBytecode, never released
+    to buyers. Require minter signature to issue child NFTs.
+  required_features:
+    - signature_verification
+    - token_category_check
+  critical_features:
+    - minting_authority_custody
+    - valid_signature_check
+  tags: ["cashtokens", "nft_minting"]
+
+- id: ct_minting_002
+  pattern: nft_minting
+  difficulty: hard
+  intent: |
+    Collection genesis contract with minting authority. Only mintAuthority can
+    create new NFTs. The minting capability UTXO must self-anchor and not escape.
+  required_features:
+    - signature_verification
+    - token_category_check
+  critical_features:
+    - minting_authority_custody
+  tags: ["cashtokens", "nft_minting"]
+
+- id: ct_minting_003
+  pattern: nft_minting
+  difficulty: hard
+  intent: |
+    PFP drop contract: buyers receive newly minted immutable NFTs while the
+    minting authority NFT (0x02) remains locked in the contract bytecode.
+  required_features:
+    - signature_verification
+    - token_category_check
+  critical_features:
+    - minting_authority_custody
+    - capability_minting
+  tags: ["cashtokens", "nft_minting"]
+
+- id: ct_hybrid_001
+  pattern: hybrid_token
+  difficulty: hard
+  intent: |
+    Stablecoin-style covenant: preserve lockingBytecode, tokenCategory, value,
+    tokenAmount, and nftCommitment across state transitions on the active output.
+  required_features:
+    - signature_verification
+    - covenant
+    - token_category_check
+    - token_amount_check
+  critical_features:
+    - covenant_self_reference
+    - token_category_check
+  tags: ["cashtokens", "hybrid"]
+
+- id: ct_hybrid_002
+  pattern: hybrid_token
+  difficulty: hard
+  intent: |
+    Stateful token vault using NFT commitment for oracle price and fungible
+    tokenAmount on the same category. Five-point covenant validation required.
+  required_features:
+    - signature_verification
+    - covenant
+    - token_category_check
+    - token_amount_check
+  critical_features:
+    - nftcommitment_preservation
+    - token_category_check
+  tags: ["cashtokens", "hybrid"]
+
+- id: ct_minting_fail_001
+  pattern: nft_minting
+  difficulty: hard
+  intent: |
+    FAILURE CASE: NFT mint shop that pays the 0x02 minting authority NFT out to
+    the buyer wallet (capability leak — must NOT self-anchor minting NFT).
+  required_features:
+    - signature_verification
+  critical_features:
+    - must_fail_capability_leak
+  expected_structure:
+    require_count_min: 2
+  tags: ["cashtokens", "nft_minting", "failure", "vulnerability"]

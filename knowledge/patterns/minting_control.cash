@@ -71,7 +71,7 @@ contract MintingControl() {
     // Demonstrates complete minting control with typed P2PKH destination
     // Recipient is a pubkeyhash — not raw bytes — preventing covenant escape
     function validateP2PKH(
-        pubkeyhash recipient,  // Typed recipient hash — NOT raw bytes
+        pubkey recipient,  // Typed recipient pubkey — NOT raw bytes
         int outputValue        // Expected output value (BCH only)
     ) {
         // TOKEN CATEGORY CONSTANT
@@ -86,7 +86,7 @@ contract MintingControl() {
         // PURPOSE: Establish which input belongs to this contract
         // PREVENTS: Position attacks, wrong input validation
         // SEVERITY: Critical
-        require(tx.inputs[this.activeInputIndex].lockingBytecode == this.lockingBytecode);
+        require(tx.inputs[this.activeInputIndex].lockingBytecode == this.activeBytecode);
 
         // ═══════════════════════════════════════════════════════════════
         // SECTION 2: INPUT TOKEN CATEGORY REJECTION
@@ -153,7 +153,7 @@ contract MintingControl() {
         // - The script template itself is enforced by the constructor (not caller)
         // - Attacker can only influence WHICH P2PKH address, not the script TYPE
         // This is the NexOps-required pattern for all payment destinations
-        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(recipient));
+        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(hash160(recipient)));
 
         // ═══════════════════════════════════════════════════════════════
         // SECTION 6: OUTPUT VALUE VALIDATION
@@ -224,7 +224,7 @@ contract MintingControl() {
         bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
 
         // Active input validation
-        require(tx.inputs[this.activeInputIndex].lockingBytecode == this.lockingBytecode);
+        require(tx.inputs[this.activeInputIndex].lockingBytecode == this.activeBytecode);
         require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
         require(tx.inputs[this.activeInputIndex].tokenAmount == 0);
 
@@ -235,7 +235,7 @@ contract MintingControl() {
         // new LockingBytecodeP2SH(scriptHash) constructs the P2SH wrapper
         // Caller provides the script hash, not the raw destination bytecode
         // The P2SH script template is enforced by the constructor
-        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2SH(scriptHash));
+        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2SH32(scriptHash));
 
         // Value binding (outputValue is untrusted — bound to consensus data)
         require(tx.outputs[0].value == outputValue);
@@ -255,7 +255,7 @@ contract MintingControl() {
         bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
 
         // Active input validation
-        require(tx.inputs[this.activeInputIndex].lockingBytecode == this.lockingBytecode);
+        require(tx.inputs[this.activeInputIndex].lockingBytecode == this.activeBytecode);
         require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
         require(tx.inputs[this.activeInputIndex].tokenAmount == 0);
 
@@ -291,15 +291,15 @@ contract MintingControl() {
 
 contract MintingControlMultiOutput() {
     function validate(
-        pubkeyhash recipient0,    // Typed destination — output 0
-        pubkeyhash recipient1,    // Typed destination — output 1
+        pubkey recipient0,    // Typed destination — output 0
+        pubkey recipient1,    // Typed destination — output 1
         int output0Value,
         int output1Value
     ) {
         bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
 
         // Active input validation
-        require(tx.inputs[this.activeInputIndex].lockingBytecode == this.lockingBytecode);
+        require(tx.inputs[this.activeInputIndex].lockingBytecode == this.activeBytecode);
         require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
         require(tx.inputs[this.activeInputIndex].tokenAmount == 0);
 
@@ -309,7 +309,7 @@ contract MintingControlMultiOutput() {
         require(tx.outputs.length == 2);
 
         // OUTPUT 0: Full token rejection with typed P2PKH destination
-        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(recipient0));
+        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(hash160(recipient0)));
         require(tx.outputs[0].value == output0Value);
         require(tx.outputs[0].tokenCategory == NO_TOKEN);
         require(tx.outputs[0].tokenAmount == 0);
@@ -317,7 +317,7 @@ contract MintingControlMultiOutput() {
         // OUTPUT 1: Full token rejection with typed P2PKH destination
         // CRITICAL: Every output MUST be validated individually
         // Skipping even one output creates a token injection vector
-        require(tx.outputs[1].lockingBytecode == new LockingBytecodeP2PKH(recipient1));
+        require(tx.outputs[1].lockingBytecode == new LockingBytecodeP2PKH(hash160(recipient1)));
         require(tx.outputs[1].value == output1Value);
         require(tx.outputs[1].tokenCategory == NO_TOKEN);
         require(tx.outputs[1].tokenAmount == 0);

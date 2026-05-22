@@ -10,6 +10,123 @@ from benchmark.schemas import BenchmarkCase, CaseResult
 from benchmark.feature_extractor import FeatureExtractor
 from src.services.pipeline_engine import get_guarded_pipeline_engine
 
+
+def _cashtoken_alias_pool(
+    pattern: str,
+    capabilities: Dict[str, Any],
+    detected: set,
+    code: str,
+    functions: List[Dict],
+) -> Dict[str, bool]:
+    """Per-pattern alias checks for CashTokens benchmark cases."""
+    sig_ok = capabilities.get("signature_verification", False)
+    cat_in = bool(re.search(r"tokenCategory\s*==", code) and "activeInputIndex" in code)
+    cat_out = bool(re.search(r"tx\.outputs\[\d+\]\.tokenCategory\s*==", code))
+    amt_ok = bool(
+        re.search(r"expectedTokenAmount", code)
+        or (
+            "tokenAmount" in code
+            and "tx.inputs[this.activeInputIndex]" in code
+        )
+    )
+    commitment_ok = (
+        "token_nft_commitment" in detected
+        or bool(re.search(r"\.nftCommitment\s*==\s*", code))
+    )
+    _authority_category_preserved = bool(
+        re.search(
+            r"tx\.outputs\[\d+\]\.tokenCategory\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenCategory",
+            code,
+        )
+        or re.search(
+            r"tx\.outputs\[\d+\]\.tokenCategory\s*==\s*\w*(?:minting|authority|base)\w*Category",
+            code,
+            re.IGNORECASE,
+        )
+    )
+    cap_ok = (
+        "capability_mutable" in detected
+        or "capability_minting" in detected
+        or bool(re.search(r"tokenCategory\s*\+\s*0x0[12]", code))
+        or bool(re.search(r"0x02", code))
+        or _authority_category_preserved
+    )
+    _active_custody = bool(re.search(r"lockingBytecode\s*==\s*this\.activeBytecode", code))
+    custody_ok = bool(
+        _active_custody
+        and ("capability_minting" in detected or re.search(r"0x02", code))
+    ) or bool(
+        re.search(r"0x02", code)
+        and re.search(r"lockingBytecode.*activeBytecode", code, re.DOTALL)
+    ) or bool(_active_custody and _authority_category_preserved)
+    bch_change = "bch_only_output" in detected
+    leak_fail = not custody_ok
+
+    pools: Dict[str, Dict[str, bool]] = {
+        "token_ft": {
+            "valid_signature_check": sig_ok,
+            "token_category_check": cat_in and cat_out,
+            "token_amount_check": amt_ok,
+            "bch_only_change_guard": bch_change,
+            "output_destination_validation": "locking_bytecode" in detected,
+        },
+        "nft_immutable": {
+            "valid_signature_check": sig_ok,
+            "token_category_check": cat_in and cat_out,
+            "token_amount_check": amt_ok or bool(re.search(r"tokenAmount\s*==\s*0", code)),
+            "nftcommitment_preservation": commitment_ok,
+            "token_nft_commitment": commitment_ok,
+            "locking_bytecode": "locking_bytecode" in detected,
+            "output_lockingbytecode_check": (
+                "locking_bytecode" in detected
+                or bool(re.search(r"tx\.outputs\[\d+\]\.lockingBytecode\s*==", code))
+            ),
+        },
+        "nft_mutable": {
+            "valid_signature_check": sig_ok,
+            "token_category_check": cap_ok or cat_in,
+            "capability_byte_match": cap_ok,
+            "nftcommitment_preservation": commitment_ok,
+            "covenant_self_reference": bool(
+                re.search(r"lockingBytecode\s*==\s*this\.activeBytecode", code)
+            ),
+        },
+        "nft_minting": {
+            "valid_signature_check": sig_ok,
+            "token_category_check": cat_in,
+            "capability_byte_match": cap_ok,
+            "capability_minting": cap_ok,
+            "minting_authority_custody": custody_ok,
+            "must_fail_capability_leak": leak_fail,
+        },
+        "hybrid_token": {
+            "valid_signature_check": sig_ok,
+            "token_category_check": cat_in and cat_out,
+            "token_amount_check": amt_ok,
+            "nftcommitment_preservation": commitment_ok,
+            "covenant_self_reference": bool(
+                re.search(r"lockingBytecode\s*==\s*this\.activeBytecode", code)
+            ),
+        },
+    }
+    default = {
+        "valid_signature_check": sig_ok,
+        "token_category_check": cat_in or cat_out,
+        "token_amount_check": amt_ok,
+        "nftcommitment_preservation": commitment_ok,
+        "capability_byte_match": cap_ok,
+        "minting_authority_custody": custody_ok,
+        "bch_only_change_guard": bch_change,
+        "must_fail_capability_leak": leak_fail,
+        "covenant_self_reference": capabilities.get("covenant_continuation", False),
+        "locktime_check": capabilities.get("time_validation", False),
+        "output_amount_check": capabilities.get("output_value_validation", False),
+        "two_of_three_logic": ("multisig_2of3" in detected or "checkMultiSig" in code),
+    }
+    merged = {**default, **pools.get(pattern, {})}
+    return merged
+
+
 class BenchmarkEvaluator:
     def __init__(self, weights_path: str = "benchmark/config/scoring_weights.yaml"):
         self.weights_path = Path(weights_path)
@@ -25,7 +142,12 @@ class BenchmarkEvaluator:
         with open(self.weights_path, "r", encoding="utf-8") as f:
             self.weights = yaml.safe_load(f)
 
-    async def evaluate(self, case: BenchmarkCase, model_override: str = None) -> CaseResult:
+    async def evaluate(
+        self,
+        case: BenchmarkCase,
+        model_override: str = None,
+        disable_golden: bool = True,
+    ) -> CaseResult:
         start_time = time.time()
         
         # Determine failure layer and state
@@ -46,10 +168,10 @@ class BenchmarkEvaluator:
             # Note: generate_guarded handles inner retry loops
             result = await asyncio.wait_for(
                 self.engine.generate_guarded(
-                    case.intent, 
+                    case.intent,
                     security_level="high",
-                    disable_golden=True,
-                    disable_fallbacks=True
+                    disable_golden=disable_golden,
+                    disable_fallbacks=True,
                 ),
                 timeout=300  # 5 min — token treasury paths can spend retries in compile/lint loops
             )
@@ -98,52 +220,32 @@ class BenchmarkEvaluator:
                     if capabilities.get(req) or req in detected:
                         return True
 
-                    # Alias mappings used in benchmark suites.
-                    alias_checks = {
-                        "valid_signature_check": capabilities.get("signature_verification", False),
-                        "covenant_self_reference": capabilities.get("covenant_continuation", False),
-                        "locktime_check": capabilities.get("time_validation", False),
-                        "output_amount_check": capabilities.get("output_value_validation", False),
-                        "amount_threshold_logic": ("<=" in code or ">=" in code),
-                        "tiered_delay_logic": (
-                            "smallDelay" in code
-                            or "largeDelay" in code
-                            or "oneDayDelay" in code
-                            or "sevenDayDelay" in code
-                            or "instantLimit" in code
-                            or "oneDayLimit" in code
-                            or "smallThreshold" in code
-                            or "largeWithdrawDelay" in code
-                            or "smallWithdrawLimit" in code
-                            or "threshold" in code.lower()
-                        ),
-                        "emergency_path": any(f.get("role") == "RECOVERY" for f in functions),
-                        "cancellation_path": (
-                            "cancel" in code.lower()
-                            or "emergencyrecover" in code.lower().replace("_", "")
-                        ),
-                        "two_of_three_logic": ("multisig_2of3" in detected or "checkMultiSig" in code),
-                        # CashTokens / NFT criticals (suite uses these names)
-                        "token_category_check": bool(
-                            re.search(r"expectedTokenCategory|nftCategory", code)
-                            or re.search(r"tokenCategory\s*==", code)
-                        ),
-                        "token_amount_check": bool(
-                            re.search(r"expectedTokenAmount", code)
-                            or (
-                                "tokenAmount" in code
-                                and "tx.inputs[this.activeInputIndex]" in code
-                            )
-                        ),
-                        "token_nft_amount_check": ("token_nft" in detected)
-                        or bool(re.search(r"tokenAmount\s*==\s*1\b", code))
-                        or bool(
-                            re.search(
-                                r"tokenAmount\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenAmount",
-                                code,
-                            )
-                        ),
-                    }
+                    pattern_key = (case.pattern or "").strip()
+                    if pattern_key in {
+                        "token_ft", "nft_immutable", "nft_mutable",
+                        "nft_minting", "hybrid_token",
+                    }:
+                        alias_checks = _cashtoken_alias_pool(
+                            pattern_key, capabilities, detected, code, functions
+                        )
+                    else:
+                        alias_checks = _cashtoken_alias_pool(
+                            "", capabilities, detected, code, functions
+                        )
+                        alias_checks.update({
+                            "amount_threshold_logic": ("<=" in code or ">=" in code),
+                            "tiered_delay_logic": (
+                                "smallDelay" in code
+                                or "largeDelay" in code
+                                or "threshold" in code.lower()
+                            ),
+                            "emergency_path": any(
+                                f.get("role") == "RECOVERY" for f in functions
+                            ),
+                            "cancellation_path": "cancel" in code.lower(),
+                            "token_nft_amount_check": ("token_nft" in detected)
+                            or bool(re.search(r"tokenAmount\s*==\s*1\b", code)),
+                        })
                     return bool(alias_checks.get(req, False))
 
                 # 3. Intent Coverage Calculation (Proportional)

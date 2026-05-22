@@ -1,5 +1,18 @@
 family: nft
 description: "Mandatory rules for CashTokens NFT identity and preservation."
+concrete_expressions:
+  - check: "require(tx.inputs[this.activeInputIndex].tokenCategory == expectedCategory);"
+    prevents: "wrong NFT category accepted"
+    mode: [nft_immutable, nft_transfer_immutable]
+  - check: "require(tx.outputs[0].nftCommitment == tx.inputs[this.activeInputIndex].nftCommitment);"
+    prevents: "immutable NFT commitment altered"
+    mode: [nft_immutable, nft_transfer_immutable]
+  - check: "require(tx.outputs[0].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount);"
+    prevents: "NFT amount corruption"
+    mode: [nft_immutable, nft_transfer_immutable]
+  - check: "require(checkSig(ownerSig, owner));"
+    prevents: "unauthorized NFT transfer"
+    mode: [nft_immutable, nft_transfer_immutable]
 must:
   - id: NFT-INPUT-AUTH
     rule: "require(tx.inputs[this.activeInputIndex].tokenCategory == expectedCategory);"
@@ -7,6 +20,8 @@ must:
     rule: "require(tx.outputs[0].tokenCategory == expectedCategory);"
   - id: NFT-AMOUNT-PRESERVATION
     rule: "require(tx.outputs[0].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount); // Must be 0 for NFTs"
+  - id: NFT-COMMITMENT-PRESERVATION
+    rule: "require(tx.outputs[0].nftCommitment == tx.inputs[this.activeInputIndex].nftCommitment); // immutable transfer"
 burn_mode:
   rule: "If burning an NFT, the specific tokenCategory MUST NOT appear in any tx.outputs."
 optional:

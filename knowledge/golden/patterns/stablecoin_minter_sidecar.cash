@@ -1,0 +1,33 @@
+// GOLDEN TEMPLATE — Pattern-ID: stablecoin_minter_sidecar (hybrid stretch)
+pragma cashscript ^0.13.0;
+
+contract StablecoinMinterSidecar(
+    // === MUTABLE_CONSTRUCTOR_START ===
+    pubkey vaultOwner,
+    bytes32 stateCategory,
+    bytes32 ftCategory,
+    bytes32 expectedSidecarTxHash
+    // === MUTABLE_CONSTRUCTOR_END ===
+) {
+    function updateStateAndMint(
+        sig ownerSig,
+        bytes newCommitment,
+        int ftMintAmount
+    ) {
+        // === INVARIANT_ANCHOR_START ===
+        require(checkSig(ownerSig, vaultOwner));
+        require(
+            tx.inputs[1].outpointTransactionHash == expectedSidecarTxHash
+        );
+        require(tx.outputs.length == 3);
+        require(tx.inputs[this.activeInputIndex].tokenCategory == stateCategory + 0x01);
+        require(tx.outputs[0].lockingBytecode == this.activeBytecode);
+        require(tx.outputs[0].tokenCategory == stateCategory + 0x01);
+        require(tx.outputs[0].nftCommitment == newCommitment);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+        require(tx.outputs[1].tokenCategory == ftCategory);
+        require(tx.outputs[1].tokenAmount == ftMintAmount);
+        require(tx.outputs[2].tokenCategory == 0x);
+        // === INVARIANT_ANCHOR_END ===
+    }
+}

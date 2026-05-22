@@ -482,18 +482,24 @@ def _check_covenant_self_anchor(code: str, contract_mode: str = "") -> list[dict
     # These modes don't care about self-anchoring (or use unrelated logic).
     SKIP_MODES = {
         "multisig", "multisig_simple_spend", "p2pkh", "stateless",
-        "timelock", "escrow", "token", "minting",
-        # Golden pattern IDs — these are terminal payout contracts, not perpetuating covenants.
-        # The SELF_ANCHOR is intentionally absent from golden release functions.
+        "timelock", "escrow",
+        # Golden pattern IDs — terminal payout contracts, not perpetuating covenants.
         "escrow_2of3_nft", "escrow_2of3", "linear_vesting",
+        # CashTokens one-shot transfer modes (no covenant self-anchor required).
+        "token_ft", "ft_transfer",
+        "nft_immutable", "nft_transfer_immutable",
         ""
     }
     if mode in SKIP_MODES:
         return []
 
     # 3. REQUIRE SELF-ANCHOR MODES (Continuation Patterns)
-    # vesting, stateful, covenant, vault
-    REQUIRE_MODES = {"vesting", "stateful", "covenant", "vault"}
+    # vesting, stateful, covenant, vault, CashTokens state/minting paths
+    REQUIRE_MODES = {
+        "vesting", "stateful", "covenant", "vault",
+        "nft_mutable", "nft_minting", "nft_minting_authority",
+        "nft_mutable_state_update", "hybrid_token", "minting",
+    }
 
     # If unknown mode, infer from code content (conservative fallback)
     if mode not in REQUIRE_MODES:
@@ -526,6 +532,7 @@ def _check_covenant_self_anchor(code: str, contract_mode: str = "") -> list[dict
                 r"\b("
                 r"burn|refund|claim|withdraw|exit|drain|close|liquidate|sweep"
                 r"|finalize|finalise|release|payout|pay|redeem|execute|settle"
+                r"|transfer|send|payOut|payout|revoke|mint"
                 r"|emergency|recover|recovery|guardian|guardianRecovery"
                 r"|fullWithdraw|fullSpend|finalWithdraw|complete"
                 r")\w*\b",
@@ -563,11 +570,14 @@ def _check_covenant_self_anchor(code: str, contract_mode: str = "") -> list[dict
             if mode == "vault":
                 msg += " Hint: Vault intermediate states (like announce/start) MUST re-anchor the contract logic."
 
-            violations.append({
+            entry = {
                 "rule_id": "LNC-008",
                 "message": msg,
                 "line_hint": start_lineno,
-            })
+            }
+            if mode == "hybrid_token":
+                entry["severity"] = "warning"
+            violations.append(entry)
 
     return violations
 
@@ -711,9 +721,12 @@ def _check_mint_authority(code: str, contract_mode: str = "") -> list[dict]:
         return []
 
     violations = []
+    _MINT_FUNC = re.compile(
+        r"\b(mint\w*|issue\w*|create\w*|genesis\w*|drop\w*|bootstrap\w*)\b",
+        re.IGNORECASE,
+    )
     for func_name, body, start_lineno in _function_bodies(code):
-        # Check if this function looks like a mint operation
-        is_mint_func = bool(re.search(r"\bmint\w*\b", func_name, re.IGNORECASE))
+        is_mint_func = bool(_MINT_FUNC.search(func_name))
         if not is_mint_func:
             continue
 
@@ -790,6 +803,8 @@ def _check_token_mint_supply_enforcement(code: str, contract_mode: str = "") -> 
     LNC-017: Fungible mint paths must enforce supply bounds.
     """
     mode = (contract_mode or "").lower().strip()
+    if mode in {"nft_minting", "nft_minting_authority", "nft_mutable", "nft_immutable", "token_ft", "ft_transfer"}:
+        return []
     if mode not in {"token", "minting", "covenant"} and "mint" not in code.lower():
         return []
 
@@ -809,6 +824,7 @@ def _check_token_mint_supply_enforcement(code: str, contract_mode: str = "") -> 
                     "Add a cap guard (e.g. require(totalSupply + mintAmount <= maxSupply))."
                 ),
                 "line_hint": start_lineno,
+                "severity": "warning",
             })
     return violations
 
@@ -818,6 +834,8 @@ def _check_nft_mint_transfer_rules(code: str, contract_mode: str = "") -> list[d
     LNC-018: NFT mint/transfer should preserve singleton semantics.
     """
     mode = (contract_mode or "").lower().strip()
+    if mode in {"nft_minting", "nft_minting_authority", "token_ft", "ft_transfer"}:
+        return []
     if mode not in {"token", "minting", "escrow_2of3_nft", "escrow"} and "nft" not in code.lower():
         return []
 
@@ -839,6 +857,7 @@ def _check_nft_mint_transfer_rules(code: str, contract_mode: str = "") -> list[d
             "Add require(tokenAmount == 1) for singleton NFTs or preserve input tokenAmount exactly."
         ),
         "line_hint": 0,
+        "severity": "warning",
     }]
 
 
@@ -863,6 +882,156 @@ def _check_invalid_token_log(code: str, contract_mode: str = "") -> list[dict]:
         }]
     return []
 
+
+
+_NFT_MODES = {"nft_immutable", "nft_mutable", "token", "covenant", "hybrid_token"}
+_FT_MODES = {"token_ft", "token", "distribution", "split"}
+
+
+def _check_nft_commitment_preservation(code: str, contract_mode: str = "") -> list[dict]:
+    """LNC-020: NFT commitment must be validated when nftCommitment appears (soft warning)."""
+    mode = (contract_mode or "").lower().strip()
+    if mode not in _NFT_MODES and "nft" not in code.lower():
+        return []
+    violations = []
+    for func_name, body, start_lineno in _function_bodies(code):
+        refs_commit = bool(re.search(r"\.nftCommitment\b", body))
+        if not refs_commit:
+            continue
+        preserves = bool(
+            re.search(
+                r"\.nftCommitment\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.nftCommitment",
+                body,
+            )
+            or re.search(r"\.nftCommitment\s*==\s*\w+", body)
+        )
+        if not preserves and mode in {"nft_immutable", "nft_mutable"}:
+            violations.append({
+                "rule_id": "LNC-020",
+                "message": (
+                    f"Function '{func_name}' references nftCommitment without preserving or "
+                    "assigning it explicitly (immutable: equality to input; mutable: new commitment param)."
+                ),
+                "line_hint": start_lineno,
+                "severity": "warning",
+            })
+    return violations
+
+
+def _check_bch_only_output_guard(code: str, contract_mode: str = "") -> list[dict]:
+    """LNC-021: Token modes with multiple outputs should guard BCH-only change outputs (soft)."""
+    mode = (contract_mode or "").lower().strip()
+    if mode not in _FT_MODES | _NFT_MODES and "token" not in code.lower():
+        return []
+    if not re.search(r"tx\.outputs\.length\s*==\s*[2-9]", code):
+        return []
+    if re.search(r"tokenCategory\s*==\s*0x\b", code):
+        return []
+    return [{
+        "rule_id": "LNC-021",
+        "message": (
+            "Multi-output token spend without require(tx.outputs[N].tokenCategory == 0x) "
+            "on BCH-only change output — risk of spam token attachment."
+        ),
+        "line_hint": 0,
+        "severity": "warning",
+    }]
+
+
+def _check_capability_byte_match(code: str, contract_mode: str = "") -> list[dict]:
+    """LNC-022: Mutable/minting modes should express capability suffix (soft)."""
+    mode = (contract_mode or "").lower().strip()
+    if mode not in {"nft_mutable", "nft_minting", "minting"} and "mutable" not in code.lower():
+        return []
+    has_capability = bool(
+        re.search(r"tokenCategory\s*\+\s*0x0[12]", code)
+        or re.search(r"split\s*\(\s*32\s*\)", code)
+    )
+    if has_capability:
+        return []
+    if mode in {"nft_mutable", "nft_minting", "minting"}:
+        return [{
+            "rule_id": "LNC-022",
+            "message": (
+                "Mutable/minting NFT path should validate capability via "
+                "tokenCategory == baseCategory + 0x01 or + 0x02."
+            ),
+            "line_hint": 0,
+            "severity": "warning",
+        }]
+    return []
+
+
+def _check_minting_authority_custody(code: str, contract_mode: str = "") -> list[dict]:
+    """LNC-023: Minting NFT (0x02) must not escape contract — HARD gate."""
+    mode = (contract_mode or "").lower().strip()
+    if mode not in {"nft_minting", "minting", "token"} and not re.search(r"0x02", code):
+        return []
+    if not re.search(r"0x02", code):
+        return []
+    has_custody = bool(
+        re.search(
+            r"lockingBytecode\s*==\s*this\.activeBytecode",
+            code,
+        )
+    )
+    if has_custody:
+        return []
+    return [{
+        "rule_id": "LNC-023",
+        "message": (
+            "Minting capability (0x02) detected without "
+            "require(tx.outputs[N].lockingBytecode == this.activeBytecode) on the authority output. "
+            "Minting NFT must not escape contract custody."
+        ),
+        "line_hint": 0,
+    }]
+
+
+def _check_nft_commitment_length_bound(code: str, contract_mode: str = "") -> list[dict]:
+    """LNC-024: Bound nftCommitment length when assigned from params (soft)."""
+    mode = (contract_mode or "").lower().strip()
+    if mode not in {"nft_mutable", "nft_minting", "minting"} and "nftCommitment" not in code:
+        return []
+    if re.search(r"nftCommitment\.length\s*<=", code) or re.search(r"commitment\.length\s*<=", code):
+        return []
+    if re.search(r"\.nftCommitment\s*==\s*\w+", code):
+        return [{
+            "rule_id": "LNC-024",
+            "message": (
+                "nftCommitment compared to a parameter without a visible length bound "
+                "(recommend require(commitment.length > 0) and require(commitment.length <= 40))."
+            ),
+            "line_hint": 0,
+            "severity": "warning",
+        }]
+    return []
+
+
+def _check_five_point_covenant(code: str, contract_mode: str = "") -> list[dict]:
+    """LNC-025: Hybrid/stateful token covenants should cover five properties (soft)."""
+    mode = (contract_mode or "").lower().strip()
+    if mode not in {"hybrid_token", "covenant", "stateful", "vault"} and "hybrid" not in code.lower():
+        return []
+    checks = {
+        "lockingBytecode": bool(re.search(r"\.lockingBytecode\s*==", code)),
+        "tokenCategory": bool(re.search(r"\.tokenCategory\s*==", code)),
+        "value": bool(re.search(r"\.value\s*==", code)),
+        "tokenAmount": bool(re.search(r"\.tokenAmount\s*==", code)),
+        "nftCommitment": bool(re.search(r"\.nftCommitment\s*==", code)),
+    }
+    missing = [k for k, ok in checks.items() if not ok]
+    if len(missing) <= 2:
+        return []
+    return [{
+        "rule_id": "LNC-025",
+        "message": (
+            f"Covenant/hybrid token contract missing five-point checks for: {', '.join(missing)}. "
+            "Validate lockingBytecode, tokenCategory, value, tokenAmount, nftCommitment."
+        ),
+        "line_hint": 0,
+        "severity": "warning",
+    }]
 
 
 def _check_locking_bytecode_constructor(code: str) -> list[dict]:
@@ -979,6 +1148,12 @@ class DSLLinter:
         _check_token_mint_supply_enforcement,  # LNC-017
         _check_nft_mint_transfer_rules,  # LNC-018
         _check_invalid_token_log,        # LNC-019
+        _check_nft_commitment_preservation,  # LNC-020
+        _check_bch_only_output_guard,    # LNC-021
+        _check_capability_byte_match,    # LNC-022
+        _check_minting_authority_custody,  # LNC-023 (hard)
+        _check_nft_commitment_length_bound,  # LNC-024
+        _check_five_point_covenant,      # LNC-025
         _check_locking_bytecode_constructor,  # LNC-015  (P2PKH/P2SH constructor safety)
         _check_value_preservation,       # LNC-016  (Self-anchor + Value continuity)
     ]
@@ -1029,12 +1204,19 @@ class DSLLinter:
             if not any(str(v.get("rule_id", "")).startswith(prefix) for prefix in disabled_rule_prefixes)
         ]
 
-        passed = len(filtered_violations) == 0
+        blocking = [v for v in filtered_violations if v.get("severity") != "warning"]
+        passed = len(blocking) == 0
         if not passed:
-            for v in filtered_violations:
+            for v in blocking:
                 logger.warning(f"[DSLLint] {v['rule_id']} L{v['line_hint']}: {v['message']}")
         else:
-            logger.info(f"[DSLLint] PASSED (mode={contract_mode or 'auto'}) — no violations.")
+            if filtered_violations:
+                logger.info(
+                    f"[DSLLint] PASSED with {len(filtered_violations)} warning(s) "
+                    f"(mode={contract_mode or 'auto'})"
+                )
+            else:
+                logger.info(f"[DSLLint] PASSED (mode={contract_mode or 'auto'}) — no violations.")
 
         return {"passed": passed, "violations": filtered_violations}
 

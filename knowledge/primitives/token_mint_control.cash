@@ -3,35 +3,33 @@
 // SCOPE: Strict token category and mint capability validation
 // SECURITY LEVEL: NEXOPS CANONICAL
 // CashScript Version: ^0.13.0
+// NOTE: CashScript ^0.13.0 has no if/for — use enforceNoMint() or enforceMintAllowed()
+//       instead of a mintAllowed flag. Capability is on tokenCategory (+0x01/+0x02), not nftCapability.
 
 pragma cashscript ^0.13.0;
 
 contract TokenMintControl(
-    bytes32 expectedCategory,
-    bool mintAllowed
+    bytes32 expectedCategory
 ) {
-    function enforce() {
+    function enforceNoMint() {
         bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+        require(expectedCategory != NO_TOKEN);
 
         // ---------------------------------------------------------------------
         // 1. ACTIVE INPUT VALIDATION
         // ---------------------------------------------------------------------
-        bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
-        require(thisBytecode == this.lockingBytecode);
+        require(tx.inputs[this.activeInputIndex].lockingBytecode == this.activeBytecode);
 
         // ---------------------------------------------------------------------
         // 2. TOKEN CATEGORY VALIDATION
         // ---------------------------------------------------------------------
-        bytes32 inputCategory = tx.inputs[this.activeInputIndex].tokenCategory;
-        require(inputCategory == expectedCategory);
+        require(tx.inputs[this.activeInputIndex].tokenCategory == expectedCategory);
 
         // ---------------------------------------------------------------------
         // 3. MINT CAPABILITY VALIDATION
         // ---------------------------------------------------------------------
-        // If minting is NOT allowed, ensure no mint capability exists
-        if (!mintAllowed) {
-            require(tx.inputs[this.activeInputIndex].nftCapability == 0x00);
-        }
+        // If minting is NOT allowed, ensure no mint capability exists (+0x02 suffix).
+        // expectedCategory must be the 32-byte base category (no capability byte).
 
         // ---------------------------------------------------------------------
         // 4. OUTPUT BOUNDS
@@ -40,21 +38,14 @@ contract TokenMintControl(
         require(tx.outputs.length <= 2);
 
         // ---------------------------------------------------------------------
-        // 5. OUTPUT TOKEN VALIDATION
+        // 5. OUTPUT TOKEN VALIDATION (unrolled — max 2 outputs)
         // ---------------------------------------------------------------------
-        for (int i = 0; i < tx.outputs.length; i++) {
-
-            // Token category must remain consistent
-            require(tx.outputs[i].tokenCategory == expectedCategory);
-
-            // Prevent unauthorized mint propagation
-            if (!mintAllowed) {
-                require(tx.outputs[i].nftCapability == 0x00);
-            }
-
-            // Optional strict NFT-only enforcement
-            require(tx.outputs[i].tokenAmount == 0);
-        }
+        require(tx.outputs.length != 1 || tx.outputs[0].tokenCategory == expectedCategory);
+        require(tx.outputs.length != 1 || tx.outputs[0].tokenAmount == 0);
+        require(tx.outputs.length != 2 || tx.outputs[0].tokenCategory == expectedCategory);
+        require(tx.outputs.length != 2 || tx.outputs[0].tokenAmount == 0);
+        require(tx.outputs.length != 2 || tx.outputs[1].tokenCategory == expectedCategory);
+        require(tx.outputs.length != 2 || tx.outputs[1].tokenAmount == 0);
 
         // ---------------------------------------------------------------------
         // SECURITY INVARIANTS:
@@ -64,5 +55,42 @@ contract TokenMintControl(
         // ✓ Output count bounded
         // ✓ Token propagation explicitly validated
         // ✓ No implicit mint continuation
+    }
+
+    function enforceMintAllowed() {
+        bytes32 NO_TOKEN = 0x0000000000000000000000000000000000000000000000000000000000000000;
+        require(expectedCategory != NO_TOKEN);
+
+        // ---------------------------------------------------------------------
+        // 1. ACTIVE INPUT VALIDATION
+        // ---------------------------------------------------------------------
+        require(tx.inputs[this.activeInputIndex].lockingBytecode == this.activeBytecode);
+
+        // ---------------------------------------------------------------------
+        // 2. TOKEN CATEGORY VALIDATION
+        // ---------------------------------------------------------------------
+        require(tx.inputs[this.activeInputIndex].tokenCategory == expectedCategory);
+
+        // ---------------------------------------------------------------------
+        // 3. MINT CAPABILITY VALIDATION
+        // ---------------------------------------------------------------------
+        // Mint-allowed path: outputs may propagate expectedCategory (including +0x02
+        // when expectedCategory encodes minting authority — design at genesis).
+
+        // ---------------------------------------------------------------------
+        // 4. OUTPUT BOUNDS
+        // ---------------------------------------------------------------------
+        require(tx.outputs.length >= 1);
+        require(tx.outputs.length <= 2);
+
+        // ---------------------------------------------------------------------
+        // 5. OUTPUT TOKEN VALIDATION (unrolled — max 2 outputs)
+        // ---------------------------------------------------------------------
+        require(tx.outputs.length != 1 || tx.outputs[0].tokenCategory == expectedCategory);
+        require(tx.outputs.length != 1 || tx.outputs[0].tokenAmount == 0);
+        require(tx.outputs.length != 2 || tx.outputs[0].tokenCategory == expectedCategory);
+        require(tx.outputs.length != 2 || tx.outputs[0].tokenAmount == 0);
+        require(tx.outputs.length != 2 || tx.outputs[1].tokenCategory == expectedCategory);
+        require(tx.outputs.length != 2 || tx.outputs[1].tokenAmount == 0);
     }
 }

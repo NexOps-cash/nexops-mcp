@@ -327,11 +327,11 @@ def recompose_template(template: str, constructor_block: str, business_logic_blo
         + template[ce_line_end:]
     )
 
-    # Replace business logic placeholder
+    # Replace business logic placeholder (optional — CashTokens anchor-only templates omit it)
     bl = "=== BUSINESS_LOGIC_ZONE ==="
     bi = template.find(bl)
     if bi == -1:
-        raise ValueError("BUSINESS_LOGIC_ZONE marker missing during recomposition")
+        return template
     # Find the next marker after business logic to know where to stop replacing
     rest_start = bi + len(bl)
 

@@ -65,7 +65,7 @@ pragma cashscript ^0.13.0;
 
 contract SidecarWithRecipient() {
     function execute(
-        pubkeyhash recipient,    // Typed P2PKH destination for primary output
+        pubkey recipient,    // Typed P2PKH destination for primary output
         int primaryValue,        // Value for primary output (untrusted — bound below)
         int sidecarValue         // Value for sidecar output (MUST be 0 if no sidecar)
     ) {
@@ -135,7 +135,7 @@ contract SidecarWithRecipient() {
         // OUTPUT[0]: PRIMARY — RECIPIENT PAYMENT
         // ═══════════════════════════════════════════════════════════════
         // Destination is typed P2PKH — no raw bytes injection possible
-        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(recipient));
+        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(hash160(recipient)));
 
         // primaryValue is UNTRUSTED (caller-provided)
         // Bound SOLELY by equality with consensus-enforced output value
@@ -151,27 +151,18 @@ contract SidecarWithRecipient() {
         // This branch executes ONLY when tx.outputs.length == 2.
         // Due to the consistency invariant above, if we reach this branch
         // then sidecarValue > 0 is already guaranteed — no re-check needed.
-        if (tx.outputs.length == 2) {
-            // SIDECAR VALUE BINDING
-            // sidecarValue > 0 already guaranteed by consistency invariant
-            // Bind to consensus-enforced output value
-            require(tx.outputs[1].value == sidecarValue);
-
-            // SIDECAR TOKEN REJECTION
-            // Sidecar must be BCH-only
-            // Prevents token injection through the sidecar slot
-            require(tx.outputs[1].tokenCategory == NO_TOKEN);
-            require(tx.outputs[1].tokenAmount == 0);
-
-            // SIDECAR COVENANT EXCLUSION
-            // CRITICAL: Sidecar MUST NOT recreate this contract
-            // Prevents covenant cloning and parallel instance attacks
-            // Builder controls WHERE the sidecar goes — just not WHAT it is
-            require(
-                tx.outputs[1].lockingBytecode !=
-                tx.inputs[this.activeInputIndex].lockingBytecode
-            );
-        }
+        // CashScript ^0.13.0: no if — implication guards for output[1]:
+        // SIDECAR VALUE BINDING
+        require(tx.outputs.length != 2 || tx.outputs[1].value == sidecarValue);
+        // SIDECAR TOKEN REJECTION
+        require(tx.outputs.length != 2 || tx.outputs[1].tokenCategory == NO_TOKEN);
+        require(tx.outputs.length != 2 || tx.outputs[1].tokenAmount == 0);
+        // SIDECAR COVENANT EXCLUSION
+        require(
+            tx.outputs.length != 2 ||
+            tx.outputs[1].lockingBytecode !=
+            tx.inputs[this.activeInputIndex].lockingBytecode
+        );
 
         // NEXOPS INVARIANT: Token burn enforcement is safe here
         // tx.outputs.length <= 2 ensures token checks cover all outputs
@@ -237,22 +228,15 @@ contract SidecarWithContinuation() {
         // OUTPUT[1]: OPTIONAL SIDECAR
         // sidecarValue > 0 already guaranteed by consistency invariant
         // when tx.outputs.length == 2
-        if (tx.outputs.length == 2) {
-            // SIDECAR VALUE BINDING
-            require(tx.outputs[1].value == sidecarValue);
-
-            // SIDECAR TOKEN REJECTION
-            require(tx.outputs[1].tokenCategory == NO_TOKEN);
-            require(tx.outputs[1].tokenAmount == 0);
-
-            // SIDECAR COVENANT EXCLUSION
-            // Since output[0] is already the continuation, output[1]
-            // being a second continuation would be a protocol violation
-            require(
-                tx.outputs[1].lockingBytecode !=
-                tx.inputs[this.activeInputIndex].lockingBytecode
-            );
-        }
+        // CashScript ^0.13.0: no if — implication guards for output[1]:
+        require(tx.outputs.length != 2 || tx.outputs[1].value == sidecarValue);
+        require(tx.outputs.length != 2 || tx.outputs[1].tokenCategory == NO_TOKEN);
+        require(tx.outputs.length != 2 || tx.outputs[1].tokenAmount == 0);
+        require(
+            tx.outputs.length != 2 ||
+            tx.outputs[1].lockingBytecode !=
+            tx.inputs[this.activeInputIndex].lockingBytecode
+        );
     }
 }
 
@@ -293,7 +277,7 @@ contract SidecarWithP2SH() {
         require(primaryValue + sidecarValue <= inputValue);
 
         // OUTPUT[0]: PRIMARY — TYPED P2SH DESTINATION
-        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2SH(scriptHash));
+        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2SH32(scriptHash));
         require(tx.outputs[0].value == primaryValue);
         require(tx.outputs[0].tokenCategory == NO_TOKEN);
         require(tx.outputs[0].tokenAmount == 0);
@@ -301,15 +285,15 @@ contract SidecarWithP2SH() {
         // OUTPUT[1]: OPTIONAL SIDECAR
         // sidecarValue > 0 already guaranteed by consistency invariant
         // when tx.outputs.length == 2
-        if (tx.outputs.length == 2) {
-            require(tx.outputs[1].value == sidecarValue);
-            require(tx.outputs[1].tokenCategory == NO_TOKEN);
-            require(tx.outputs[1].tokenAmount == 0);
-            require(
-                tx.outputs[1].lockingBytecode !=
-                tx.inputs[this.activeInputIndex].lockingBytecode
-            );
-        }
+        // CashScript ^0.13.0: no if — implication guards for output[1]:
+        require(tx.outputs.length != 2 || tx.outputs[1].value == sidecarValue);
+        require(tx.outputs.length != 2 || tx.outputs[1].tokenCategory == NO_TOKEN);
+        require(tx.outputs.length != 2 || tx.outputs[1].tokenAmount == 0);
+        require(
+            tx.outputs.length != 2 ||
+            tx.outputs[1].lockingBytecode !=
+            tx.inputs[this.activeInputIndex].lockingBytecode
+        );
     }
 }
 

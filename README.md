@@ -200,6 +200,15 @@ graph LR
 
 ---
 
+## CashTokens generation
+
+Five pattern classes (FT, immutable/mutable NFT, minting authority, hybrid vault) are routed and scored via the CashTokens benchmark suite. For supported intents, pipeline behavior, limitations, and reproduction steps, see:
+
+- [`docs/cashtokens_generation.md`](docs/cashtokens_generation.md) — user-facing trust and usage
+- [`docs/cashtokens_benchmark.md`](docs/cashtokens_benchmark.md) — reproducible baseline vs post-upgrade metrics
+
+---
+
 ## 🛠️ Getting Started
 
 ### Prerequisites

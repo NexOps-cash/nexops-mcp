@@ -29,6 +29,11 @@ class IntentModel(BaseModel):
     threshold: Optional[int] = None
     timeout_days: Optional[int] = None
     token_id: Optional[str] = None
+    token_class: Optional[str] = None  # ft | nft_immutable | nft_mutable | nft_minting | hybrid
+    nft_capability: Optional[str] = None  # none | mutable | minting
+    expected_category: Optional[str] = None
+    requires_commitment: bool = False
+    is_genesis: bool = False
     purpose: str = ""
 
     @field_validator("contract_type", "purpose", mode="before")

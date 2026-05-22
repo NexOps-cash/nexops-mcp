@@ -1,0 +1,48 @@
+# FT transfer family — example prompts (free synthesis benchmark)
+# python -m benchmark.runner benchmark/suites/cashtokens_ft.yaml
+
+- id: ct_ft_family_001
+  pattern: token_ft
+  difficulty: medium
+  intent: |
+    Create a loyalty points transfer contract. Users hold pre-minted fungible tokens and can send tokens to a recipient with their owner signature. Preserve token category and amount from the active input to the payout output.
+  required_features:
+    - signature_verification
+    - token_category_check
+    - token_amount_check
+    - output_destination_validation
+  critical_features:
+    - valid_signature_check
+    - token_category_check
+    - token_amount_check
+  expected_structure:
+    require_count_min: 4
+  tags: ["cashtokens", "ft", "family_suite"]
+
+- id: ct_ft_family_002
+  pattern: token_ft
+  difficulty: medium
+  intent: |
+    Build a contract to transfer in-game gold (fungible CashTokens) to another player. Require owner signature and enforce tokenCategory and tokenAmount preservation on the recipient output.
+  required_features:
+    - signature_verification
+    - token_category_check
+    - token_amount_check
+  critical_features:
+    - valid_signature_check
+    - token_category_check
+  tags: ["cashtokens", "ft", "family_suite"]
+
+- id: ct_ft_family_003
+  pattern: token_ft
+  difficulty: hard
+  intent: |
+    Split a fungible token UTXO into two outputs: half to recipient A and half to recipient B. Sum of output tokenAmounts must equal the input tokenAmount. Owner must sign.
+  required_features:
+    - signature_verification
+    - token_category_check
+    - token_amount_check
+  critical_features:
+    - token_category_check
+    - token_amount_check
+  tags: ["cashtokens", "ft", "family_suite", "split"]

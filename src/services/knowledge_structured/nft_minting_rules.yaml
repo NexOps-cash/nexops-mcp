@@ -1,0 +1,30 @@
+family: nft_minting
+description: "Minting NFT (category + 0x02) custody and issuance."
+concrete_expressions:
+  - check: "require(tx.inputs[this.activeInputIndex].tokenCategory == baseCategory + 0x02);"
+    prevents: "minting without authority input"
+    mode: [nft_minting, nft_minting_authority, minting]
+  - check: "require(tx.outputs[authIdx].tokenCategory == baseCategory + 0x02);"
+    prevents: "minting capability stripped from custody output"
+    mode: [nft_minting, nft_minting_authority, minting]
+  - check: "require(tx.outputs[authIdx].lockingBytecode == this.activeBytecode);"
+    prevents: "minting authority escapes contract (direct fund loss)"
+    mode: [nft_minting, nft_minting_authority, minting]
+  - check: "require(checkSig(mintSig, mintAuthority));"
+    prevents: "unauthorized mint"
+    mode: [nft_minting, nft_minting_authority, minting]
+  - check: "require(tx.outputs.length <= maxOutputs);"
+    prevents: "hidden mint outputs"
+    mode: [nft_minting, nft_minting_authority, minting]
+must:
+  - id: MINT-CAPABILITY-IN
+    rule: "Input minting authority uses tokenCategory with 0x02 suffix."
+  - id: MINT-CUSTODY
+    rule: "require(tx.outputs[mintAuthIndex].lockingBytecode == this.activeBytecode);"
+  - id: MINT-AUTH-SIG
+    rule: "require(checkSig(mintSig, mintAuthority));"
+  - id: MINT-OUTPUT-LIMIT
+    rule: "require(tx.outputs.length <= N); // first line in mint functions"
+forbidden:
+  - id: MINT-ESCAPE
+    rule: "Never send 0x02 minting NFT to an external wallet — capability leak."

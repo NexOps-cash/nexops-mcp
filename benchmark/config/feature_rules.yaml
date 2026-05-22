@@ -29,3 +29,18 @@ features:
   output_value_validation:
     rule: 'tx\.outputs\[\d+\]\.value\s*==\s*'
     description: "Detected output value validation"
+  token_nft_commitment:
+    rule: '\.nftCommitment\s*==\s*'
+    description: "NFT commitment equality preservation"
+  capability_mutable:
+    rule: 'tokenCategory\s*==\s*[^;]+\+\s*0x01\b'
+    description: "Mutable NFT capability suffix (+0x01)"
+  capability_minting:
+    rule: 'tokenCategory\s*==\s*[^;]+\+\s*0x02\b'
+    description: "Minting NFT capability suffix (+0x02)"
+  bch_only_output:
+    rule: 'tx\.outputs\[\d+\]\.tokenCategory\s*==\s*0x\b'
+    description: "BCH-only output guard (no tokens on output)"
+  self_anchor_minting:
+    rule: 'this\.activeBytecode'
+    description: "Contract self-anchor reference (minting custody heuristic)"

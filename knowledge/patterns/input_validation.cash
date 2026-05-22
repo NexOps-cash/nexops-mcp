@@ -39,7 +39,7 @@ contract BasicInputIdentity() {
         // CRITICAL: Validate active input IS this contract
         // Prevents attacker from substituting different contract at activeInputIndex
         bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
-        require(thisBytecode == this.lockingBytecode);
+        require(thisBytecode == this.activeBytecode);
         
         // SECURITY PROPERTIES:
         // ✓ Input identity verified (lockingBytecode match)
@@ -48,7 +48,7 @@ contract BasicInputIdentity() {
         // ✓ Validates WHAT the input is, not WHERE it is
         //
         // WHY THIS IS SECURE:
-        // - this.lockingBytecode is the contract's own bytecode
+        // - this.activeBytecode is the contract's own bytecode
         // - tx.inputs[this.activeInputIndex] is the input being spent
         // - Exact bytecode match proves input is this contract instance
         // - Attacker cannot substitute different contract
@@ -84,7 +84,7 @@ contract InputValueValidation(
     function validate() {
         // Step 1: CRITICAL - Validate input identity
         bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
-        require(thisBytecode == this.lockingBytecode);
+        require(thisBytecode == this.activeBytecode);
         
         // Step 2: CRITICAL - Capture input value explicitly
         // Get the value of the input being spent
@@ -132,7 +132,7 @@ contract InputValueRange(
     function validate() {
         // Step 1: CRITICAL - Validate input identity
         bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
-        require(thisBytecode == this.lockingBytecode);
+        require(thisBytecode == this.activeBytecode);
         
         // Step 2: CRITICAL - Capture input value
         int inputValue = tx.inputs[this.activeInputIndex].value;
@@ -181,7 +181,7 @@ contract TokenFreeValidation(
         
         // Step 1: CRITICAL - Validate input identity
         bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
-        require(thisBytecode == this.lockingBytecode);
+        require(thisBytecode == this.activeBytecode);
         
         // Step 2: CRITICAL - Capture input value
         int inputValue = tx.inputs[this.activeInputIndex].value;
@@ -189,8 +189,7 @@ contract TokenFreeValidation(
         
         // Step 3: CRITICAL - Enforce NO_TOKEN
         // Validates input has no CashTokens (fungible or NFT)
-        bytes32 inputTokenCategory = tx.inputs[this.activeInputIndex].tokenCategory;
-        require(inputTokenCategory == NO_TOKEN);
+        require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
         
         // SECURITY PROPERTIES:
         // ✓ Input identity verified
@@ -242,7 +241,7 @@ contract ExplicitParameterValidation() {
         
         // Step 1: CRITICAL - Validate input identity
         bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
-        require(thisBytecode == this.lockingBytecode);
+        require(thisBytecode == this.activeBytecode);
         
         // Step 2: CRITICAL - Capture actual input value
         int actualValue = tx.inputs[this.activeInputIndex].value;
@@ -252,8 +251,7 @@ contract ExplicitParameterValidation() {
         require(declaredValue == actualValue);
         
         // Step 4: CRITICAL - Enforce NO_TOKEN
-        bytes32 inputTokenCategory = tx.inputs[this.activeInputIndex].tokenCategory;
-        require(inputTokenCategory == NO_TOKEN);
+        require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
         
         // Now we can safely use declaredValue in logic
         // We know it accurately represents the input value
@@ -305,7 +303,7 @@ contract ComprehensiveInputValidation(
         // Step 1: CRITICAL - Validate input identity
         // Ensures activeInputIndex is this contract
         bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
-        require(thisBytecode == this.lockingBytecode);
+        require(thisBytecode == this.activeBytecode);
         
         // Step 2: CRITICAL - Capture actual input value
         int actualValue = tx.inputs[this.activeInputIndex].value;
@@ -318,8 +316,7 @@ contract ComprehensiveInputValidation(
         require(actualValue <= maximumValue);
         
         // Step 5: CRITICAL - Enforce NO_TOKEN
-        bytes32 inputTokenCategory = tx.inputs[this.activeInputIndex].tokenCategory;
-        require(inputTokenCategory == NO_TOKEN);
+        require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
         
         // Step 6: OPTIONAL - Validate no NFT commitment
         // (tokenCategory == NO_TOKEN already ensures this, but explicit check available)
@@ -379,7 +376,7 @@ contract InputValidationWithPosition(
         
         // Step 1: CRITICAL - Validate input identity
         bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
-        require(thisBytecode == this.lockingBytecode);
+        require(thisBytecode == this.activeBytecode);
         
         // Step 2: OPTIONAL - Validate position if needed
         // ⚠️ CAVEAT: This is a CONSTRAINT, not cryptographic security
@@ -394,8 +391,7 @@ contract InputValidationWithPosition(
         require(actualValue == expectedValue);
         
         // Step 4: CRITICAL - Enforce NO_TOKEN
-        bytes32 inputTokenCategory = tx.inputs[this.activeInputIndex].tokenCategory;
-        require(inputTokenCategory == NO_TOKEN);
+        require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
         
         // SECURITY PROPERTIES:
         // ✓ Input identity verified
@@ -454,15 +450,14 @@ contract PureValidationContract(
         
         // Step 1: CRITICAL - Validate input identity
         bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
-        require(thisBytecode == this.lockingBytecode);
+        require(thisBytecode == this.activeBytecode);
         
         // Step 2: CRITICAL - Validate input value
         int actualValue = tx.inputs[this.activeInputIndex].value;
         require(actualValue == expectedValue);
         
         // Step 3: CRITICAL - Enforce NO_TOKEN
-        bytes32 inputTokenCategory = tx.inputs[this.activeInputIndex].tokenCategory;
-        require(inputTokenCategory == NO_TOKEN);
+        require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
         
         // NO output validation
         // Outputs can be anything (by design)
@@ -515,15 +510,14 @@ contract SignatureFreeValidation(
         
         // Step 1: CRITICAL - Validate input identity
         bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
-        require(thisBytecode == this.lockingBytecode);
+        require(thisBytecode == this.activeBytecode);
         
         // Step 2: CRITICAL - Validate input value
         int actualValue = tx.inputs[this.activeInputIndex].value;
         require(actualValue == expectedValue);
         
         // Step 3: CRITICAL - Enforce NO_TOKEN
-        bytes32 inputTokenCategory = tx.inputs[this.activeInputIndex].tokenCategory;
-        require(inputTokenCategory == NO_TOKEN);
+        require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
         
         // NO signature required (anyone-can-spend)
         // As long as input is valid, spending is allowed
@@ -581,7 +575,7 @@ contract ProductionInputValidation(
         
         // 1. IDENTITY - Validate this is the correct contract
         bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
-        require(thisBytecode == this.lockingBytecode);
+        require(thisBytecode == this.activeBytecode);
         
         // 2. VALUE CAPTURE - Get actual input value from blockchain
         int actualValue = tx.inputs[this.activeInputIndex].value;
@@ -596,8 +590,7 @@ contract ProductionInputValidation(
         require(actualValue <= maximumValue);
         
         // 6. TOKEN ENFORCEMENT - Reject any tokens (pure BCH)
-        bytes32 inputTokenCategory = tx.inputs[this.activeInputIndex].tokenCategory;
-        require(inputTokenCategory == NO_TOKEN);
+        require(tx.inputs[this.activeInputIndex].tokenCategory == NO_TOKEN);
         
         // All validations complete
         // Input is guaranteed to be:
@@ -646,7 +639,7 @@ contract ProductionInputValidation(
 //
 // REQUIRED:
 //   bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
-//   require(thisBytecode == this.lockingBytecode);
+//   require(thisBytecode == this.activeBytecode);
 //
 // WHY:
 // - Prevents input position attacks
@@ -794,7 +787,7 @@ contract ProductionInputValidation(
 // CORRECT:
 //   function validate(int expectedValue) {
 //       bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
-//       require(thisBytecode == this.lockingBytecode);
+//       require(thisBytecode == this.activeBytecode);
 //       int inputValue = tx.inputs[this.activeInputIndex].value;
 //       require(inputValue == expectedValue);
 //   }
@@ -816,7 +809,7 @@ contract ProductionInputValidation(
 // CORRECT:
 //   function validate(int expectedValue) {
 //       bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
-//       require(thisBytecode == this.lockingBytecode);
+//       require(thisBytecode == this.activeBytecode);
 //       int actualValue = tx.inputs[this.activeInputIndex].value;
 //       require(actualValue == expectedValue);
 //   }
@@ -838,7 +831,7 @@ contract ProductionInputValidation(
 // CORRECT:
 //   function validate(int declaredValue) {
 //       bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
-//       require(thisBytecode == this.lockingBytecode);
+//       require(thisBytecode == this.activeBytecode);
 //       int actualValue = tx.inputs[this.activeInputIndex].value;
 //       require(declaredValue == actualValue);  // Honesty check
 //       require(actualValue >= 100000);
@@ -867,7 +860,7 @@ contract ProductionInputValidation(
 // WRONG:
 //   function validate() {
 //       bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
-//       require(thisBytecode == this.lockingBytecode);
+//       require(thisBytecode == this.activeBytecode);
 //       // No value bounds - accepts any value including dust
 //   }
 //
@@ -879,7 +872,7 @@ contract ProductionInputValidation(
 // CORRECT:
 //   function validate() {
 //       bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
-//       require(thisBytecode == this.lockingBytecode);
+//       require(thisBytecode == this.activeBytecode);
 //       int inputValue = tx.inputs[this.activeInputIndex].value;
 //       require(inputValue >= 100000);  // Minimum 100k sats
 //       require(inputValue <= 10000000);  // Maximum 10M sats
@@ -901,7 +894,7 @@ contract ProductionInputValidation(
 // CORRECT:
 //   function validate() {
 //       bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
-//       require(thisBytecode == this.lockingBytecode);
+//       require(thisBytecode == this.activeBytecode);
 //       // Validates IDENTITY, not position
 //   }
 
@@ -921,7 +914,7 @@ contract ProductionInputValidation(
 // CORRECT:
 //   function validate() {
 //       bytes thisBytecode = tx.inputs[this.activeInputIndex].lockingBytecode;
-//       require(thisBytecode == this.lockingBytecode);
+//       require(thisBytecode == this.activeBytecode);
 //       int inputValue = tx.inputs[this.activeInputIndex].value;
 //       require(inputValue == 1000000);
 //   }

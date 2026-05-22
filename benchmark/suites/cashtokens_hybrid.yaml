@@ -1,0 +1,32 @@
+# Hybrid vault family — example prompts
+# python -m benchmark.runner benchmark/suites/cashtokens_hybrid.yaml
+
+- id: ct_hybrid_family_001
+  pattern: hybrid_token
+  difficulty: hard
+  intent: |
+    Stablecoin-style covenant: preserve lockingBytecode, tokenCategory, value, tokenAmount, and nftCommitment across state transitions on the active output.
+  required_features:
+    - signature_verification
+    - covenant
+    - token_category_check
+    - token_amount_check
+  critical_features:
+    - covenant_self_reference
+    - token_category_check
+  tags: ["cashtokens", "hybrid", "family_suite"]
+
+- id: ct_hybrid_family_002
+  pattern: hybrid_token
+  difficulty: hard
+  intent: |
+    Stateful token vault using NFT commitment for oracle price and fungible tokenAmount on the same category. Five-point covenant validation required.
+  required_features:
+    - signature_verification
+    - covenant
+    - token_category_check
+    - token_amount_check
+  critical_features:
+    - nftcommitment_preservation
+    - token_category_check
+  tags: ["cashtokens", "hybrid", "family_suite"]

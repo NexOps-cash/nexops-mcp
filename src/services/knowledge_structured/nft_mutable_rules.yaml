@@ -1,0 +1,26 @@
+family: nft_mutable
+description: "Mutable NFT (category + 0x01) state update rules."
+concrete_expressions:
+  - check: "require(tx.inputs[this.activeInputIndex].tokenCategory == baseCategory + 0x01);"
+    prevents: "mutable capability stripped or wrong category"
+    mode: [nft_mutable, nft_mutable_state_update]
+  - check: "require(tx.outputs[0].tokenCategory == baseCategory + 0x01);"
+    prevents: "output loses mutable capability suffix"
+    mode: [nft_mutable, nft_mutable_state_update]
+  - check: "require(tx.outputs[0].nftCommitment == newCommitment);"
+    prevents: "stale or attacker-controlled NFT state"
+    mode: [nft_mutable, nft_mutable_state_update]
+  - check: "require(tx.outputs[0].lockingBytecode == this.activeBytecode);"
+    prevents: "state NFT escapes contract custody"
+    mode: [nft_mutable, nft_mutable_state_update]
+  - check: "require(checkSig(ownerSig, owner));"
+    prevents: "unauthorized state update"
+    mode: [nft_mutable, nft_mutable_state_update]
+must:
+  - id: MUT-CAPABILITY
+    rule: "require(tx.outputs[0].tokenCategory == baseCategory + 0x01);"
+  - id: MUT-COMMITMENT
+    rule: "require(tx.outputs[0].nftCommitment == newCommitment);"
+continuation:
+  - id: MUT-REANCHOR
+    rule: "require(tx.outputs[0].lockingBytecode == this.activeBytecode); // when state stays in contract"

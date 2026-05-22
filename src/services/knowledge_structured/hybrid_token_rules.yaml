@@ -1,0 +1,32 @@
+family: hybrid_token
+description: "Five-point covenant for stateful CashToken + NFT hybrids."
+concrete_expressions:
+  - check: "require(tx.outputs[N].lockingBytecode == expectedLockingBytecode);"
+    prevents: "covenant escape via arbitrary destination"
+    mode: [hybrid_token]
+  - check: "require(tx.outputs[N].tokenCategory == tx.inputs[this.activeInputIndex].tokenCategory);"
+    prevents: "category substitution on state transition"
+    mode: [hybrid_token]
+  - check: "require(tx.outputs[N].value == expectedValue);"
+    prevents: "value drain on hybrid UTXO"
+    mode: [hybrid_token]
+  - check: "require(tx.outputs[N].tokenAmount == expectedTokenAmount);"
+    prevents: "FT amount corruption on hybrid UTXO"
+    mode: [hybrid_token]
+  - check: "require(tx.outputs[N].nftCommitment == newCommitment);"
+    prevents: "NFT state corruption"
+    mode: [hybrid_token]
+  - check: "require(tx.inputs[sidecarIdx].outpointTransactionHash == expectedSidecarTxHash);"
+    prevents: "unauthenticated sidecar attachment"
+    mode: [hybrid_token]
+five_point:
+  - id: HYB-LOCK
+    rule: "require(tx.outputs[N].lockingBytecode == expectedLockingBytecode);"
+  - id: HYB-CATEGORY
+    rule: "require(tx.outputs[N].tokenCategory == tx.inputs[this.activeInputIndex].tokenCategory);"
+  - id: HYB-VALUE
+    rule: "require(tx.outputs[N].value == expectedValue);"
+  - id: HYB-AMOUNT
+    rule: "require(tx.outputs[N].tokenAmount == expectedTokenAmount);"
+  - id: HYB-COMMITMENT
+    rule: "require(tx.outputs[N].nftCommitment == newCommitment);"
