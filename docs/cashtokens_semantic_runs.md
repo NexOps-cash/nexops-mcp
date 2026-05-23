@@ -4,6 +4,20 @@ Free synthesis (`disable_golden=True`). **8 in-scope cases** (#1–#8; #9 collat
 
 Exit gate: **≥6/8 Tier B** (converged = compile + critical_features).
 
+## Wave 1.5 parity — 2026-05-23
+
+**Unit parity (no API):** `pytest tests/test_semantic_capabilities.py tests/cashtokens/test_capability_detectors.py tests/test_invariant_engine_core.py tests/cashtokens/test_evaluator_pools.py` — capability extraction, declarative `satisfies_requirement`, evaluator alias pools, unified enforcer profiles.
+
+**Full semantic/family re-run:** requires `OPENROUTER_API_KEY`. Expect capability traces under `benchmark/results/capability_traces/` per case. Regex fallback paths appear in trace `requirement_results.*.path` as `fallback_regex_alias` when YAML capability predicates miss.
+
+**Known family delta (unchanged):** `ct_mint_family_fail_001` negative-case may fail at compile vs converge — documented in `docs/cashtokens_family_benchmark_report.md`.
+
+## Family benchmarks post–Wave 1 — 2026-05-23
+
+`python scripts/run_family_benchmarks.py` — positive-path families (**FT, immutable, mutable, minting 001–003, hybrid**) match prior **2026-05-22** regression (100% compile & converge where expected).
+
+**Delta:** `ct_mint_family_fail_001` (intentional capability-leak probe) previously **compiled** malformed output (converged N); after structural / lint tightening it often **never reaches compile** (pipeline exhaustion). Aggregate `nft_minting` compile rate **75%** vs prior **100%** — see drift table in `docs/cashtokens_family_benchmark_report.md`.
+
 ## Run bench_20260522_1808_5cf6 — 2026-05-22 (cashtokenupgrade)
 
 | Case | Compile | Converged | Coverage | Notes |
