@@ -235,6 +235,10 @@ class AuditMetadata(BaseModel):
     structural_score: float
     semantic_score: Optional[int] = None
     semantic_confidence: Optional[float] = None
+    compile_confidence: Optional[float] = None
+    structural_confidence: Optional[float] = None
+    authorization_confidence: Optional[float] = None
+    findings_by_capability_domain: Dict[str, int] = Field(default_factory=dict)
     contract_hash: str
 
 class SemanticAuditResult(BaseModel):
