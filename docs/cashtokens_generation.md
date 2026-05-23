@@ -43,6 +43,8 @@ python scripts/generate.py -p "stateful token vault five-point covenant" --code-
 
 Use `--golden` to enable golden templates (default is free synthesis, same as the benchmark).
 
+The **WebSocket `/ws/generate` API** uses the same defaults as the benchmark evaluator: free synthesis, no secure fallback, three attempts. Responses include `data.synthesis` (`converged`, `fallback_used`, `attempt_number`, etc.). Legacy behavior: `context.allow_fallback: true` or `context.benchmark_synthesis: false`.
+
 ## Reproduce benchmark numbers
 
 From `nexops-mcp/` with `OPENROUTER_API_KEY` in `.env`. Phase 1 defaults to `anthropic/claude-haiku-4.5` (override with `OPENROUTER_PHASE1_MODEL`; fallback `OPENROUTER_PHASE1_FALLBACK_MODEL`):
