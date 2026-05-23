@@ -140,3 +140,19 @@ Family suite re-run hit **OpenRouter 402 insufficient credits** mid-`nft_immutab
 | semantic_008 | yes | no | 50% |
 
 **Tier B (converged): 6/8** (gate: ≥6/8)
+
+## Run bench_20260523_0817_sem — 2026-05-23T08:18:33.688588+00:00
+
+
+| Case | Compile | Converged | Coverage |
+|------|---------|-----------|----------|
+| semantic_001 | yes | yes | 100% |
+| semantic_002 | yes | yes | 100% |
+| semantic_003 | yes | yes | 100% |
+| semantic_004 | yes | yes | 100% |
+| semantic_005 | yes | yes | 100% |
+| semantic_006 | yes | yes | 100% |
+| semantic_007 | yes | yes | 100% |
+| semantic_008 | yes | yes | 100% |
+
+**Tier B (converged): 8/8** (gate: ≥6/8)
