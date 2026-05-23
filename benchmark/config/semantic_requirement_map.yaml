@@ -1,0 +1,88 @@
+# Declarative requirement -> capability mapping (Wave 1.5)
+# satisfy_via: capability key OR legacy alias pool key
+# fallback: regex_alias | detected_feature | none
+
+mappings:
+  # required_features (YAML capability names)
+  signature_verification:
+    capability: has_signature_auth
+    fallback: regex_alias
+    alias_pool_key: valid_signature_check
+  token_validation:
+    capability: token_category_constrained
+    any_capabilities: [preserves_token_amount, burns_output_tokens]
+    fallback: regex_alias
+  covenant_continuation:
+    capability: reanchors_covenant
+    fallback: regex_alias
+  output_destination_validation:
+    capability: migratory_output
+    fallback: detected_feature
+    detected: locking_bytecode
+  output_value_validation:
+    capability: terminating_output
+    fallback: detected_feature
+    detected: output_value_validation
+  time_validation:
+    capability: terminating_output
+    fallback: regex_alias
+    alias_pool_key: locktime_check
+
+  # critical_features (semantic suite)
+  valid_signature_check:
+    capability: has_signature_auth
+    fallback: regex_alias
+  token_category_check:
+    capability: preserves_token_category
+    any_capabilities: [token_category_constrained, burns_output_tokens]
+    fallback: regex_alias
+  covenant_self_reference:
+    capability: reanchors_covenant
+    fallback: regex_alias
+  soulbound_no_external_transfer:
+    capability: unrestricted_external_transfer
+    negate: true
+    fallback: regex_alias
+  state_transition_commitment:
+    capability: reanchors_covenant
+    fallback: regex_alias
+  terminating_payout_path:
+    capability: terminating_output
+    fallback: regex_alias
+  migratory_locking_bytecode:
+    capability: migratory_output
+    fallback: regex_alias
+  burn_supply_reduction:
+    capability: burns_output_tokens
+    fallback: regex_alias
+  no_mint_increase:
+    capability: capability_retained
+    fallback: regex_alias
+  mint_cap_guard:
+    capability: capability_retained
+    fallback: regex_alias
+  minting_authority_custody:
+    capability: capability_retained
+    negate_capability: capability_escaped
+    fallback: regex_alias
+  capability_byte_match:
+    capability: capability_retained
+    fallback: regex_alias
+  redeem_burn_termination:
+    all_capabilities: [burns_output_tokens, terminating_output]
+    fallback: regex_alias
+  expiry_time_check:
+    capability: terminating_output
+    fallback: regex_alias
+  governance_commitment_mutate:
+    capability: requires_multisig
+    fallback: regex_alias
+  output_amount_check:
+    capability: terminating_output
+    fallback: regex_alias
+  locktime_check:
+    capability: terminating_output
+    fallback: regex_alias
+  two_of_three_logic:
+    capability: has_multisig_auth
+    fallback: regex_alias
