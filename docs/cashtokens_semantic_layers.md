@@ -27,12 +27,16 @@ Deterministic normalization in `semantic_normalization.py` overrides LLM drift a
 
 **≥6/8** in-scope cases converged (compile + critical_features). See `docs/cashtokens_semantic_runs.md`.
 
+## Wave 1.5 (invariant unification)
+
+Shared semantic capabilities drive benchmark `satisfies()` (declarative YAML), capability traces, and high-priority detectors. See `docs/wave_1_5_semantic_invariant_unification.md`. **Wave 2 expansion remains frozen.**
+
 ## Wave 1 freeze (stabilization)
 
 Semantic expansion is **paused**. No new semantic fields, LP/proportional supply, authority-model expansion, or cross-contract reasoning until:
 
 - `semantic_005` compiles consistently (structural repair + marketplace rail)
 - `semantic_008` reaches Tier B (evaluator redeem burn calibration)
-- Family benchmarks show no regression
+- Family benchmarks stable on **positive** paths (done 2026-05-23 — see `docs/cashtokens_family_benchmark_report.md`)
 
 Pipeline focus: `structural_integrity.py`, compile-repair observability under `benchmark/results/repair_debug/`, and `tests/test_structural_integrity.py`. See `docs/semantic_005_008_investigation.md`.

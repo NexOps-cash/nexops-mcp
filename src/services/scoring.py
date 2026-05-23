@@ -1,5 +1,6 @@
 import hashlib
-from typing import List, Optional
+import re
+from typing import Dict, List, Optional
 from src.models import (
     AuditIssue,
     AuditReport,
@@ -46,6 +47,42 @@ ALLOWED_CATEGORIES = set(SEMANTIC_CATEGORY_MAP.keys())
 DISPLAY_FLOOR = 20
 
 
+def _capability_domain_for_rule(rule_id: str) -> str:
+    """Map rule_id to capability tier for report aggregation (metadata only)."""
+    if rule_id.startswith("capability_"):
+        if "auth" in rule_id or "transfer" in rule_id or "payout" in rule_id:
+            return "Authorization"
+        if "token" in rule_id or "burn" in rule_id or "continuity" in rule_id:
+            return "TokenFlow"
+        if "reanchor" in rule_id or "migration" in rule_id or "mutable" in rule_id:
+            return "Lifecycle"
+    capability_rules = {
+        "minting_authority_escape": "Lifecycle",
+        "vulnerable_covenant.cash": "Lifecycle",
+        "token_pair_validation": "TokenFlow",
+    }
+    if rule_id in capability_rules:
+        return capability_rules[rule_id]
+    if re.search(r"token|category|burn|nft", rule_id, re.I):
+        return "TokenFlow"
+    if re.search(r"covenant|anchor|minting|capability", rule_id, re.I):
+        return "Lifecycle"
+    if re.search(r"sig|auth|multisig", rule_id, re.I):
+        return "Authorization"
+    return "Structural"
+
+
+def aggregate_findings_by_capability_domain(issues: List[AuditIssue]) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for issue in issues:
+        if issue.source == "semantic":
+            domain = "Semantic"
+        else:
+            domain = _capability_domain_for_rule(issue.rule_id)
+        counts[domain] = counts.get(domain, 0) + 1
+    return counts
+
+
 def calculate_audit_report(
     issues: List[AuditIssue],
     compile_success: bool,
@@ -56,6 +93,7 @@ def calculate_audit_report(
     semantic_confidence: Optional[float],
     original_code: str,
     compile_toolchain_error: bool = False,
+    authorization_confidence: Optional[float] = None,
 ) -> AuditReport:
     """
     Hybrid Scoring v2 (revised semantic split):
@@ -179,12 +217,25 @@ def calculate_audit_report(
     else:
         risk_level = "CRITICAL"
 
+    compile_confidence = (
+        0.5 if compile_toolchain_error else (1.0 if compile_success else 0.0)
+    )
+    structural_confidence = max(0.0, min(1.0, float(structural_score)))
+    if semantic_confidence is not None:
+        semantic_conf = max(0.0, min(1.0, float(semantic_confidence)))
+    else:
+        semantic_conf = semantic_confidence
+
     metadata = AuditMetadata(
         compile_success=compile_success,
         dsl_passed=dsl_passed,
         structural_score=structural_score,
         semantic_score=semantic_score,
-        semantic_confidence=semantic_confidence,
+        semantic_confidence=semantic_conf,
+        compile_confidence=compile_confidence,
+        structural_confidence=structural_confidence,
+        authorization_confidence=authorization_confidence,
+        findings_by_capability_domain=aggregate_findings_by_capability_domain(deduped_issues),
         contract_hash=contract_hash,
     )
 
