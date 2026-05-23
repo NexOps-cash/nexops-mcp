@@ -19,9 +19,8 @@ import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-from src.utils.cashscript_ast import CashScriptAST
-from src.services.anti_pattern_detectors import DETECTOR_REGISTRY, Violation
-from src.services.pattern_profiles import get_pattern_profile
+from src.services.anti_pattern_detectors import DETECTOR_REGISTRY
+from src.services.invariant_engine_core import build_generation_profile, validate_with_profile
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +79,8 @@ class AntiPatternEnforcer:
         self.kb_path = kb_path
         self.anti_patterns: List[AntiPattern] = []  # Documentation
         self.detectors = DETECTOR_REGISTRY  # Enforcement
-        
+        self._profile = build_generation_profile(DETECTOR_REGISTRY)
+
         self._load_anti_pattern_docs()
     
     def _load_anti_pattern_docs(self):
@@ -175,47 +175,12 @@ class AntiPatternEnforcer:
                 "stage": str
             }
         """
-        violations = []
-        
-        # Parse code into AST for semantic analysis — inject mode so detectors can branch
-        try:
-            ast = CashScriptAST(code, contract_mode=contract_mode)
-        except Exception as e:
-            logger.error(f"Failed to parse code: {e}")
-            return {
-                "valid": False,
-                "violated_rules": ["parse_error"],
-                "violations": [{
-                    "rule": "parse_error",
-                    "reason": f"Failed to parse code: {e}",
-                    "exploit": "Cannot validate unparseable code",
-                    "location": {},
-                    "severity": "critical"
-                }],
-                "stage": stage
-            }
-        
-        profile = get_pattern_profile(contract_mode)
-        disabled_detectors = set(profile.get("disable_detectors", []))
-
-        # Run semantic detectors with pattern-scoped filtering
-        for detector in self.detectors:
-            if detector.id in disabled_detectors:
-                continue
-            try:
-                violation = detector.detect(ast)
-                if violation:
-                    violations.append(violation.to_dict())
-                    logger.warning(f"Anti-pattern detected: {violation.rule}")
-            except Exception as e:
-                logger.error(f"Detector {detector.id} failed: {e}")
-        
-        return {
-            "valid": len(violations) == 0,
-            "violated_rules": [v["rule"] for v in violations],
-            "violations": violations,
-            "stage": stage
-        }
+        return validate_with_profile(
+            code,
+            self._profile,
+            contract_mode=contract_mode,
+            stage=stage,
+        )
 
 
 # Singleton instance

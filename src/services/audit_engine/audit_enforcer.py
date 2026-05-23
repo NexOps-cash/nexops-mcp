@@ -19,10 +19,10 @@ import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-from src.utils.cashscript_ast import CashScriptAST
-from src.services.audit_engine.audit_detectors import AUDIT_DETECTOR_REGISTRY, Violation
-from src.services.audit_engine.invariant_engine import InvariantEngine
-from src.services.pattern_profiles import get_pattern_profile
+import hashlib
+
+from src.services.audit_engine.audit_detectors import AUDIT_DETECTOR_REGISTRY
+from src.services.invariant_engine_core import build_audit_profile, validate_with_profile
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +81,8 @@ class AuditEnforcer:
         self.kb_path = kb_path
         self.anti_patterns: List[AntiPattern] = []  # Documentation
         self.detectors = AUDIT_DETECTOR_REGISTRY  # Enforcement
-        
+        self._profile = build_audit_profile(AUDIT_DETECTOR_REGISTRY)
+
         self._load_anti_pattern_docs()
     
     def _load_anti_pattern_docs(self):
@@ -174,59 +175,13 @@ class AuditEnforcer:
                 "violations": List[Dict],     # Detailed violation info
             }
         """
-        violations = []
-        
-        # Parse code into AST for semantic analysis — inject mode so detectors can branch
-        try:
-            ast = CashScriptAST(code, contract_mode=contract_mode)
-        except Exception as e:
-            logger.error(f"Failed to parse code: {e}")
-            return {
-                "valid": False,
-                "violated_rules": ["parse_error"],
-                "violations": [{
-                    "rule": "parse_error",
-                    "reason": f"Failed to parse code: {e}",
-                    "exploit": "Cannot validate unparseable code",
-                    "location": {},
-                    "severity": "critical"
-                }],
-            }
-        
-        profile = get_pattern_profile(contract_mode)
-        disabled_detectors = set(profile.get("disable_detectors", []))
-
-        invariants: Dict[str, Any] = {}
-        try:
-            invariants = InvariantEngine(ast).analyze()
-        except Exception as e:
-            logger.warning(f"InvariantEngine analysis failed, continuing without invariants: {e}")
-            invariants = {}
-
-        # Run semantic detectors with pattern-scoped filtering
-        for detector in self.detectors:
-            if detector.id in disabled_detectors:
-                continue
-            try:
-                violation = detector.detect(ast, invariants)
-                if violation:
-                    violations.append(violation.to_dict())
-                    logger.warning(f"Anti-pattern detected: {violation.rule}")
-            except Exception as e:
-                logger.error(f"Detector {detector.id} failed: {e}")
-        
-        # Route authorization_model_classifier to metadata only — it must not
-        # appear as an AuditIssue finding (noise on every shared-category contract).
-        auth_metadata = [v for v in violations if v.get("rule") == "authorization_model_classifier"]
-        findings = [v for v in violations if v.get("rule") != "authorization_model_classifier"]
-
-        return {
-            "valid": len(findings) == 0,
-            "violated_rules": [v["rule"] for v in findings],
-            "violations": findings,
-            "invariants": invariants,
-            "auth_classifier_metadata": auth_metadata,  # metadata only, not surfaced as issues
-        }
+        trace_id = hashlib.sha256(code.encode("utf-8")).hexdigest()[:12]
+        return validate_with_profile(
+            code,
+            self._profile,
+            contract_mode=contract_mode,
+            trace_case_id=trace_id,
+        )
 
 
 # Singleton instance
