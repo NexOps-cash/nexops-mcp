@@ -348,4 +348,19 @@ Quick ASCII flow (**audit**, distinct stack):
 
 ---
 
+## Wave 1.5 — shared semantic capabilities
+
+| Component | Role |
+|-----------|------|
+| `semantic_capabilities.py` | Tiered capability extraction (Structural / Authorization / TokenFlow / Lifecycle) |
+| `benchmark/config/semantic_requirement_map.yaml` | Declarative benchmark requirement → capability mapping |
+| `benchmark/semantic_requirements.py` | Thin `satisfies_requirement()` dispatcher |
+| `capability_detectors.py` | High-priority invariant detectors on capabilities |
+| `invariant_engine_core.py` | Unified validate loop; `generation` vs `audit` profiles |
+| `benchmark/results/capability_traces/` | Per-case capability + requirement trace JSON |
+
+Generation TollGate and audit `validate_audit` both route through `invariant_engine_core` with different detector registries. See `docs/wave_1_5_semantic_invariant_unification.md`.
+
+---
+
 *If you extend this doc, link new detection rules to both **LNC-ID** (DSL), **rule id strings** (TollGate/audit), and **benchmark feature names** to avoid terminology drift.*
