@@ -66,6 +66,11 @@ def _parse_args() -> argparse.Namespace:
         help="Use golden template adaptation (default: free synthesis).",
     )
     parser.add_argument(
+        "--allow-fallback",
+        action="store_true",
+        help="Allow secure fallback contract on exhaustion (default: benchmark parity, no fallback).",
+    )
+    parser.add_argument(
         "--security-level",
         choices=("low", "medium", "high"),
         default="high",
@@ -111,7 +116,7 @@ async def _run(
         security_level=security_level,
         on_update=on_update,
         disable_golden=disable_golden,
-        disable_fallbacks=False,
+        disable_fallbacks=not getattr(args, "allow_fallback", False),
     )
 
     if result.get("type") != "success":
