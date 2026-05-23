@@ -35,6 +35,17 @@
 - [ ] No edits to Wave 2 / LP docs
 - [ ] `pytest tests/test_semantic_capabilities.py tests/cashtokens/test_capability_detectors.py tests/test_invariant_engine_core.py` green
 
+## Production API parity (generation)
+
+`/ws/generate` and `GenerationController` default to **benchmark synthesis**:
+
+- `disable_golden=True` (free synthesis)
+- `disable_fallbacks=True` (no `fallback_token.cash` substitution)
+- 3 generation attempts (same as evaluator)
+- Response includes `data.synthesis`: `compile_pass`, `converged`, `fallback_used`, `attempt_number`, `generation_seconds`
+
+Opt out via WebSocket `context`: `benchmark_synthesis: false`, or `allow_fallback: true` / `use_golden: true`.
+
 ## Validation commands
 
 ```powershell
