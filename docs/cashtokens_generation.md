@@ -45,7 +45,7 @@ Use `--golden` to enable golden templates (default is free synthesis, same as th
 
 ## Reproduce benchmark numbers
 
-From `nexops-mcp/` with API keys in `.env` (`OPENROUTER_API_KEY` or `GROQ_API_KEY`):
+From `nexops-mcp/` with `OPENROUTER_API_KEY` in `.env`. Phase 1 defaults to `anthropic/claude-haiku-4.5` (override with `OPENROUTER_PHASE1_MODEL`; fallback `OPENROUTER_PHASE1_FALLBACK_MODEL`):
 
 ```powershell
 # Free synthesis (no golden)
@@ -72,3 +72,16 @@ python scripts/check_cash_compile.py
 ```
 
 See [`cashtokens_benchmark.md`](cashtokens_benchmark.md) for the latest baseline vs post-upgrade diff.
+
+## Semantic constraint layers (v1)
+
+Phase 1 also extracts `ownership_mode`, `lifecycle_mode`, `supply_mode`, and `commitment_schema` (see [`cashtokens_semantic_layers.md`](cashtokens_semantic_layers.md)). Normalization runs after CashToken class routing; lint and Phase 2 rails are lifecycle-aware.
+
+11 real-world prompts (LP excluded):
+
+```powershell
+python scripts/run_semantic_benchmark.py --all
+python scripts/run_semantic_benchmark.py --ids semantic_002 semantic_005
+```
+
+Results: [`cashtokens_semantic_runs.md`](cashtokens_semantic_runs.md). Exit gate: **≥7/11 converged** with API credits available.

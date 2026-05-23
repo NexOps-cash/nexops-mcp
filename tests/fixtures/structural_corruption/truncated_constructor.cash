@@ -1,0 +1,7 @@
+pragma cashscript ^0.13.0;
+contract BadCtor(pubkey owner, bytes32 tokenCategory
+{
+    function spend(sig ownerSig) {
+        require(checkSig(ownerSig, owner));
+    }
+}

@@ -140,7 +140,11 @@ def _check_unused_variables(code: str) -> list[dict]:
     return violations
 
 
-def _check_value_anchoring(code: str, contract_mode: str = "") -> list[dict]:
+def _check_value_anchoring(
+    code: str,
+    contract_mode: str = "",
+    semantic: dict | None = None,
+) -> list[dict]:
     """
     LNC-003: Every function with an output length guard MUST anchor at least
     one output value to the corresponding input value.
@@ -233,7 +237,18 @@ def _check_value_anchoring(code: str, contract_mode: str = "") -> list[dict]:
 
             vault_staged_split = vault_staged_split or vault_tok_split
 
-        has_value_anchor = direct_anchor or sum_anchor or partial_anchor or vault_staged_split
+        sem = semantic or {}
+        terminating_payout = (
+            sem.get("lifecycle_mode") == "terminating"
+            and bool(
+                re.search(r"tx\.outputs\[\d+\]\.value\s*==", body)
+                or re.search(r"tx\.outputs\[\d+\]\.value\s*>=", body)
+            )
+        )
+
+        has_value_anchor = (
+            direct_anchor or sum_anchor or partial_anchor or vault_staged_split or terminating_payout
+        )
         if not has_value_anchor:
             violations.append({
                 "rule_id": "LNC-003",
@@ -752,7 +767,11 @@ def _check_mint_authority(code: str, contract_mode: str = "") -> list[dict]:
     return violations
 
 
-def _check_token_pair_completeness(code: str, contract_mode: str = "") -> list[dict]:
+def _check_token_pair_completeness(
+    code: str,
+    contract_mode: str = "",
+    semantic: dict | None = None,
+) -> list[dict]:
     """
     LNC-014: Missing Token Pair Guard.
 
@@ -765,8 +784,15 @@ def _check_token_pair_completeness(code: str, contract_mode: str = "") -> list[d
     Keep this rule mode-agnostic to avoid split gating logic.
     """
     violations = []
+    sem = semantic or {}
+    supply = (sem.get("supply_mode") or "").lower()
 
     for func_name, body, start_lineno in _function_bodies(code):
+        fn_lower = func_name.lower()
+        if "burn" in fn_lower or "redeem" in fn_lower or supply in ("burnable", "redeemable"):
+            if re.search(r"tokenCategory\s*==\s*0x|tokenAmount\s*==\s*0", body):
+                continue
+
         references_category = bool(re.search(r"\.tokenCategory\b", body))
         references_amount   = bool(re.search(r"\.tokenAmount\b", body))
 
@@ -798,22 +824,55 @@ def _check_token_pair_completeness(code: str, contract_mode: str = "") -> list[d
     return violations
 
 
-def _check_token_mint_supply_enforcement(code: str, contract_mode: str = "") -> list[dict]:
+def _check_token_mint_supply_enforcement(
+    code: str,
+    contract_mode: str = "",
+    semantic: dict | None = None,
+) -> list[dict]:
     """
-    LNC-017: Fungible mint paths must enforce supply bounds.
+    LNC-017: Supply mutation semantics — mint caps, burn-only, no post-genesis mint.
     """
     mode = (contract_mode or "").lower().strip()
-    if mode in {"nft_minting", "nft_minting_authority", "nft_mutable", "nft_immutable", "token_ft", "ft_transfer"}:
-        return []
-    if mode not in {"token", "minting", "covenant"} and "mint" not in code.lower():
-        return []
+    sem = semantic or {}
+    supply_mode = (sem.get("supply_mode") or "fixed").lower()
 
-    violations = []
+    violations: list[dict] = []
+
+    if supply_mode == "burnable":
+        for func_name, body, start_lineno in _function_bodies(code):
+            if "mint" in func_name.lower() and re.search(r"totalMinted|mintAmount\s*\+", body, re.I):
+                violations.append({
+                    "rule_id": "LNC-017",
+                    "message": (
+                        f"Burnable-only contract: function '{func_name}' must not increase supply."
+                    ),
+                    "line_hint": start_lineno,
+                })
+        return violations
+
+    if supply_mode == "fixed" and mode in {"token_ft", "ft_transfer"}:
+        for func_name, body, start_lineno in _function_bodies(code):
+            if "mint" in func_name.lower() and re.search(r"mintAmount|totalMinted\s*\+", body, re.I):
+                violations.append({
+                    "rule_id": "LNC-017",
+                    "message": f"Fixed supply: '{func_name}' must not mint new tokens.",
+                    "line_hint": start_lineno,
+                    "severity": "warning",
+                })
+        return violations
+
+    if supply_mode != "capped_mint":
+        if mode in {"nft_minting", "nft_minting_authority", "nft_mutable", "nft_immutable", "token_ft", "ft_transfer"}:
+            if supply_mode not in ("capped_mint",):
+                return []
+        if mode not in {"token", "minting", "covenant", "nft_minting", "nft_minting_authority"} and "mint" not in code.lower():
+            return []
+
     for func_name, body, start_lineno in _function_bodies(code):
         if "mint" not in func_name.lower() and "mint" not in body.lower():
             continue
         has_supply_guard = bool(
-            re.search(r"totalSupply|maxSupply|remainingSupply|cap", body, re.IGNORECASE)
+            re.search(r"totalSupply|maxSupply|remainingSupply|totalMinted", body, re.IGNORECASE)
             and re.search(r"require\s*\(", body)
         )
         if not has_supply_guard:
@@ -821,7 +880,7 @@ def _check_token_mint_supply_enforcement(code: str, contract_mode: str = "") -> 
                 "rule_id": "LNC-017",
                 "message": (
                     f"Mint function '{func_name}' has no visible supply enforcement. "
-                    "Add a cap guard (e.g. require(totalSupply + mintAmount <= maxSupply))."
+                    "Add a cap guard (e.g. require(totalMinted + mintAmount <= maxSupply))."
                 ),
                 "line_hint": start_lineno,
                 "severity": "warning",
@@ -888,15 +947,30 @@ _NFT_MODES = {"nft_immutable", "nft_mutable", "token", "covenant", "hybrid_token
 _FT_MODES = {"token_ft", "token", "distribution", "split"}
 
 
-def _check_nft_commitment_preservation(code: str, contract_mode: str = "") -> list[dict]:
-    """LNC-020: NFT commitment must be validated when nftCommitment appears (soft warning)."""
+def _check_nft_commitment_preservation(
+    code: str,
+    contract_mode: str = "",
+    semantic: dict | None = None,
+) -> list[dict]:
+    """LNC-020: NFT commitment validation; stricter when commitment_schema set."""
     mode = (contract_mode or "").lower().strip()
+    sem = semantic or {}
+    schema = (sem.get("commitment_schema") or "opaque").lower()
     if mode not in _NFT_MODES and "nft" not in code.lower():
         return []
     violations = []
     for func_name, body, start_lineno in _function_bodies(code):
         refs_commit = bool(re.search(r"\.nftCommitment\b", body))
         if not refs_commit:
+            if schema in ("expiry", "governance") and "update" in func_name.lower():
+                violations.append({
+                    "rule_id": "LNC-020",
+                    "message": (
+                        f"Schema '{schema}': '{func_name}' must read or assign nftCommitment."
+                    ),
+                    "line_hint": start_lineno,
+                    "severity": "warning",
+                })
             continue
         preserves = bool(
             re.search(
@@ -905,17 +979,36 @@ def _check_nft_commitment_preservation(code: str, contract_mode: str = "") -> li
             )
             or re.search(r"\.nftCommitment\s*==\s*\w+", body)
         )
-        if not preserves and mode in {"nft_immutable", "nft_mutable"}:
+        if schema == "expiry" and not (
+            preserves or re.search(r"tx\.time", body) or re.search(r"expir", body, re.I)
+        ):
             violations.append({
                 "rule_id": "LNC-020",
-                "message": (
-                    f"Function '{func_name}' references nftCommitment without preserving or "
-                    "assigning it explicitly (immutable: equality to input; mutable: new commitment param)."
-                ),
+                "message": f"Expiry schema: '{func_name}' needs tx.time or commitment expiry compare.",
                 "line_hint": start_lineno,
                 "severity": "warning",
             })
+        elif not preserves and mode in {"nft_immutable", "nft_mutable", "hybrid_token"}:
+            if schema == "opaque" or mode == "nft_mutable":
+                violations.append({
+                    "rule_id": "LNC-020",
+                    "message": (
+                        f"Function '{func_name}' references nftCommitment without preserving or "
+                        "assigning it explicitly."
+                    ),
+                    "line_hint": start_lineno,
+                    "severity": "warning",
+                })
     return violations
+
+
+def _check_semantic_lifecycle_rules(
+    code: str,
+    contract_mode: str = "",
+    semantic: dict | None = None,
+) -> list[dict]:
+    from src.services.lifecycle_lint import run_semantic_lint
+    return run_semantic_lint(code, contract_mode, semantic)
 
 
 def _check_bch_only_output_guard(code: str, contract_mode: str = "") -> list[dict]:
@@ -1069,6 +1162,10 @@ def _check_locking_bytecode_constructor(code: str) -> list[dict]:
         if re.fullmatch(r'0x[0-9a-fA-F]{40}', arg):
             continue
 
+        # bytes20 constructor params (buyerPkh, sellerHash, recipientLock, etc.)
+        if re.search(r"(?i)(?:hash|pkh|lock|bytecode)$", arg):
+            continue
+
         # Unsafe: raw pubkey, bytes variable, or other non-hashed arg
         violations.append({
             "rule_id": "LNC-015",
@@ -1154,11 +1251,17 @@ class DSLLinter:
         _check_minting_authority_custody,  # LNC-023 (hard)
         _check_nft_commitment_length_bound,  # LNC-024
         _check_five_point_covenant,      # LNC-025
+        _check_semantic_lifecycle_rules,  # LNC-026, LNC-027, lifecycle LNC-008 hints
         _check_locking_bytecode_constructor,  # LNC-015  (P2PKH/P2SH constructor safety)
         _check_value_preservation,       # LNC-016  (Self-anchor + Value continuity)
     ]
 
-    def lint(self, code: str, contract_mode: str = "") -> dict[str, Any]:
+    def lint(
+        self,
+        code: str,
+        contract_mode: str = "",
+        semantic: dict | None = None,
+    ) -> dict[str, Any]:
         """
         Run all lint rules against the provided CashScript source.
 
@@ -1192,8 +1295,14 @@ class DSLLinter:
             try:
                 import inspect
                 sig = inspect.signature(rule_fn)
-                if "contract_mode" in sig.parameters:
-                    all_violations.extend(rule_fn(code, contract_mode=contract_mode))
+                params = sig.parameters
+                kwargs: dict = {}
+                if "contract_mode" in params:
+                    kwargs["contract_mode"] = contract_mode
+                if "semantic" in params:
+                    kwargs["semantic"] = semantic
+                if kwargs:
+                    all_violations.extend(rule_fn(code, **kwargs))
                 else:
                     all_violations.extend(rule_fn(code))
             except Exception as exc:

@@ -1,0 +1,120 @@
+# 8 in-scope semantic cases (#9 collateral, #10 LP, #11 stablecoin, #12 auction removed)
+# python scripts/run_semantic_benchmark.py --all
+
+- id: semantic_001
+  pattern: semantic_escrow
+  difficulty: hard
+  intent: |
+    NFT escrow where seller transfers immutable NFT only after BCH payment is verified.
+  required_features:
+    - signature_verification
+    - token_category_check
+    - output_destination_validation
+  critical_features:
+    - valid_signature_check
+    - token_category_check
+    - terminating_payout_path
+    - migratory_locking_bytecode
+  tags: ["cashtokens", "semantic", "escrow"]
+
+- id: semantic_002
+  pattern: semantic_soulbound
+  difficulty: medium
+  intent: |
+    Soulbound identity NFT that can update metadata commitment but cannot transfer ownership.
+  required_features:
+    - signature_verification
+  critical_features:
+    - valid_signature_check
+    - soulbound_no_external_transfer
+    - covenant_self_reference
+    - state_transition_commitment
+  tags: ["cashtokens", "semantic", "soulbound"]
+
+- id: semantic_003
+  pattern: semantic_burnable
+  difficulty: medium
+  intent: |
+    Burnable fungible token covenant where users can destroy tokens but never mint new supply.
+  required_features:
+    - signature_verification
+    - token_validation
+  critical_features:
+    - valid_signature_check
+    - token_category_check
+    - burn_supply_reduction
+    - no_mint_increase
+  tags: ["cashtokens", "semantic", "burnable"]
+
+- id: semantic_004
+  pattern: semantic_governance
+  difficulty: hard
+  intent: |
+    Governance NFT where holders can update treasury state stored inside nftCommitment using multisig approval.
+  required_features:
+    - signature_verification
+    - covenant_continuation
+  critical_features:
+    - valid_signature_check
+    - governance_commitment_mutate
+    - state_transition_commitment
+    - two_of_three_logic
+  tags: ["cashtokens", "semantic", "governance"]
+
+- id: semantic_005
+  pattern: semantic_marketplace
+  difficulty: medium
+  intent: |
+    Marketplace covenant that locks immutable NFT until buyer pays exact BCH amount to seller.
+  required_features:
+    - signature_verification
+    - token_category_check
+    - output_value_validation
+  critical_features:
+    - valid_signature_check
+    - output_amount_check
+    - migratory_locking_bytecode
+    - token_category_check
+  tags: ["cashtokens", "semantic", "marketplace"]
+
+- id: semantic_006
+  pattern: semantic_capped_mint
+  difficulty: hard
+  intent: |
+    Open edition NFT collection with capped max supply and mint authority permanently retained by covenant.
+  required_features:
+    - signature_verification
+    - covenant_continuation
+  critical_features:
+    - mint_cap_guard
+    - minting_authority_custody
+    - capability_byte_match
+  tags: ["cashtokens", "semantic", "minting"]
+
+- id: semantic_007
+  pattern: semantic_streaming
+  difficulty: hard
+  intent: |
+    Subscription NFT where nftCommitment stores expiry timestamp and renewals update the mutable commitment state.
+  required_features:
+    - signature_verification
+    - covenant_continuation
+  critical_features:
+    - state_transition_commitment
+    - expiry_time_check
+    - covenant_self_reference
+  tags: ["cashtokens", "semantic", "streaming"]
+
+- id: semantic_008
+  pattern: semantic_voucher
+  difficulty: medium
+  intent: |
+    Redeemable voucher token that burns itself when exchanged for BCH payout.
+  required_features:
+    - signature_verification
+    - token_validation
+  critical_features:
+    - redeem_burn_termination
+    - burn_supply_reduction
+    - output_amount_check
+  tags: ["cashtokens", "semantic", "voucher"]

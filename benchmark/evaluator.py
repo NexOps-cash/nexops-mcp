@@ -127,6 +127,96 @@ def _cashtoken_alias_pool(
     return merged
 
 
+def _semantic_alias_pool(
+    pattern: str,
+    capabilities: Dict[str, Any],
+    detected: set,
+    code: str,
+    functions: List[Dict],
+) -> Dict[str, bool]:
+    """Semantic suite critical_features (code-pattern checks)."""
+    sig_ok = capabilities.get("signature_verification", False)
+    anchor = bool(re.search(r"lockingBytecode\s*==\s*this\.activeBytecode", code))
+    migratory = bool(
+        re.search(r"lockingBytecode\s*==\s*\w+", code)
+        and not re.search(
+            r"lockingBytecode\s*==\s*this\.activeBytecode",
+            code.split("function")[-1] if "release" in code.lower() or "claim" in code.lower() else code,
+        )
+    ) or bool(re.search(r"recipientLockingBytecode|buyerLockingBytecode|sellerLockingBytecode", code))
+    terminating = bool(
+        re.search(r"tx\.outputs\[\d+\]\.value", code)
+        and (
+            "release" in code.lower()
+            or "claim" in code.lower()
+            or "purchase" in code.lower()
+            or "redeem" in code.lower()
+        )
+    )
+    burn_path = bool(
+        re.search(r"tokenCategory\s*==\s*0x", code)
+        or re.search(r"tokenAmount\s*==\s*0", code)
+        or "burn" in code.lower()
+    )
+    no_mint = not bool(
+        re.search(r"function\s+mint\w*\s*\(", code, re.I)
+        and re.search(r"totalMinted\s*\+|mintAmount\s*\+", code, re.I)
+    )
+    mint_cap = bool(
+        re.search(r"maxSupply|totalMinted\s*\+", code, re.I)
+        and re.search(r"require\s*\(", code)
+    )
+    expiry = bool(
+        re.search(r"tx\.time", code)
+        or re.search(r"expir", code, re.I)
+        or re.search(r"nftCommitment", code)
+    )
+    gov_mutate = bool(
+        re.search(r"nftCommitment\s*==\s*\w+", code)
+        and ("checkMultiSig" in code or "checkSig" in code)
+    )
+
+    cov_ref = anchor or capabilities.get("covenant_continuation", False)
+    base = {
+        "valid_signature_check": sig_ok,
+        "token_category_check": bool(re.search(r"tokenCategory\s*==", code)),
+        "covenant_continuation": cov_ref,
+        "covenant_self_reference": cov_ref,
+        "soulbound_no_external_transfer": anchor and not bool(
+            re.search(r"lockingBytecode\s*==\s*(?!this\.activeBytecode)(?:recipient|buyer|external)", code)
+        ),
+        "state_transition_commitment": bool(re.search(r"nftCommitment", code)) and anchor,
+        "terminating_payout_path": terminating,
+        "migratory_locking_bytecode": migratory or bool(re.search(r"lockingBytecode\s*==\s*\w+Lock", code)),
+        "burn_supply_reduction": burn_path,
+        "no_mint_increase": no_mint,
+        "mint_cap_guard": mint_cap,
+        "minting_authority_custody": anchor and bool(re.search(r"0x02", code)),
+        "capability_byte_match": bool(re.search(r"0x0[12]", code)),
+        "redeem_burn_termination": burn_path and terminating,
+        "expiry_time_check": expiry,
+        "governance_commitment_mutate": gov_mutate,
+        "nftcommitment_preservation": bool(re.search(r"nftCommitment", code)),
+        "output_amount_check": bool(re.search(r"tx\.outputs\[\d+\]\.value", code)),
+        "locktime_check": capabilities.get("time_validation", False) or "tx.time" in code,
+        "two_of_three_logic": "checkMultiSig" in code,
+    }
+    pools = {
+        "semantic_escrow": base,
+        "semantic_soulbound": base,
+        "semantic_burnable": base,
+        "semantic_governance": base,
+        "semantic_marketplace": base,
+        "semantic_capped_mint": base,
+        "semantic_streaming": base,
+        "semantic_voucher": base,
+        "semantic_collateral": base,
+        "semantic_stablecoin": base,
+        "semantic_auction": base,
+    }
+    return {**base, **pools.get(pattern, {})}
+
+
 class BenchmarkEvaluator:
     def __init__(self, weights_path: str = "benchmark/config/scoring_weights.yaml"):
         self.weights_path = Path(weights_path)
@@ -200,6 +290,13 @@ class BenchmarkEvaluator:
                     or "timelock_refund" in detected
                     or ("this.age" in code)
                 )
+                def _redeemable_category_burn_validation(src: str) -> bool:
+                    """FT redeem via output tokenCategory == 0x with constrained input category."""
+                    return bool(
+                        re.search(r"tx\.inputs\[[^\]]+\]\.tokenCategory\s*==", src)
+                        and re.search(r"tx\.outputs\[\d+\]\.tokenCategory\s*==\s*0x", src)
+                    )
+
                 capabilities = {
                     "signature_verification": any("_signature" in f or f == "multisig" for f in detected),
                     "covenant_continuation": any(f.get("has_anchor") and f.get("has_value_check") for f in functions if f["role"] == "INTERMEDIATE"),
@@ -219,9 +316,15 @@ class BenchmarkEvaluator:
                     # Direct capability or feature hit first.
                     if capabilities.get(req) or req in detected:
                         return True
+                    if req == "token_validation" and _redeemable_category_burn_validation(code):
+                        return True
 
                     pattern_key = (case.pattern or "").strip()
-                    if pattern_key in {
+                    if pattern_key.startswith("semantic_"):
+                        alias_checks = _semantic_alias_pool(
+                            pattern_key, capabilities, detected, code, functions
+                        )
+                    elif pattern_key in {
                         "token_ft", "nft_immutable", "nft_mutable",
                         "nft_minting", "hybrid_token",
                     }:

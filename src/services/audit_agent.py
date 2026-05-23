@@ -190,7 +190,6 @@ class AuditAgent:
         effective_mode: str = "", 
         api_key: Optional[str] = None, 
         provider: Optional[str] = None,
-        groq_key: Optional[str] = None,
         openrouter_key: Optional[str] = None
     ) -> AuditReport:
         issues: List[AuditIssue] = []
@@ -352,7 +351,6 @@ class AuditAgent:
                     "audit", 
                     api_key=api_key, 
                     provider_type=provider,
-                    groq_key=groq_key,
                     openrouter_key=openrouter_key
                 )
                 user_prompt = _build_semantic_user_prompt(code, intent)

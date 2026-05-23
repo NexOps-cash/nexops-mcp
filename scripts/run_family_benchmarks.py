@@ -93,8 +93,8 @@ def _md_report(sections: list[dict]) -> str:
 
 
 async def main() -> int:
-    if not os.getenv("OPENROUTER_API_KEY") and not os.getenv("GROQ_API_KEY"):
-        print("Error: OPENROUTER_API_KEY or GROQ_API_KEY required.", file=sys.stderr)
+    if not os.getenv("OPENROUTER_API_KEY"):
+        print("Error: OPENROUTER_API_KEY required.", file=sys.stderr)
         return 1
 
     sections = []

@@ -8,7 +8,7 @@ Usage:
   python scripts/generate.py -p "..." --out MyContract.cash
   python scripts/generate.py -p "..." --code-only
 
-Requires OPENROUTER_API_KEY or GROQ_API_KEY in .env or environment.
+Requires OPENROUTER_API_KEY in .env or environment.
 """
 
 from __future__ import annotations
@@ -82,9 +82,9 @@ async def _run(
     code_only: bool,
     out_path: str,
 ) -> int:
-    if not os.getenv("OPENROUTER_API_KEY") and not os.getenv("GROQ_API_KEY"):
+    if not os.getenv("OPENROUTER_API_KEY"):
         print(
-            "Error: set OPENROUTER_API_KEY or GROQ_API_KEY in .env or the environment.",
+            "Error: set OPENROUTER_API_KEY in .env or the environment.",
             file=sys.stderr,
         )
         return 1

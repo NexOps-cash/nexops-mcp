@@ -3,8 +3,8 @@ import os
 import pytest
 
 pytestmark = pytest.mark.skipif(
-    not os.getenv("OPENROUTER_API_KEY") and not os.getenv("GROQ_API_KEY"),
-    reason="OPENROUTER_API_KEY or GROQ_API_KEY required for E2E generation",
+    not os.getenv("OPENROUTER_API_KEY"),
+    reason="OPENROUTER_API_KEY required for E2E generation",
 )
 
 

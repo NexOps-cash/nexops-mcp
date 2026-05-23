@@ -1,0 +1,6 @@
+pragma cashscript ^0.13.0;
+contract Good(pubkey owner) {
+    function spend(sig ownerSig) {
+        require(checkSig(ownerSig, owner));
+    }
+}
