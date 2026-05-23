@@ -6,6 +6,7 @@ from src.services.audit_engine.audit_lint import get_audit_linter as get_dsl_lin
 from src.services.audit_engine.audit_phase import validate_audit
 from src.services.compiler import get_compiler_service
 from src.services.scoring import calculate_audit_report, ALLOWED_CATEGORIES
+from src.services.semantic_capabilities import extract_semantic_capabilities
 
 logger = logging.getLogger("nexops.audit_agent")
 
@@ -518,6 +519,17 @@ class AuditAgent:
             logger.info("[Semantic Audit] Skipped — compile failed.")
 
         # ── 5. Aggregate, Score, Return ───────────────────────────────────
+        sem_caps = extract_semantic_capabilities(code, contract_mode=effective_mode)
+        auth_caps = sem_caps.authorization
+        if auth_caps.get("has_multisig_auth"):
+            authorization_confidence = 1.0
+        elif auth_caps.get("has_signature_auth"):
+            authorization_confidence = 0.85
+        elif compile_success:
+            authorization_confidence = 0.35
+        else:
+            authorization_confidence = None
+
         report = calculate_audit_report(
             issues=issues,
             compile_success=compile_success,
@@ -528,6 +540,7 @@ class AuditAgent:
             semantic_confidence=semantic_confidence,
             original_code=code,
             compile_toolchain_error=compile_toolchain_error,
+            authorization_confidence=authorization_confidence,
         )
 
         return report
