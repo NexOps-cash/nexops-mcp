@@ -8,7 +8,9 @@ from datetime import datetime
 
 from benchmark.schemas import BenchmarkCase, CaseResult
 from benchmark.feature_extractor import FeatureExtractor
+from benchmark.semantic_requirements import satisfies_requirement
 from src.services.pipeline_engine import get_guarded_pipeline_engine
+from src.services.semantic_capabilities import extract_semantic_capabilities, save_capability_trace
 
 
 def _cashtoken_alias_pool(
@@ -290,16 +292,13 @@ class BenchmarkEvaluator:
                     or "timelock_refund" in detected
                     or ("this.age" in code)
                 )
-                def _redeemable_category_burn_validation(src: str) -> bool:
-                    """FT redeem via output tokenCategory == 0x with constrained input category."""
-                    return bool(
-                        re.search(r"tx\.inputs\[[^\]]+\]\.tokenCategory\s*==", src)
-                        and re.search(r"tx\.outputs\[\d+\]\.tokenCategory\s*==\s*0x", src)
-                    )
-
-                capabilities = {
+                legacy_capabilities = {
                     "signature_verification": any("_signature" in f or f == "multisig" for f in detected),
-                    "covenant_continuation": any(f.get("has_anchor") and f.get("has_value_check") for f in functions if f["role"] == "INTERMEDIATE"),
+                    "covenant_continuation": any(
+                        f.get("has_anchor") and f.get("has_value_check")
+                        for f in functions
+                        if f["role"] == "INTERMEDIATE"
+                    ),
                     "time_validation": has_time_check,
                     "timelock_unlock": has_time_check,
                     "multiple_paths": len(functions) >= 2,
@@ -309,47 +308,67 @@ class BenchmarkEvaluator:
                         or ("tokenCategory" in code and "tokenAmount" in code)
                     ),
                     "output_destination_validation": "locking_bytecode" in detected,
-                    "output_value_validation": ("output_value_validation" in detected) or ("value_check" in detected),
+                    "output_value_validation": (
+                        ("output_value_validation" in detected) or ("value_check" in detected)
+                    ),
                 }
-                
-                def requirement_satisfied(req: str) -> bool:
-                    # Direct capability or feature hit first.
-                    if capabilities.get(req) or req in detected:
-                        return True
-                    if req == "token_validation" and _redeemable_category_burn_validation(code):
-                        return True
 
-                    pattern_key = (case.pattern or "").strip()
-                    if pattern_key.startswith("semantic_"):
-                        alias_checks = _semantic_alias_pool(
-                            pattern_key, capabilities, detected, code, functions
-                        )
-                    elif pattern_key in {
-                        "token_ft", "nft_immutable", "nft_mutable",
-                        "nft_minting", "hybrid_token",
-                    }:
-                        alias_checks = _cashtoken_alias_pool(
-                            pattern_key, capabilities, detected, code, functions
-                        )
-                    else:
-                        alias_checks = _cashtoken_alias_pool(
-                            "", capabilities, detected, code, functions
-                        )
-                        alias_checks.update({
-                            "amount_threshold_logic": ("<=" in code or ">=" in code),
-                            "tiered_delay_logic": (
-                                "smallDelay" in code
-                                or "largeDelay" in code
-                                or "threshold" in code.lower()
-                            ),
-                            "emergency_path": any(
-                                f.get("role") == "RECOVERY" for f in functions
-                            ),
-                            "cancellation_path": "cancel" in code.lower(),
-                            "token_nft_amount_check": ("token_nft" in detected)
-                            or bool(re.search(r"tokenAmount\s*==\s*1\b", code)),
-                        })
-                    return bool(alias_checks.get(req, False))
+                intent_model = data.get("intent_model") or {}
+                intent_modes = {
+                    "ownership_mode": intent_model.get("ownership_mode", ""),
+                    "lifecycle_mode": intent_model.get("lifecycle_mode", ""),
+                    "supply_mode": intent_model.get("supply_mode", ""),
+                    "commitment_schema": intent_model.get("commitment_schema", ""),
+                }
+                sem_caps = extract_semantic_capabilities(
+                    code,
+                    contract_mode=(case.pattern or intent_model.get("contract_type", "")),
+                    intent_modes=intent_modes,
+                )
+
+                pattern_key = (case.pattern or "").strip()
+                if pattern_key.startswith("semantic_"):
+                    legacy_alias_checks = _semantic_alias_pool(
+                        pattern_key, legacy_capabilities, detected, code, functions
+                    )
+                elif pattern_key in {
+                    "token_ft", "nft_immutable", "nft_mutable",
+                    "nft_minting", "hybrid_token",
+                }:
+                    legacy_alias_checks = _cashtoken_alias_pool(
+                        pattern_key, legacy_capabilities, detected, code, functions
+                    )
+                else:
+                    legacy_alias_checks = _cashtoken_alias_pool(
+                        "", legacy_capabilities, detected, code, functions
+                    )
+                    legacy_alias_checks.update({
+                        "amount_threshold_logic": ("<=" in code or ">=" in code),
+                        "tiered_delay_logic": (
+                            "smallDelay" in code
+                            or "largeDelay" in code
+                            or "threshold" in code.lower()
+                        ),
+                        "emergency_path": any(
+                            f.get("role") == "RECOVERY" for f in functions
+                        ),
+                        "cancellation_path": "cancel" in code.lower(),
+                        "token_nft_amount_check": ("token_nft" in detected)
+                        or bool(re.search(r"tokenAmount\s*==\s*1\b", code)),
+                    })
+
+                requirement_traces: Dict[str, Any] = {}
+
+                def requirement_satisfied(req: str) -> bool:
+                    ok, tr = satisfies_requirement(
+                        req,
+                        sem_caps,
+                        legacy_alias_checks=legacy_alias_checks,
+                        detected_features=set(detected),
+                        legacy_capabilities=legacy_capabilities,
+                    )
+                    requirement_traces[req] = tr
+                    return ok
 
                 # 3. Intent Coverage Calculation (Proportional)
                 matched_required = []
@@ -384,7 +403,16 @@ class BenchmarkEvaluator:
                 adj_structure_score = structure_score # Legacy name, simplified
                 
                 critical_missing = [f for f in case.critical_features if not requirement_satisfied(f)]
-                
+
+                try:
+                    save_capability_trace(
+                        case_id=case.id,
+                        caps=sem_caps,
+                        requirement_results=requirement_traces,
+                    )
+                except OSError:
+                    pass
+
                 lint_factor = self.weights.get("factors", {}).get("lint_no_error", 1.0)
                 # Token-bearing vaults: pipeline already passed compile + toll gate; align score with convergence.
                 token_vault_relaxed = (
