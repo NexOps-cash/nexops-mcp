@@ -1,0 +1,8 @@
+pragma cashscript ^0.13.0;
+contract C(pubkey o) {
+    function hold(sig s) {
+        require(checkSig(s, o));
+        require(tx.outputs[0].lockingBytecode == this.activeBytecode);
+        require(tx.outputs[0].tokenCategory == tx.inputs[this.activeInputIndex].tokenCategory);
+    }
+}

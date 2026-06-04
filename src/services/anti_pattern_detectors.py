@@ -990,4 +990,11 @@ DETECTOR_REGISTRY = [
 ]
 
 
+def generation_detector_registry():
+    """Full TollGate registry including Wave 2B CashTokens invalid-logic detectors."""
+    from src.services.cashtokens_token_detectors import CASHTOKENS_INVALID_DETECTOR_REGISTRY
+
+    return DETECTOR_REGISTRY + CASHTOKENS_INVALID_DETECTOR_REGISTRY
+
+
 

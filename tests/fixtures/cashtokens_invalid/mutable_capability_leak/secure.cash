@@ -1,0 +1,9 @@
+pragma cashscript ^0.13.0;
+contract C(pubkey o, bytes32 base, bytes newC) {
+    function update(sig s) {
+        require(checkSig(s, o));
+        require(tx.outputs[0].tokenCategory == base + 0x01);
+        require(tx.outputs[0].nftCommitment == newC);
+        require(tx.outputs[0].lockingBytecode == this.activeBytecode);
+    }
+}

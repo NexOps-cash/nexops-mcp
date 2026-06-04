@@ -19,7 +19,7 @@ import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-from src.services.anti_pattern_detectors import DETECTOR_REGISTRY
+from src.services.anti_pattern_detectors import generation_detector_registry
 from src.services.invariant_engine_core import build_generation_profile, validate_with_profile
 
 logger = logging.getLogger(__name__)
@@ -78,8 +78,8 @@ class AntiPatternEnforcer:
     def __init__(self, kb_path: str = "knowledge"):
         self.kb_path = kb_path
         self.anti_patterns: List[AntiPattern] = []  # Documentation
-        self.detectors = DETECTOR_REGISTRY  # Enforcement
-        self._profile = build_generation_profile(DETECTOR_REGISTRY)
+        self.detectors = generation_detector_registry()  # Enforcement
+        self._profile = build_generation_profile(self.detectors)
 
         self._load_anti_pattern_docs()
     

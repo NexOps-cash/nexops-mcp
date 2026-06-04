@@ -135,6 +135,18 @@ def _cashtoken_alias_pool(
     return merged
 
 
+def _invalid_detector_alias_pool(code: str, contract_mode: str = "") -> Dict[str, bool]:
+    """Wave 2B: must_fail_* keys true when matching invalid-logic detector fires."""
+    from src.services.cashtokens_token_detectors import CASHTOKENS_INVALID_DETECTOR_REGISTRY
+    from src.utils.cashscript_ast import CashScriptAST
+
+    ast = CashScriptAST(code, contract_mode=contract_mode)
+    out: Dict[str, bool] = {}
+    for detector in CASHTOKENS_INVALID_DETECTOR_REGISTRY:
+        out[f"must_fail_{detector.id}"] = detector.detect(ast) is not None
+    return out
+
+
 def _semantic_alias_pool(
     pattern: str,
     capabilities: Dict[str, Any],
@@ -363,6 +375,11 @@ class BenchmarkEvaluator:
                         "token_nft_amount_check": ("token_nft" in detected)
                         or bool(re.search(r"tokenAmount\s*==\s*1\b", code)),
                     })
+                legacy_alias_checks.update(
+                    _invalid_detector_alias_pool(
+                        code, case.pattern or intent_model.get("contract_type", "")
+                    )
+                )
 
                 requirement_traces: Dict[str, Any] = {}
 

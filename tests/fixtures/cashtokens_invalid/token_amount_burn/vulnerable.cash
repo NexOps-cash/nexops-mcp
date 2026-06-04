@@ -1,0 +1,7 @@
+pragma cashscript ^0.13.0;
+contract C(pubkey o) {
+    function burn(sig s) {
+        require(checkSig(s, o));
+        require(tx.outputs[0].tokenCategory == 0x);
+    }
+}

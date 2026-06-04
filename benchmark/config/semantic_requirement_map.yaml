@@ -68,6 +68,27 @@ mappings:
     capability: enforces_supply_cap
     negate: true
     fallback: regex_alias
+  must_fail_authority_leak:
+    fallback: regex_alias
+    alias_pool_key: must_fail_authority_leak
+  must_fail_token_category_drift:
+    fallback: regex_alias
+    alias_pool_key: must_fail_token_category_drift
+  must_fail_token_amount_inflation:
+    fallback: regex_alias
+    alias_pool_key: must_fail_token_amount_inflation
+  must_fail_token_amount_burn:
+    fallback: regex_alias
+    alias_pool_key: must_fail_token_amount_burn
+  must_fail_nft_commitment_loss:
+    fallback: regex_alias
+    alias_pool_key: must_fail_nft_commitment_loss
+  must_fail_hybrid_continuity_break:
+    fallback: regex_alias
+    alias_pool_key: must_fail_hybrid_continuity_break
+  must_fail_unrestricted_token_transfer:
+    fallback: regex_alias
+    alias_pool_key: must_fail_unrestricted_token_transfer
   minting_authority_custody:
     capability: capability_retained
     negate_capability: capability_escaped
