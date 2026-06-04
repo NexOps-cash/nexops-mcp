@@ -41,6 +41,7 @@ CAPABILITY_REGISTRY: Dict[str, tuple[str, str]] = {
     "preserves_token_amount": ("TokenFlow", "cashscript_ast"),
     "burns_output_tokens": ("TokenFlow", "semantic_capabilities"),
     "token_category_constrained": ("TokenFlow", "semantic_capabilities"),
+    "enforces_supply_cap": ("TokenFlow", "semantic_capabilities"),
     # Lifecycle
     "reanchors_covenant": ("Lifecycle", "cashscript_ast"),
     "migratory_output": ("Lifecycle", "semantic_capabilities"),
@@ -204,6 +205,9 @@ def extract_semantic_capabilities(
         _grep_lines(code, r"inputs\[.*\]\.tokenCategory"),
     )
 
+    supply_cap_ok, supply_anchors = _mint_supply_cap_in_requires(code)
+    _add_evidence(caps, "enforces_supply_cap", supply_cap_ok, "ast", supply_anchors)
+
     reanchor = bool(re.search(r"lockingBytecode\s*==\s*this\.activeBytecode", code))
     migratory = bool(
         re.search(
@@ -263,6 +267,21 @@ def _sig_anchors(ast: CashScriptAST) -> List[str]:
 def _multisig_anchors(code: str) -> List[str]:
     m = re.search(r"checkMultiSig\s*\([^)]+\)", code)
     return [m.group(0)[:80]] if m else []
+
+
+def _mint_supply_cap_in_requires(code: str) -> tuple[bool, List[str]]:
+    """True only when a require() inequality binds mint increment to maxSupply/totalSupply."""
+    anchors: List[str] = []
+    for m in re.finditer(r"require\s*\((.*?)\)\s*;", code, re.DOTALL):
+        expr = m.group(1)
+        if not re.search(r"<=|<", expr):
+            continue
+        if not re.search(r"maxSupply|totalSupply|remainingSupply", expr, re.IGNORECASE):
+            continue
+        if not re.search(r"totalMinted|mintAmount|currentSupply", expr, re.IGNORECASE):
+            continue
+        anchors.append(expr.strip()[:120])
+    return bool(anchors), anchors
 
 
 def _grep_lines(code: str, pattern: str, limit: int = 5) -> List[str]:

@@ -1,0 +1,51 @@
+# FT capped mint family — Wave 2A
+# python -m benchmark.runner benchmark/suites/cashtokens_ft_mint.yaml
+
+- id: ct_ft_mint_001
+  pattern: ft_mint
+  difficulty: medium
+  intent: |
+    Mint loyalty tokens with a maximum supply of 1,000,000.
+  required_features:
+    - signature_verification
+    - token_category_check
+  critical_features:
+    - valid_signature_check
+    - supply_cap_enforcement
+  tags: ["cashtokens", "ft_mint", "family_suite"]
+
+- id: ct_ft_mint_002
+  pattern: ft_mint
+  difficulty: medium
+  intent: |
+    Treasury may mint reward tokens but total supply must never exceed maxSupply.
+  required_features:
+    - signature_verification
+  critical_features:
+    - valid_signature_check
+    - supply_cap_enforcement
+  tags: ["cashtokens", "ft_mint", "family_suite"]
+
+- id: ct_ft_mint_003
+  pattern: ft_mint
+  difficulty: hard
+  intent: |
+    Create capped fungible points token where mintAmount + currentSupply must remain below supply cap.
+  required_features:
+    - signature_verification
+    - token_category_check
+  critical_features:
+    - supply_cap_enforcement
+    - mint_cap_guard
+  tags: ["cashtokens", "ft_mint", "family_suite"]
+
+- id: ct_ft_mint_fail_001
+  pattern: ft_mint
+  difficulty: medium
+  intent: |
+    FAILURE CASE: mint unlimited fungible tokens without supply cap.
+  required_features:
+    - signature_verification
+  critical_features:
+    - must_fail_unbounded_mint
+  tags: ["cashtokens", "ft_mint", "family_suite", "failure", "vulnerability"]
