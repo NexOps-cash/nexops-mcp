@@ -1,0 +1,8 @@
+pragma cashscript ^0.13.0;
+contract C(pubkey mintingAuthority, bytes32 baseCategory) {
+    function mint(sig s) {
+        // minting authority 0x02 must stay in covenant
+        require(checkSig(s, mintingAuthority));
+        require(tx.outputs[0].tokenCategory == baseCategory);
+    }
+}
