@@ -35,7 +35,11 @@ mappings:
   token_category_check:
     capability: preserves_token_category
     any_capabilities: [token_category_constrained, burns_output_tokens]
-    fallback: regex_alias
+    fallback: none
+  token_amount_check:
+    capability: preserves_token_amount
+    any_capabilities: [preserves_split_token_supply, burns_output_tokens]
+    fallback: none
   covenant_self_reference:
     capability: reanchors_covenant
     fallback: regex_alias

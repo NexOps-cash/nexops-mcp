@@ -42,6 +42,7 @@ CAPABILITY_REGISTRY: Dict[str, tuple[str, str]] = {
     "burns_output_tokens": ("TokenFlow", "semantic_capabilities"),
     "token_category_constrained": ("TokenFlow", "semantic_capabilities"),
     "enforces_supply_cap": ("TokenFlow", "semantic_capabilities"),
+    "preserves_split_token_supply": ("TokenFlow", "cashscript_ast"),
     # Lifecycle
     "reanchors_covenant": ("Lifecycle", "cashscript_ast"),
     "migratory_output": ("Lifecycle", "semantic_capabilities"),
@@ -169,6 +170,12 @@ def extract_semantic_capabilities(
 
     preserves_cat, cat_anchors = _preserves_token_category_guard(code)
     preserves_amt, amt_anchors = _preserves_token_amount_guard(code)
+    split_ok = ast.has_split_token_supply_conservation()
+    split_anchors = (
+        _grep_lines(code, r"tokenAmount\s*\+.*tokenAmount\s*==")
+        if split_ok
+        else []
+    )
     burns = bool(re.search(r"tx\.outputs\[\d+\]\.tokenCategory\s*==\s*0x\b", code))
     cat_constrained = bool(re.search(r"tx\.inputs\[[^\]]+\]\.tokenCategory\s*==", code))
     _add_evidence(
@@ -181,10 +188,11 @@ def extract_semantic_capabilities(
     _add_evidence(
         caps,
         "preserves_token_amount",
-        preserves_amt,
+        preserves_amt or split_ok,
         "ast",
-        amt_anchors,
+        amt_anchors or split_anchors,
     )
+    _add_evidence(caps, "preserves_split_token_supply", split_ok, "ast", split_anchors)
     _add_evidence(caps, "burns_output_tokens", burns, "heuristic", _grep_lines(code, r"tokenCategory\s*==\s*0x"))
     _add_evidence(
         caps,

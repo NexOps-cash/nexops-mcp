@@ -103,9 +103,9 @@ def _cashtoken_alias_pool(
         },
         "ft_mint": {
             "valid_signature_check": sig_ok,
-            "supply_cap_enforcement": legacy_capabilities.get("enforces_supply_cap") is True,
-            "mint_cap_guard": legacy_capabilities.get("enforces_supply_cap") is True,
-            "must_fail_unbounded_mint": legacy_capabilities.get("enforces_supply_cap") is not True,
+            "supply_cap_enforcement": capabilities.get("enforces_supply_cap") is True,
+            "mint_cap_guard": capabilities.get("enforces_supply_cap") is True,
+            "must_fail_unbounded_mint": capabilities.get("enforces_supply_cap") is not True,
         },
         "hybrid_token": {
             "valid_signature_check": sig_ok,
