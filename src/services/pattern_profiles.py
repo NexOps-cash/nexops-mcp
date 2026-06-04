@@ -6,6 +6,9 @@ def canonical_pattern(contract_mode: str) -> str:
     alias_map = {
         "escrow_2of3_nft": "escrow",
         "ft_transfer": "token_ft",
+        "ft_mint_authority": "ft_mint",
+        "ft_mint": "ft_mint",
+        "ft_mint_failure": "ft_mint_failure",
         "nft_transfer_immutable": "nft_immutable",
         "nft_mutable_state_update": "nft_mutable",
         "nft_minting_authority": "nft_minting",
@@ -93,6 +96,21 @@ PATTERN_PROFILES: Dict[str, Dict[str, List[str]]] = {
         "knowledge_files": ["covenant_rules.yaml", "cashtokens_rules.yaml", "ft_transfer_rules.yaml"],
         "disable_lint_rules": [],
         "disable_detectors": [],
+    },
+    "ft_mint": {
+        "knowledge_files": ["covenant_rules.yaml", "cashtokens_rules.yaml", "ft_mint_rules.yaml"],
+        "disable_lint_rules": ["LNC-018"],
+        "disable_detectors": [],
+    },
+    "ft_mint_failure": {
+        "knowledge_files": ["covenant_rules.yaml", "cashtokens_rules.yaml", "ft_mint_rules.yaml"],
+        "disable_lint_rules": ["LNC-001", "LNC-005", "LNC-008", "LNC-014", "LNC-018"],
+        "disable_detectors": [
+            "missing_output_limit",
+            "missing_value_enforcement",
+            "output_binding_missing",
+            "empty_function_body",
+        ],
     },
     "nft_immutable": {
         "knowledge_files": ["covenant_rules.yaml", "cashtokens_rules.yaml", "nft_rules.yaml"],

@@ -1,0 +1,17 @@
+family: ft_mint
+description: Capped fungible token mint (genesis / inflation with maxSupply guard)
+
+required_invariants:
+  - id: supply_cap
+    mode: [ft_mint, ft_mint_authority, token_ft_mint]
+    rule: require(totalMinted + mintAmount <= maxSupply) or equivalent in every mint function
+  - id: mint_auth
+    mode: [ft_mint, ft_mint_authority, token_ft_mint]
+    rule: require(checkSig(...)) on mint path
+  - id: token_outputs
+    mode: [ft_mint, ft_mint_authority, token_ft_mint]
+    rule: minted output must set tokenCategory and tokenAmount
+
+forbidden:
+  - unbounded mint without maxSupply require guard
+  - NFT 0x02 minting authority patterns on pure FT mint

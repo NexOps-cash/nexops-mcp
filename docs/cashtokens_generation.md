@@ -27,7 +27,8 @@ Routing is deterministic in `apply_cashtoken_intent_routing()` (immutable → hy
 
 - **Not audited.** Generated code is a starting point; human review is required.
 - **Not mainnet-ready by default.** Deployment gate (audit score) is separate from benchmark convergence.
-- **No FT genesis** or BCMR metadata generation.
+- **FT capped mint** via `ft_mint_authority` golden, `_FT_MINT_RAIL`, and `cashtokens_ft_mint.yaml` benchmarks (Wave 2A).
+- **No BCMR metadata** generation.
 - **Minting / hybrid** may need retries on hard intents; use `security_level="high"` and golden templates when available.
 - **Golden adaptation** applies only to registered templates under `knowledge/golden/patterns/`.
 

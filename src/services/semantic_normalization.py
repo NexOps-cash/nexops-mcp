@@ -9,6 +9,12 @@ _NFT_SIGNALS = {
     "immutable nft", "mutable nft", "soulbound",
 }
 
+_FT_CAP_MINT_SIGNALS = (
+    "loyalty", "fungible", "points token", "reward token", "game currency",
+    "treasury may mint", "maximum supply", "max supply", "supply cap",
+    "capped fungible", "mint amount", "currentsupply", "maxsupply",
+)
+
 
 def apply_ownership_semantics(intent_model: IntentModel, intent_lower: str) -> None:
     if any(w in intent_lower for w in ("soulbound", "non-transferable", "identity nft", "cannot transfer ownership")):
@@ -69,7 +75,10 @@ def apply_supply_semantics(intent_model: IntentModel, intent_lower: str) -> None
             intent_model.supply_mode = "burnable"
     elif any(
         w in intent_lower
-        for w in ("capped", "max supply", "open edition", "mint cap", "capped max")
+        for w in (
+            "capped", "max supply", "maximum supply", "open edition", "mint cap",
+            "capped max", "supply cap", "never exceed", "must never exceed",
+        )
     ):
         intent_model.supply_mode = "capped_mint"
     if "burn" in intent_lower and "mint" not in intent_lower and intent_model.supply_mode == "fixed":
@@ -135,11 +144,25 @@ def _semantic_cashtoken_adjust(intent_model: IntentModel, intent_lower: str) -> 
         return
 
     if intent_model.supply_mode == "capped_mint" or "open edition" in intent_lower:
-        intent_model.contract_type = "nft_minting_authority"
-        intent_model.token_class = "nft_minting"
-        intent_model.nft_capability = "minting"
-        if "minting" not in intent_model.features:
-            intent_model.features = list(intent_model.features) + ["minting"]
+        is_ft_cap = any(s in intent_lower for s in _FT_CAP_MINT_SIGNALS) or (
+            "mint" in intent_lower
+            and "nft" not in intent_lower
+            and any(w in intent_lower for w in ("fungible", "token", "points", "loyalty", "reward"))
+        )
+        if is_ft_cap and "open edition" not in intent_lower and "nft drop" not in intent_lower:
+            intent_model.contract_type = "ft_mint_authority"
+            intent_model.token_class = "ft"
+            intent_model.nft_capability = "none"
+            if "minting" not in intent_model.features:
+                intent_model.features = list(intent_model.features) + ["minting"]
+            if "tokens" not in intent_model.features:
+                intent_model.features = list(intent_model.features) + ["tokens"]
+        else:
+            intent_model.contract_type = "nft_minting_authority"
+            intent_model.token_class = "nft_minting"
+            intent_model.nft_capability = "minting"
+            if "minting" not in intent_model.features:
+                intent_model.features = list(intent_model.features) + ["minting"]
 
 
 def check_pure_bch_escrow_mismatch(intent_model: IntentModel, intent_lower: str) -> bool:

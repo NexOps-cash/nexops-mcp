@@ -1,0 +1,23 @@
+// GOLDEN TEMPLATE — Pattern-ID: ft_mint_authority
+pragma cashscript ^0.13.0;
+
+contract FTMintAuthority(
+    // === MUTABLE_CONSTRUCTOR_START ===
+    pubkey mintAuthority,
+    bytes32 tokenCategory,
+    int maxSupply,
+    int totalMinted
+    // === MUTABLE_CONSTRUCTOR_END ===
+) {
+    function mint(sig mintSig, int mintAmount, bytes recipientLockingBytecode) {
+        // === INVARIANT_ANCHOR_START ===
+        require(checkSig(mintSig, mintAuthority));
+        require(tx.outputs.length <= 2);
+        require(totalMinted + mintAmount <= maxSupply);
+        require(tx.outputs[0].lockingBytecode == recipientLockingBytecode);
+        require(tx.outputs[0].tokenCategory == tokenCategory);
+        require(tx.outputs[0].tokenAmount == mintAmount);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+        // === INVARIANT_ANCHOR_END ===
+    }
+}

@@ -101,6 +101,12 @@ def _cashtoken_alias_pool(
             "minting_authority_custody": custody_ok,
             "must_fail_capability_leak": leak_fail,
         },
+        "ft_mint": {
+            "valid_signature_check": sig_ok,
+            "supply_cap_enforcement": legacy_capabilities.get("enforces_supply_cap") is True,
+            "mint_cap_guard": legacy_capabilities.get("enforces_supply_cap") is True,
+            "must_fail_unbounded_mint": legacy_capabilities.get("enforces_supply_cap") is not True,
+        },
         "hybrid_token": {
             "valid_signature_check": sig_ok,
             "token_category_check": cat_in and cat_out,
@@ -325,6 +331,7 @@ class BenchmarkEvaluator:
                     contract_mode=(case.pattern or intent_model.get("contract_type", "")),
                     intent_modes=intent_modes,
                 )
+                legacy_capabilities["enforces_supply_cap"] = sem_caps.get("enforces_supply_cap") is True
 
                 pattern_key = (case.pattern or "").strip()
                 if pattern_key.startswith("semantic_"):
@@ -332,7 +339,7 @@ class BenchmarkEvaluator:
                         pattern_key, legacy_capabilities, detected, code, functions
                     )
                 elif pattern_key in {
-                    "token_ft", "nft_immutable", "nft_mutable",
+                    "token_ft", "ft_mint", "nft_immutable", "nft_mutable",
                     "nft_minting", "hybrid_token",
                 }:
                     legacy_alias_checks = _cashtoken_alias_pool(

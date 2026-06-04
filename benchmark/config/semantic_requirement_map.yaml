@@ -59,7 +59,14 @@ mappings:
     capability: capability_retained
     fallback: regex_alias
   mint_cap_guard:
-    capability: capability_retained
+    capability: enforces_supply_cap
+    fallback: regex_alias
+  supply_cap_enforcement:
+    capability: enforces_supply_cap
+    fallback: none
+  must_fail_unbounded_mint:
+    capability: enforces_supply_cap
+    negate: true
     fallback: regex_alias
   minting_authority_custody:
     capability: capability_retained
