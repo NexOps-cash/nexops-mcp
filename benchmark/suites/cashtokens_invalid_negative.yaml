@@ -1,0 +1,65 @@
+# CashTokens invalid-logic negative prompts — Wave 2B
+# python -m benchmark.runner benchmark/suites/cashtokens_invalid_negative.yaml
+
+- id: ct_invalid_auth_leak_001
+  pattern: nft_minting
+  difficulty: medium
+  intent: |
+    FAILURE CASE: transfer 0x02 mint authority NFT to buyer.
+  critical_features:
+    - must_fail_authority_leak
+  tags: ["cashtokens", "failure", "vulnerability"]
+
+- id: ct_invalid_cat_drift_001
+  pattern: token_ft
+  difficulty: medium
+  intent: |
+    FAILURE CASE: output token category differs from input category.
+  critical_features:
+    - must_fail_token_category_drift
+  tags: ["cashtokens", "failure", "vulnerability"]
+
+- id: ct_invalid_inflation_001
+  pattern: token_ft
+  difficulty: medium
+  intent: |
+    FAILURE CASE: output token amount exceeds input amount without mint authority.
+  critical_features:
+    - must_fail_token_amount_inflation
+  tags: ["cashtokens", "failure", "vulnerability"]
+
+- id: ct_invalid_burn_001
+  pattern: token_ft
+  difficulty: medium
+  intent: |
+    FAILURE CASE: destroy user tokens without explicit burn path.
+  critical_features:
+    - must_fail_token_amount_burn
+  tags: ["cashtokens", "failure", "vulnerability"]
+
+- id: ct_invalid_commit_001
+  pattern: nft_immutable
+  difficulty: medium
+  intent: |
+    FAILURE CASE: immutable NFT transfer drops nftCommitment.
+  critical_features:
+    - must_fail_nft_commitment_loss
+  tags: ["cashtokens", "failure", "vulnerability"]
+
+- id: ct_invalid_hybrid_001
+  pattern: hybrid_token
+  difficulty: hard
+  intent: |
+    FAILURE CASE: state transition changes tokenAmount and nftCommitment unexpectedly.
+  critical_features:
+    - must_fail_hybrid_continuity_break
+  tags: ["cashtokens", "failure", "vulnerability"]
+
+- id: ct_invalid_transfer_001
+  pattern: nft_immutable
+  difficulty: medium
+  intent: |
+    FAILURE CASE: unrestricted token transfer to arbitrary lockingBytecode.
+  critical_features:
+    - must_fail_unrestricted_token_transfer
+  tags: ["cashtokens", "failure", "vulnerability"]

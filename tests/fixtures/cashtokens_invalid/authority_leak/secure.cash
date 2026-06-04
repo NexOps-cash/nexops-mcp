@@ -1,0 +1,8 @@
+pragma cashscript ^0.13.0;
+contract C(pubkey a, bytes32 base) {
+    function mint(sig s) {
+        require(checkSig(s, a));
+        require(tx.outputs[0].tokenCategory == base + 0x02);
+        require(tx.outputs[0].lockingBytecode == this.activeBytecode);
+    }
+}

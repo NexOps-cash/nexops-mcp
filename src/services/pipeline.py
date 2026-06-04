@@ -1044,8 +1044,8 @@ class Phase3:
                     hallucination_flags.append(v.get("reason", "Solidity syntax"))
 
         # Score is based on number of passing detectors in registry
-        from src.services.anti_pattern_detectors import DETECTOR_REGISTRY
-        total_detectors = len(DETECTOR_REGISTRY)
+        from src.services.anti_pattern_detectors import generation_detector_registry
+        total_detectors = len(generation_detector_registry())
         failed_count = len(set(v.rule for v in violations))
         score = (total_detectors - failed_count) / total_detectors if total_detectors > 0 else 0.0
 

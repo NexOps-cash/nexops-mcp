@@ -1,0 +1,9 @@
+pragma cashscript ^0.13.0;
+contract C(pubkey o, bytes32 stateCat, bytes sideLb) {
+    function migrate(sig s) {
+        require(checkSig(s, o));
+        require(tx.outputs[0].lockingBytecode == sideLb);
+        require(tx.outputs[0].tokenCategory == tx.inputs[this.activeInputIndex].tokenCategory);
+        require(tx.outputs[0].nftCommitment == tx.inputs[this.activeInputIndex].nftCommitment);
+    }
+}
