@@ -821,7 +821,26 @@ def _check_token_pair_completeness(
                 "line_hint": start_lineno,
             })
 
+        out_amt_refs = set(re.findall(r"tx\.outputs\[(\d+)\]\.tokenAmount", body))
+        if len(out_amt_refs) >= 2 and not _split_token_conservation_in_body(body):
+            violations.append({
+                "rule_id": "LNC-014",
+                "message": (
+                    f"Function '{func_name}' splits tokenAmount across multiple outputs "
+                    "without sum conservation vs active input."
+                ),
+                "line_hint": start_lineno,
+            })
+
     return violations
+
+
+def _split_token_conservation_in_body(body: str) -> bool:
+    patterns = [
+        r"outputs\[\d+\]\.tokenAmount\s*\+\s*tx\.outputs\[\d+\]\.tokenAmount\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenAmount",
+        r"tx\.outputs\[\d+\]\.tokenAmount\s*\+\s*tx\.outputs\[\d+\]\.tokenAmount\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenAmount",
+    ]
+    return any(re.search(p, body, re.DOTALL) for p in patterns)
 
 
 def _check_token_mint_supply_enforcement(
