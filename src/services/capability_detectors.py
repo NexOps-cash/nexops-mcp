@@ -239,6 +239,7 @@ AUDIT_CAPABILITY_DETECTOR_REGISTRY = [
     MissingAuthorizationStateMutationDetector(),
     UnrestrictedNftTransferDetector(),
     MutableNftMissingReanchorDetector(),
+    TokenContinuityBreakDetector(),
     UnintendedBurnPathDetector(),
     HybridMigrationMismatchDetector(),
     UnrestrictedPayoutPathDetector(),

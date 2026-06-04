@@ -1,0 +1,33 @@
+# Audit vs generation parity probes — Wave 2C
+
+- id: ct_audit_pos_imm_001
+  pattern: nft_immutable
+  difficulty: medium
+  intent: |
+    Immutable NFT transfer preserving commitment and category.
+  required_features:
+    - signature_verification
+    - token_category_check
+  critical_features:
+    - valid_signature_check
+    - nftcommitment_preservation
+    - token_category_check
+  tags: ["cashtokens", "audit_parity"]
+
+- id: ct_audit_neg_escape_001
+  pattern: nft_minting
+  difficulty: medium
+  intent: |
+    FAILURE CASE: mint authority NFT escapes covenant.
+  critical_features:
+    - must_fail_authority_leak
+  tags: ["cashtokens", "audit_parity", "failure", "vulnerability"]
+
+- id: ct_audit_neg_amount_001
+  pattern: token_ft
+  difficulty: medium
+  intent: |
+    FAILURE CASE: tokenAmount changes unexpectedly.
+  critical_features:
+    - must_fail_token_amount_inflation
+  tags: ["cashtokens", "audit_parity", "failure", "vulnerability"]
