@@ -167,19 +167,8 @@ def extract_semantic_capabilities(
     _add_evidence(caps, "requires_signature", has_sig, "ast", _sig_anchors(ast))
     _add_evidence(caps, "requires_multisig", has_multisig, "ast", _multisig_anchors(code))
 
-    preserves_cat = bool(
-        re.search(
-            r"\.tokenCategory\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenCategory",
-            code,
-        )
-        or re.search(r"\.tokenCategory\s*==\s*\w+Category", code)
-    )
-    preserves_amt = bool(
-        re.search(
-            r"\.tokenAmount\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenAmount",
-            code,
-        )
-    )
+    preserves_cat, cat_anchors = _preserves_token_category_guard(code)
+    preserves_amt, amt_anchors = _preserves_token_amount_guard(code)
     burns = bool(re.search(r"tx\.outputs\[\d+\]\.tokenCategory\s*==\s*0x\b", code))
     cat_constrained = bool(re.search(r"tx\.inputs\[[^\]]+\]\.tokenCategory\s*==", code))
     _add_evidence(
@@ -187,14 +176,14 @@ def extract_semantic_capabilities(
         "preserves_token_category",
         preserves_cat,
         "ast",
-        _grep_lines(code, r"tokenCategory\s*=="),
+        cat_anchors,
     )
     _add_evidence(
         caps,
         "preserves_token_amount",
         preserves_amt,
         "ast",
-        _grep_lines(code, r"tokenAmount\s*=="),
+        amt_anchors,
     )
     _add_evidence(caps, "burns_output_tokens", burns, "heuristic", _grep_lines(code, r"tokenCategory\s*==\s*0x"))
     _add_evidence(
@@ -223,13 +212,13 @@ def extract_semantic_capabilities(
         re.search(r"tx\.outputs\[\d+\]\.value", code)
         and re.search(r"release|claim|purchase|redeem", code, re.I)
     )
-    custody = bool(re.search(r"lockingBytecode\s*==\s*this\.activeBytecode", code) and re.search(r"0x02", code))
-    escaped = bool(re.search(r"0x02", code) and not custody)
+    retained, retained_anchors = _capability_retained_guard(code)
+    escaped = bool(re.search(r"0x02", code) and not retained)
 
     _add_evidence(caps, "reanchors_covenant", reanchor, "ast", _grep_lines(code, r"this\.activeBytecode"))
     _add_evidence(caps, "migratory_output", migratory, "heuristic", _grep_lines(code, r"lockingBytecode\s*=="))
     _add_evidence(caps, "terminating_output", terminating, "heuristic", _grep_lines(code, r"\.value"))
-    _add_evidence(caps, "capability_retained", custody, "heuristic", _grep_lines(code, r"activeBytecode"))
+    _add_evidence(caps, "capability_retained", retained, "ast", retained_anchors)
     _add_evidence(caps, "capability_escaped", escaped, "heuristic", _grep_lines(code, r"0x02"))
 
     om = (intent_modes.get("ownership_mode") or "").lower()
@@ -267,6 +256,39 @@ def _sig_anchors(ast: CashScriptAST) -> List[str]:
 def _multisig_anchors(code: str) -> List[str]:
     m = re.search(r"checkMultiSig\s*\([^)]+\)", code)
     return [m.group(0)[:80]] if m else []
+
+
+def _preserves_token_category_guard(code: str) -> tuple[bool, List[str]]:
+    pattern = re.compile(
+        r"outputs\[[^\]]+\]\.tokenCategory\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenCategory",
+        re.DOTALL,
+    )
+    m = pattern.search(code)
+    if not m:
+        return False, []
+    return True, [re.sub(r"\s+", " ", m.group(0))[:120]]
+
+
+def _preserves_token_amount_guard(code: str) -> tuple[bool, List[str]]:
+    pattern = re.compile(
+        r"outputs\[[^\]]+\]\.tokenAmount\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenAmount",
+        re.DOTALL,
+    )
+    m = pattern.search(code)
+    if not m:
+        return False, []
+    return True, [re.sub(r"\s+", " ", m.group(0))[:120]]
+
+
+def _capability_retained_guard(code: str) -> tuple[bool, List[str]]:
+    if not re.search(r"0x02", code):
+        return False, []
+    anchors: List[str] = []
+    for m in re.finditer(r"require\s*\((.*?)\)\s*;", code, re.DOTALL):
+        expr = m.group(1)
+        if "lockingBytecode" in expr and "this.activeBytecode" in expr:
+            anchors.append(expr.strip()[:120])
+    return bool(anchors), anchors
 
 
 def _mint_supply_cap_in_requires(code: str) -> tuple[bool, List[str]]:
