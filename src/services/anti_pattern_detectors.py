@@ -896,6 +896,39 @@ class MultisigSignatureReuseDetector(AntiPatternDetector):
         return None
 
 
+class UnboundedMintDetector(AntiPatternDetector):
+    """Mint path without require()-scoped supply cap guard."""
+
+    id = "unbounded_mint"
+
+    def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        import re
+
+        from src.services.dsl_lint import _mint_supply_cap_in_requires
+
+        mode = (ast.contract_mode or "").lower()
+        if mode not in {
+            "ft_mint", "ft_mint_authority", "token_ft_mint",
+            "nft_minting", "nft_minting_authority", "minting", "token", "",
+        } and "mint" not in ast.code.lower():
+            return None
+        if not re.search(r"\bmint\b", ast.code, re.I):
+            return None
+        if _mint_supply_cap_in_requires(ast.code):
+            return None
+        if not re.search(r"function\s+\w*mint", ast.code, re.I):
+            return None
+        return Violation(
+            rule=self.id,
+            reason="Mint function lacks require()-scoped supply cap (e.g. totalMinted + mintAmount <= maxSupply)",
+            exploit="Unbounded mint inflates token supply beyond the intended cap.",
+            location={"line": 0, "function": "all"},
+            severity="critical",
+            issue_class="real_issue",
+            exploit_severity="direct_fund_loss",
+        )
+
+
 class MintingAuthorityEscapeDetector(AntiPatternDetector):
     """Detect minting NFT (0x02) outputs not bound to this.activeBytecode."""
 
@@ -953,7 +986,15 @@ DETECTOR_REGISTRY = [
     InvalidLockingBytecodeSelfComparisonDetector(),
     MultisigSignatureReuseDetector(),
     MintingAuthorityEscapeDetector(),
+    UnboundedMintDetector(),
 ]
+
+
+def generation_detector_registry():
+    """Full TollGate registry including Wave 2B CashTokens invalid-logic detectors."""
+    from src.services.cashtokens_token_detectors import CASHTOKENS_INVALID_DETECTOR_REGISTRY
+
+    return DETECTOR_REGISTRY + CASHTOKENS_INVALID_DETECTOR_REGISTRY
 
 
 

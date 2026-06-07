@@ -52,6 +52,7 @@ _golden_registry.load_pattern("ft_transfer",            "ft_transfer.cash")
 _golden_registry.load_pattern("nft_transfer_immutable", "nft_transfer_immutable.cash")
 _golden_registry.load_pattern("nft_mutable_state_update", "nft_mutable_state_update.cash")
 _golden_registry.load_pattern("nft_minting_authority",  "nft_minting_authority.cash")
+_golden_registry.load_pattern("ft_mint_authority",      "ft_mint_authority.cash")
 _golden_registry.load_pattern("stablecoin_minter_sidecar", "stablecoin_minter_sidecar.cash")
 
 # Mapping from Phase 1 contract_type → Golden pattern_id
@@ -66,6 +67,8 @@ _GOLDEN_TYPE_MAP = {
     "nft_mutable_state_update": "nft_mutable_state_update",
     "nft_minting_authority":  "nft_minting_authority",
     "nft_minting":            "nft_minting_authority",
+    "ft_mint_authority":      "ft_mint_authority",
+    "ft_mint":                "ft_mint_authority",
     "stablecoin_minter_sidecar": "stablecoin_minter_sidecar",
     "hybrid_token":           "stablecoin_minter_sidecar",
 }
@@ -80,6 +83,7 @@ _GOLDEN_REQUIRED_PARAMS = {
     "nft_transfer_immutable": ["owner", "expectedCategory", "recipientLockingBytecode"],
     "nft_mutable_state_update": ["owner", "baseCategory", "newCommitment"],
     "nft_minting_authority":  ["mintAuthority", "baseCategory"],
+    "ft_mint_authority":      ["mintAuthority", "tokenCategory", "maxSupply", "totalMinted"],
     "stablecoin_minter_sidecar": [
         "vaultOwner", "stateCategory", "ftCategory", "expectedSidecarTxHash",
     ],
@@ -259,6 +263,17 @@ Omitting any line below is a generation error.
 7. require(totalMinted + mintAmount <= maxSupply);  // when supply cap applies
 """
 
+_FT_MINT_RAIL = """
+[RAIL: FT MINT MODE — REQUIRED CHECKS (ALL MUST APPEAR IN EVERY MINT FUNCTION)]
+Omitting any line below is a generation error.
+1. require(tx.outputs.length <= maxOutputs);  // first guard
+2. require(checkSig(mintSig, mintAuthority));
+3. require(totalMinted + mintAmount <= maxSupply);  // HARD supply cap
+4. require(tx.outputs[recipientIdx].tokenCategory == tokenCategory);
+5. require(tx.outputs[recipientIdx].tokenAmount == mintAmount);
+6. Pair tokenCategory and tokenAmount on every token-bearing output.
+"""
+
 _HYBRID_RAIL = """
 [RAIL: HYBRID TOKEN MODE — REQUIRED CHECKS (ALL MUST APPEAR IN EVERY SPENDING FUNCTION)]
 Omitting any line below is a generation error.
@@ -349,6 +364,8 @@ def build_pattern_rails(
         rails.append(_NFT_MUTABLE_RAIL)
     if mode in ("nft_minting", "minting", "nft_minting_authority"):
         rails.append(_NFT_MINTING_RAIL)
+    if mode in ("ft_mint", "ft_mint_authority", "token_ft_mint"):
+        rails.append(_FT_MINT_RAIL)
     if mode in ("hybrid_token", "stablecoin_minter_sidecar"):
         rails.append(_HYBRID_RAIL)
     if "split" in tags: rails.append(_SPLIT_RAIL)
@@ -395,6 +412,10 @@ def resolve_effective_mode(intent_model: Optional[IntentModel]) -> str:
         return base
     if base == "nft_minting_failure":
         return "nft_minting_failure"
+    if base in ("ft_mint_failure",):
+        return "ft_mint_failure"
+    if base in ("ft_mint", "ft_mint_authority"):
+        return base
     if base == "minting" or tc == "nft_minting":
         return "nft_minting"
     if tc == "ft":
@@ -423,6 +444,17 @@ def apply_cashtoken_intent_routing(intent_model: IntentModel, intent_lower: str)
         or "capability leak" in intent_lower
         or "failure case" in intent_lower
     ):
+        if any(
+            w in intent_lower
+            for w in (
+                "unlimited fungible", "without supply cap", "unbounded mint",
+                "unlimited", "supply cap",
+            )
+        ) and "fungible" in intent_lower:
+            intent_model.contract_type = "ft_mint_failure"
+            intent_model.token_class = "ft"
+            intent_model.supply_mode = "capped_mint"
+            return
         intent_model.contract_type = "nft_minting_failure"
         intent_model.token_class = "nft_minting"
         intent_model.nft_capability = "minting"
@@ -452,6 +484,26 @@ def apply_cashtoken_intent_routing(intent_model: IntentModel, intent_lower: str)
         intent_model.requires_commitment = True
         if "nft" not in intent_model.features:
             intent_model.features = list(intent_model.features) + ["nft"]
+        return
+
+    if any(
+        w in intent_lower
+        for w in (
+            "mint loyalty", "treasury may mint", "maximum supply", "supply cap",
+            "capped fungible", "reward token", "points token",
+        )
+    ) or (
+        "mint" in intent_lower
+        and "fungible" in intent_lower
+        and any(w in intent_lower for w in ("max supply", "maximum supply", "never exceed", "supply cap"))
+    ):
+        intent_model.contract_type = "ft_mint_authority"
+        intent_model.token_class = "ft"
+        intent_model.supply_mode = "capped_mint"
+        if "minting" not in intent_model.features:
+            intent_model.features = list(intent_model.features) + ["minting"]
+        if "tokens" not in intent_model.features:
+            intent_model.features = list(intent_model.features) + ["tokens"]
         return
 
     if any(
@@ -992,8 +1044,8 @@ class Phase3:
                     hallucination_flags.append(v.get("reason", "Solidity syntax"))
 
         # Score is based on number of passing detectors in registry
-        from src.services.anti_pattern_detectors import DETECTOR_REGISTRY
-        total_detectors = len(DETECTOR_REGISTRY)
+        from src.services.anti_pattern_detectors import generation_detector_registry
+        total_detectors = len(generation_detector_registry())
         failed_count = len(set(v.rule for v in violations))
         score = (total_detectors - failed_count) / total_detectors if total_detectors > 0 else 0.0
 

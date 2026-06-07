@@ -821,7 +821,29 @@ def _check_token_pair_completeness(
                 "line_hint": start_lineno,
             })
 
+        if "mint" in func_name.lower():
+            continue
+
+        out_amt_refs = set(re.findall(r"tx\.outputs\[(\d+)\]\.tokenAmount", body))
+        if len(out_amt_refs) >= 2 and not _split_token_conservation_in_body(body):
+            violations.append({
+                "rule_id": "LNC-014",
+                "message": (
+                    f"Function '{func_name}' splits tokenAmount across multiple outputs "
+                    "without sum conservation vs active input."
+                ),
+                "line_hint": start_lineno,
+            })
+
     return violations
+
+
+def _split_token_conservation_in_body(body: str) -> bool:
+    patterns = [
+        r"outputs\[\d+\]\.tokenAmount\s*\+\s*tx\.outputs\[\d+\]\.tokenAmount\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenAmount",
+        r"tx\.outputs\[\d+\]\.tokenAmount\s*\+\s*tx\.outputs\[\d+\]\.tokenAmount\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenAmount",
+    ]
+    return any(re.search(p, body, re.DOTALL) for p in patterns)
 
 
 def _check_token_mint_supply_enforcement(
@@ -862,30 +884,52 @@ def _check_token_mint_supply_enforcement(
         return violations
 
     if supply_mode != "capped_mint":
-        if mode in {"nft_minting", "nft_minting_authority", "nft_mutable", "nft_immutable", "token_ft", "ft_transfer"}:
+        if mode in {
+            "nft_minting", "nft_minting_authority", "nft_mutable", "nft_immutable",
+            "token_ft", "ft_transfer", "ft_mint", "ft_mint_authority", "token_ft_mint",
+        }:
             if supply_mode not in ("capped_mint",):
                 return []
-        if mode not in {"token", "minting", "covenant", "nft_minting", "nft_minting_authority"} and "mint" not in code.lower():
+        if mode not in {
+            "token", "minting", "covenant", "nft_minting", "nft_minting_authority",
+            "ft_mint", "ft_mint_authority", "token_ft_mint",
+        } and "mint" not in code.lower():
             return []
 
     for func_name, body, start_lineno in _function_bodies(code):
-        if "mint" not in func_name.lower() and "mint" not in body.lower():
+        if "mint" not in func_name.lower():
             continue
-        has_supply_guard = bool(
-            re.search(r"totalSupply|maxSupply|remainingSupply|totalMinted", body, re.IGNORECASE)
-            and re.search(r"require\s*\(", body)
-        )
+        has_supply_guard = _mint_supply_cap_in_requires(body)
         if not has_supply_guard:
-            violations.append({
+            entry = {
                 "rule_id": "LNC-017",
                 "message": (
                     f"Mint function '{func_name}' has no visible supply enforcement. "
                     "Add a cap guard (e.g. require(totalMinted + mintAmount <= maxSupply))."
                 ),
                 "line_hint": start_lineno,
-                "severity": "warning",
-            })
+            }
+            if supply_mode == "capped_mint" or mode in {
+                "ft_mint", "ft_mint_authority", "token_ft_mint",
+            }:
+                pass  # blocking — no severity: warning
+            else:
+                entry["severity"] = "warning"
+            violations.append(entry)
     return violations
+
+
+def _mint_supply_cap_in_requires(body: str) -> bool:
+    """Require()-scoped supply cap (not bare maxSupply field declarations)."""
+    for m in re.finditer(r"require\s*\((.*?)\)\s*;", body, re.DOTALL):
+        expr = m.group(1)
+        if not re.search(r"<=|<", expr):
+            continue
+        if not re.search(r"maxSupply|totalSupply|remainingSupply", expr, re.IGNORECASE):
+            continue
+        if re.search(r"totalMinted|mintAmount|currentSupply", expr, re.IGNORECASE):
+            return True
+    return False
 
 
 def _check_nft_mint_transfer_rules(code: str, contract_mode: str = "") -> list[dict]:

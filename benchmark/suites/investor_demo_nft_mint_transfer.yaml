@@ -1,0 +1,48 @@
+# Investor Demo — 2️⃣ NFT Mint + Transfer
+# python -m benchmark.runner benchmark/suites/investor_demo_nft_mint_transfer.yaml
+
+- id: demo_nft_mint_ticket_001
+  pattern: nft_minting
+  difficulty: hard
+  intent: |
+    Concert ticket NFT collection. Organizer retains mint authority in the covenant
+    while users can transfer purchased tickets. Minting capability 0x02 must stay
+    on this.activeBytecode; buyers receive newly minted immutable NFTs.
+  required_features:
+    - signature_verification
+    - token_category_check
+  critical_features:
+    - valid_signature_check
+    - minting_authority_custody
+    - capability_minting
+  tags: ["investor_demo", "cashtokens", "nft_minting", "category_2_nft_mint"]
+
+- id: demo_nft_mint_club_002
+  pattern: nft_minting
+  difficulty: hard
+  intent: |
+    Private club membership NFTs. New memberships can be minted only by the club
+    administrator. Mint authority remains locked in the contract; members may
+    transfer membership NFTs to other members.
+  required_features:
+    - signature_verification
+    - token_category_check
+  critical_features:
+    - minting_authority_custody
+    - valid_signature_check
+  tags: ["investor_demo", "cashtokens", "nft_minting", "category_2_nft_mint"]
+
+- id: demo_nft_mint_art_003
+  pattern: nft_minting
+  difficulty: hard
+  intent: |
+    Limited edition digital art NFT drop. Mint authority remains with the collection
+    contract covenant. Holders can transfer NFTs; the 0x02 minting authority NFT
+    must never escape to buyers.
+  required_features:
+    - signature_verification
+    - token_category_check
+  critical_features:
+    - minting_authority_custody
+    - capability_minting
+  tags: ["investor_demo", "cashtokens", "nft_minting", "category_2_nft_mint"]

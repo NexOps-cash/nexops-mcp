@@ -830,7 +830,10 @@ def _check_token_mint_supply_enforcement(code: str, contract_mode: str = "") -> 
     LNC-017: Fungible mint paths must enforce supply bounds.
     """
     mode = (contract_mode or "").lower().strip()
-    if mode not in {"token", "minting", "covenant"} and "mint" not in code.lower():
+    if mode not in {
+        "token", "minting", "covenant", "ft_mint", "ft_mint_authority", "token_ft_mint",
+        "nft_minting", "nft_minting_authority",
+    } and "mint" not in code.lower():
         return []
 
     violations = []
@@ -849,20 +852,34 @@ def _check_token_mint_supply_enforcement(code: str, contract_mode: str = "") -> 
         if is_release:
             continue
 
-        has_supply_guard = bool(
-            re.search(r"totalSupply|maxSupply|remainingSupply|cap", body, re.IGNORECASE)
-            and re.search(r"require\s*\(", body)
-        )
+        has_supply_guard = _mint_supply_cap_in_requires(body)
         if not has_supply_guard:
-            violations.append({
+            entry = {
                 "rule_id": "LNC-017",
                 "message": (
                     f"Mint function '{func_name}' has no visible supply enforcement. "
-                    "Add a cap guard (e.g. require(totalSupply + mintAmount <= maxSupply))."
+                    "Add a cap guard (e.g. require(totalMinted + mintAmount <= maxSupply))."
                 ),
                 "line_hint": start_lineno,
-            })
+            }
+            if mode in {"ft_mint", "ft_mint_authority", "token_ft_mint"}:
+                pass  # blocking
+            else:
+                entry["severity"] = "warning"
+            violations.append(entry)
     return violations
+
+
+def _mint_supply_cap_in_requires(body: str) -> bool:
+    for m in re.finditer(r"require\s*\((.*?)\)\s*;", body, re.DOTALL):
+        expr = m.group(1)
+        if not re.search(r"<=|<", expr):
+            continue
+        if not re.search(r"maxSupply|totalSupply|remainingSupply", expr, re.IGNORECASE):
+            continue
+        if re.search(r"totalMinted|mintAmount|currentSupply", expr, re.IGNORECASE):
+            return True
+    return False
 
 
 def _check_nft_mint_transfer_rules(

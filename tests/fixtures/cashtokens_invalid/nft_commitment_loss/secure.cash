@@ -1,0 +1,8 @@
+pragma cashscript ^0.13.0;
+contract C(pubkey o, bytes32 cat) {
+    function transfer(sig s) {
+        require(checkSig(s, o));
+        require(tx.outputs[0].tokenCategory == cat);
+        require(tx.outputs[0].nftCommitment == tx.inputs[this.activeInputIndex].nftCommitment);
+    }
+}

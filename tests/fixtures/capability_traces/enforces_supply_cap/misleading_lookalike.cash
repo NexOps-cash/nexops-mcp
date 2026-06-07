@@ -1,0 +1,8 @@
+pragma cashscript ^0.13.0;
+contract C(pubkey a, int maxSupply, int totalMinted) {
+    function mint(sig s, int mintAmount) {
+        int cap = maxSupply;
+        require(checkSig(s, a));
+        require(tx.outputs[0].tokenAmount == mintAmount);
+    }
+}

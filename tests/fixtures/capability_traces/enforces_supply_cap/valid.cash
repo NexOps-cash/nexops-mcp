@@ -1,0 +1,7 @@
+pragma cashscript ^0.13.0;
+contract C(pubkey a, int maxSupply, int totalMinted) {
+    function mint(sig s, int mintAmount) {
+        require(checkSig(s, a));
+        require(totalMinted + mintAmount <= maxSupply);
+    }
+}

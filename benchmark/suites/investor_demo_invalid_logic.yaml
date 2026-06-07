@@ -1,0 +1,32 @@
+# Investor Demo — 5️⃣ Invalid Token Logic (negative — must NOT converge)
+# python -m benchmark.runner benchmark/suites/investor_demo_invalid_logic.yaml
+
+- id: demo_neg_auth_leak_001
+  pattern: nft_minting
+  difficulty: medium
+  intent: |
+    FAILURE CASE: NFT mint shop that transfers the 0x02 minting authority NFT
+    to the buyer after minting.
+  critical_features:
+    - must_fail_authority_leak
+  tags: ["investor_demo", "cashtokens", "failure", "vulnerability", "category_5_invalid"]
+
+- id: demo_neg_inflation_002
+  pattern: token_ft
+  difficulty: medium
+  intent: |
+    FAILURE CASE: Transfer contract that allows output tokenAmount to exceed the
+    input tokenAmount without requiring mint authority.
+  critical_features:
+    - must_fail_token_amount_inflation
+  tags: ["investor_demo", "cashtokens", "failure", "vulnerability", "category_5_invalid"]
+
+- id: demo_neg_cat_drift_003
+  pattern: nft_immutable
+  difficulty: medium
+  intent: |
+    FAILURE CASE: NFT transfer contract that changes tokenCategory during transfer
+    to a new category chosen by the caller.
+  critical_features:
+    - must_fail_token_category_drift
+  tags: ["investor_demo", "cashtokens", "failure", "vulnerability", "category_5_invalid"]

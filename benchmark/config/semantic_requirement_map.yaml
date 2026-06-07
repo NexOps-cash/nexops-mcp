@@ -35,7 +35,11 @@ mappings:
   token_category_check:
     capability: preserves_token_category
     any_capabilities: [token_category_constrained, burns_output_tokens]
-    fallback: regex_alias
+    fallback: none
+  token_amount_check:
+    capability: preserves_token_amount
+    any_capabilities: [preserves_split_token_supply, burns_output_tokens]
+    fallback: none
   covenant_self_reference:
     capability: reanchors_covenant
     fallback: regex_alias
@@ -59,8 +63,36 @@ mappings:
     capability: capability_retained
     fallback: regex_alias
   mint_cap_guard:
-    capability: capability_retained
+    capability: enforces_supply_cap
     fallback: regex_alias
+  supply_cap_enforcement:
+    capability: enforces_supply_cap
+    fallback: none
+  must_fail_unbounded_mint:
+    capability: enforces_supply_cap
+    negate: true
+    fallback: regex_alias
+  must_fail_authority_leak:
+    fallback: regex_alias
+    alias_pool_key: must_fail_authority_leak
+  must_fail_token_category_drift:
+    fallback: regex_alias
+    alias_pool_key: must_fail_token_category_drift
+  must_fail_token_amount_inflation:
+    fallback: regex_alias
+    alias_pool_key: must_fail_token_amount_inflation
+  must_fail_token_amount_burn:
+    fallback: regex_alias
+    alias_pool_key: must_fail_token_amount_burn
+  must_fail_nft_commitment_loss:
+    fallback: regex_alias
+    alias_pool_key: must_fail_nft_commitment_loss
+  must_fail_hybrid_continuity_break:
+    fallback: regex_alias
+    alias_pool_key: must_fail_hybrid_continuity_break
+  must_fail_unrestricted_token_transfer:
+    fallback: regex_alias
+    alias_pool_key: must_fail_unrestricted_token_transfer
   minting_authority_custody:
     capability: capability_retained
     negate_capability: capability_escaped

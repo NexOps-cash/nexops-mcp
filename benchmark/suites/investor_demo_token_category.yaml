@@ -1,0 +1,46 @@
+# Investor Demo — 3️⃣ Token Category Validation
+# python -m benchmark.runner benchmark/suites/investor_demo_token_category.yaml
+
+- id: demo_cat_payroll_001
+  pattern: token_ft
+  difficulty: medium
+  intent: |
+    Employee payroll token transfer. Reject spends if the output token category
+    differs from the input token category. Owner signature required.
+  required_features:
+    - signature_verification
+    - token_category_check
+  critical_features:
+    - valid_signature_check
+    - token_category_check
+  tags: ["investor_demo", "cashtokens", "token_ft", "category_3_token_category"]
+
+- id: demo_cat_dao_002
+  pattern: token_ft
+  difficulty: medium
+  intent: |
+    DAO governance token transfer contract that preserves the original token category
+    across all outputs. Require owner signature and bind payout tokenCategory to
+    the active input category.
+  required_features:
+    - signature_verification
+    - token_category_check
+  critical_features:
+    - token_category_check
+    - valid_signature_check
+  tags: ["investor_demo", "cashtokens", "token_ft", "category_3_token_category"]
+
+- id: demo_cat_voucher_003
+  pattern: token_ft
+  difficulty: medium
+  intent: |
+    Merchant voucher token. Ensure redemption and transfer paths always preserve
+    the voucher token category from input to output. Owner must authorize each spend.
+  required_features:
+    - signature_verification
+    - token_category_check
+    - output_destination_validation
+  critical_features:
+    - token_category_check
+    - valid_signature_check
+  tags: ["investor_demo", "cashtokens", "token_ft", "category_3_token_category"]

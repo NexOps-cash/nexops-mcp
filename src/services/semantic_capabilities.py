@@ -41,6 +41,8 @@ CAPABILITY_REGISTRY: Dict[str, tuple[str, str]] = {
     "preserves_token_amount": ("TokenFlow", "cashscript_ast"),
     "burns_output_tokens": ("TokenFlow", "semantic_capabilities"),
     "token_category_constrained": ("TokenFlow", "semantic_capabilities"),
+    "enforces_supply_cap": ("TokenFlow", "semantic_capabilities"),
+    "preserves_split_token_supply": ("TokenFlow", "cashscript_ast"),
     # Lifecycle
     "reanchors_covenant": ("Lifecycle", "cashscript_ast"),
     "migratory_output": ("Lifecycle", "semantic_capabilities"),
@@ -166,18 +168,13 @@ def extract_semantic_capabilities(
     _add_evidence(caps, "requires_signature", has_sig, "ast", _sig_anchors(ast))
     _add_evidence(caps, "requires_multisig", has_multisig, "ast", _multisig_anchors(code))
 
-    preserves_cat = bool(
-        re.search(
-            r"\.tokenCategory\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenCategory",
-            code,
-        )
-        or re.search(r"\.tokenCategory\s*==\s*\w+Category", code)
-    )
-    preserves_amt = bool(
-        re.search(
-            r"\.tokenAmount\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenAmount",
-            code,
-        )
+    preserves_cat, cat_anchors = _preserves_token_category_guard(code)
+    preserves_amt, amt_anchors = _preserves_token_amount_guard(code)
+    split_ok = ast.has_split_token_supply_conservation()
+    split_anchors = (
+        _grep_lines(code, r"tokenAmount\s*\+.*tokenAmount\s*==")
+        if split_ok
+        else []
     )
     burns = bool(re.search(r"tx\.outputs\[\d+\]\.tokenCategory\s*==\s*0x\b", code))
     cat_constrained = bool(re.search(r"tx\.inputs\[[^\]]+\]\.tokenCategory\s*==", code))
@@ -186,15 +183,16 @@ def extract_semantic_capabilities(
         "preserves_token_category",
         preserves_cat,
         "ast",
-        _grep_lines(code, r"tokenCategory\s*=="),
+        cat_anchors,
     )
     _add_evidence(
         caps,
         "preserves_token_amount",
-        preserves_amt,
+        preserves_amt or split_ok,
         "ast",
-        _grep_lines(code, r"tokenAmount\s*=="),
+        amt_anchors or split_anchors,
     )
+    _add_evidence(caps, "preserves_split_token_supply", split_ok, "ast", split_anchors)
     _add_evidence(caps, "burns_output_tokens", burns, "heuristic", _grep_lines(code, r"tokenCategory\s*==\s*0x"))
     _add_evidence(
         caps,
@@ -203,6 +201,9 @@ def extract_semantic_capabilities(
         "heuristic",
         _grep_lines(code, r"inputs\[.*\]\.tokenCategory"),
     )
+
+    supply_cap_ok, supply_anchors = _mint_supply_cap_in_requires(code)
+    _add_evidence(caps, "enforces_supply_cap", supply_cap_ok, "ast", supply_anchors)
 
     reanchor = bool(re.search(r"lockingBytecode\s*==\s*this\.activeBytecode", code))
     migratory = bool(
@@ -219,13 +220,13 @@ def extract_semantic_capabilities(
         re.search(r"tx\.outputs\[\d+\]\.value", code)
         and re.search(r"release|claim|purchase|redeem", code, re.I)
     )
-    custody = bool(re.search(r"lockingBytecode\s*==\s*this\.activeBytecode", code) and re.search(r"0x02", code))
-    escaped = bool(re.search(r"0x02", code) and not custody)
+    retained, retained_anchors = _capability_retained_guard(code)
+    escaped = bool(re.search(r"0x02", code) and not retained)
 
     _add_evidence(caps, "reanchors_covenant", reanchor, "ast", _grep_lines(code, r"this\.activeBytecode"))
     _add_evidence(caps, "migratory_output", migratory, "heuristic", _grep_lines(code, r"lockingBytecode\s*=="))
     _add_evidence(caps, "terminating_output", terminating, "heuristic", _grep_lines(code, r"\.value"))
-    _add_evidence(caps, "capability_retained", custody, "heuristic", _grep_lines(code, r"activeBytecode"))
+    _add_evidence(caps, "capability_retained", retained, "ast", retained_anchors)
     _add_evidence(caps, "capability_escaped", escaped, "heuristic", _grep_lines(code, r"0x02"))
 
     om = (intent_modes.get("ownership_mode") or "").lower()
@@ -263,6 +264,73 @@ def _sig_anchors(ast: CashScriptAST) -> List[str]:
 def _multisig_anchors(code: str) -> List[str]:
     m = re.search(r"checkMultiSig\s*\([^)]+\)", code)
     return [m.group(0)[:80]] if m else []
+
+
+def _preserves_token_category_guard(code: str) -> tuple[bool, List[str]]:
+    patterns = (
+        re.compile(
+            r"outputs\[[^\]]+\]\.tokenCategory\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenCategory",
+            re.DOTALL,
+        ),
+        # FT/NFT mint: bind outputs to contract tokenCategory parameter (no input category on mint path)
+        re.compile(
+            r"outputs\[[^\]]+\]\.tokenCategory\s*==\s*tokenCategory\b",
+            re.DOTALL,
+        ),
+    )
+    for pattern in patterns:
+        m = pattern.search(code)
+        if m:
+            return True, [re.sub(r"\s+", " ", m.group(0))[:120]]
+    for m in re.finditer(
+        r"tx\.inputs\[this\.activeInputIndex\]\.tokenCategory\s*==\s*(\w+)",
+        code,
+    ):
+        var = m.group(1)
+        out = re.search(
+            rf"outputs\[[^\]]+\]\.tokenCategory\s*==\s*{re.escape(var)}\b",
+            code,
+        )
+        if out:
+            return True, [re.sub(r"\s+", " ", out.group(0))[:120]]
+    return False, []
+
+
+def _preserves_token_amount_guard(code: str) -> tuple[bool, List[str]]:
+    pattern = re.compile(
+        r"outputs\[[^\]]+\]\.tokenAmount\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenAmount",
+        re.DOTALL,
+    )
+    m = pattern.search(code)
+    if not m:
+        return False, []
+    return True, [re.sub(r"\s+", " ", m.group(0))[:120]]
+
+
+def _capability_retained_guard(code: str) -> tuple[bool, List[str]]:
+    if not re.search(r"0x02", code):
+        return False, []
+    anchors: List[str] = []
+    for m in re.finditer(r"require\s*\((.*?)\)\s*;", code, re.DOTALL):
+        expr = m.group(1)
+        if "lockingBytecode" in expr and "this.activeBytecode" in expr:
+            anchors.append(expr.strip()[:120])
+    return bool(anchors), anchors
+
+
+def _mint_supply_cap_in_requires(code: str) -> tuple[bool, List[str]]:
+    """True only when a require() inequality binds mint increment to maxSupply/totalSupply."""
+    anchors: List[str] = []
+    for m in re.finditer(r"require\s*\((.*?)\)\s*;", code, re.DOTALL):
+        expr = m.group(1)
+        if not re.search(r"<=|<", expr):
+            continue
+        if not re.search(r"maxSupply|totalSupply|remainingSupply", expr, re.IGNORECASE):
+            continue
+        if not re.search(r"totalMinted|mintAmount|currentSupply", expr, re.IGNORECASE):
+            continue
+        anchors.append(expr.strip()[:120])
+    return bool(anchors), anchors
 
 
 def _grep_lines(code: str, pattern: str, limit: int = 5) -> List[str]:

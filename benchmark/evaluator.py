@@ -101,6 +101,19 @@ def _cashtoken_alias_pool(
             "minting_authority_custody": custody_ok,
             "must_fail_capability_leak": leak_fail,
         },
+        "ft_mint": {
+            "valid_signature_check": sig_ok,
+            "token_category_check": bool(
+                re.search(
+                    r"outputs\[[^\]]+\]\.tokenCategory\s*==\s*tokenCategory",
+                    code,
+                )
+                or cat_in and cat_out
+            ),
+            "supply_cap_enforcement": capabilities.get("enforces_supply_cap") is True,
+            "mint_cap_guard": capabilities.get("enforces_supply_cap") is True,
+            "must_fail_unbounded_mint": capabilities.get("enforces_supply_cap") is not True,
+        },
         "hybrid_token": {
             "valid_signature_check": sig_ok,
             "token_category_check": cat_in and cat_out,
@@ -127,6 +140,18 @@ def _cashtoken_alias_pool(
     }
     merged = {**default, **pools.get(pattern, {})}
     return merged
+
+
+def _invalid_detector_alias_pool(code: str, contract_mode: str = "") -> Dict[str, bool]:
+    """Wave 2B: must_fail_* keys true when matching invalid-logic detector fires."""
+    from src.services.cashtokens_token_detectors import CASHTOKENS_INVALID_DETECTOR_REGISTRY
+    from src.utils.cashscript_ast import CashScriptAST
+
+    ast = CashScriptAST(code, contract_mode=contract_mode)
+    out: Dict[str, bool] = {}
+    for detector in CASHTOKENS_INVALID_DETECTOR_REGISTRY:
+        out[f"must_fail_{detector.id}"] = detector.detect(ast) is not None
+    return out
 
 
 def _semantic_alias_pool(
@@ -325,6 +350,7 @@ class BenchmarkEvaluator:
                     contract_mode=(case.pattern or intent_model.get("contract_type", "")),
                     intent_modes=intent_modes,
                 )
+                legacy_capabilities["enforces_supply_cap"] = sem_caps.get("enforces_supply_cap") is True
 
                 pattern_key = (case.pattern or "").strip()
                 if pattern_key.startswith("semantic_"):
@@ -332,7 +358,7 @@ class BenchmarkEvaluator:
                         pattern_key, legacy_capabilities, detected, code, functions
                     )
                 elif pattern_key in {
-                    "token_ft", "nft_immutable", "nft_mutable",
+                    "token_ft", "ft_mint", "nft_immutable", "nft_mutable",
                     "nft_minting", "hybrid_token",
                 }:
                     legacy_alias_checks = _cashtoken_alias_pool(
@@ -356,6 +382,11 @@ class BenchmarkEvaluator:
                         "token_nft_amount_check": ("token_nft" in detected)
                         or bool(re.search(r"tokenAmount\s*==\s*1\b", code)),
                     })
+                legacy_alias_checks.update(
+                    _invalid_detector_alias_pool(
+                        code, case.pattern or intent_model.get("contract_type", "")
+                    )
+                )
 
                 requirement_traces: Dict[str, Any] = {}
 

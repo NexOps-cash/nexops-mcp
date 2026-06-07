@@ -1,0 +1,51 @@
+# Investor Demo — 4️⃣ Token Amount Validation
+# python -m benchmark.runner benchmark/suites/investor_demo_token_amount.yaml
+
+- id: demo_amt_loyalty_001
+  pattern: token_ft
+  difficulty: medium
+  intent: |
+    Loyalty points transfer contract. Preserve the exact token amount during
+    transfers and prevent inflation or accidental burns. Owner signature required.
+  required_features:
+    - signature_verification
+    - token_amount_check
+    - token_category_check
+  critical_features:
+    - token_amount_check
+    - token_category_check
+    - valid_signature_check
+  tags: ["investor_demo", "cashtokens", "token_ft", "category_4_token_amount"]
+
+- id: demo_amt_treasury_002
+  pattern: token_ft
+  difficulty: hard
+  intent: |
+    Treasury payout contract. Split a fungible token balance between two recipients
+    while ensuring total output tokenAmount equals the input tokenAmount. Preserve
+    token category on every output.
+  required_features:
+    - signature_verification
+    - token_amount_check
+    - token_category_check
+  critical_features:
+    - token_amount_check
+    - token_category_check
+  tags: ["investor_demo", "cashtokens", "token_ft", "category_4_token_amount", "split"]
+
+- id: demo_amt_payroll_003
+  pattern: token_ft
+  difficulty: hard
+  intent: |
+    Salary token distribution contract. Token amounts distributed to employees must
+    exactly match the treasury allocation. Sum of output tokenAmounts must equal
+    input tokenAmount; category must not change.
+  required_features:
+    - signature_verification
+    - token_amount_check
+    - token_category_check
+  critical_features:
+    - token_amount_check
+    - token_category_check
+    - valid_signature_check
+  tags: ["investor_demo", "cashtokens", "token_ft", "category_4_token_amount", "split"]

@@ -359,6 +359,32 @@ class CashScriptAST:
                     unguarded.append(op)
         return unguarded
     
+    def has_same_index_category_preservation(self) -> bool:
+        return bool(
+            re.search(
+                r"outputs\[[^\]]+\]\.tokenCategory\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenCategory",
+                self.code,
+                re.DOTALL,
+            )
+        )
+
+    def has_same_index_amount_preservation(self) -> bool:
+        return bool(
+            re.search(
+                r"outputs\[[^\]]+\]\.tokenAmount\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenAmount",
+                self.code,
+                re.DOTALL,
+            )
+        )
+
+    def has_split_token_supply_conservation(self) -> bool:
+        patterns = [
+            r"outputs\[\d+\]\.tokenAmount\s*\+\s*tx\.outputs\[\d+\]\.tokenAmount\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenAmount",
+            r"tx\.outputs\[\d+\]\.tokenAmount\s*\+\s*tx\.outputs\[\d+\]\.tokenAmount\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenAmount",
+            r"outputs\[\d+\]\.tokenAmount\s*\+\s*outputs\[\d+\]\.tokenAmount\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenAmount",
+        ]
+        return any(re.search(p, self.code, re.DOTALL) for p in patterns)
+
     def find_token_pair_violations(self) -> List[int]:
         """Find output indices with tokenCategory check but no tokenAmount check.
 

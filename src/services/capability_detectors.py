@@ -129,6 +129,9 @@ class TokenContinuityBreakDetector(CapabilityBackedDetector):
     capability_domain = "TokenFlow"
 
     def _detect_with_caps(self, ast: CashScriptAST, caps) -> Optional[Violation]:
+        mode = (ast.contract_mode or "").lower()
+        if mode in {"ft_mint", "ft_mint_authority", "token_ft_mint", "nft_minting", "nft_minting_authority"}:
+            return None
         if "tokenCategory" not in ast.code and "tokenAmount" not in ast.code:
             return None
         if caps.token_flow.get("preserves_token_category") or caps.token_flow.get(
@@ -136,6 +139,8 @@ class TokenContinuityBreakDetector(CapabilityBackedDetector):
         ):
             return None
         if caps.token_flow.get("token_category_constrained"):
+            return None
+        if caps.token_flow.get("enforces_supply_cap"):
             return None
         return Violation(
             rule=self.id,
@@ -178,12 +183,16 @@ class HybridMigrationMismatchDetector(CapabilityBackedDetector):
 
     def _detect_with_caps(self, ast: CashScriptAST, caps) -> Optional[Violation]:
         mode = (ast.contract_mode or "").lower()
+        if mode in {"ft_mint", "ft_mint_authority", "token_ft_mint", "token_ft", "ft_transfer"}:
+            return None
         if mode not in {"hybrid_token", "marketplace", ""}:
             if not caps.lifecycle.get("migratory_output"):
                 return None
         if not caps.lifecycle.get("migratory_output"):
             return None
         if caps.token_flow.get("preserves_token_category"):
+            return None
+        if caps.token_flow.get("enforces_supply_cap"):
             return None
         if "tokenCategory" not in ast.code and "tokenAmount" not in ast.code:
             return None
@@ -239,6 +248,7 @@ AUDIT_CAPABILITY_DETECTOR_REGISTRY = [
     MissingAuthorizationStateMutationDetector(),
     UnrestrictedNftTransferDetector(),
     MutableNftMissingReanchorDetector(),
+    TokenContinuityBreakDetector(),
     UnintendedBurnPathDetector(),
     HybridMigrationMismatchDetector(),
     UnrestrictedPayoutPathDetector(),

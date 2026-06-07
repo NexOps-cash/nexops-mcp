@@ -22,7 +22,24 @@ from typing import List, Dict, Any, Optional
 import hashlib
 
 from src.services.audit_engine.audit_detectors import AUDIT_DETECTOR_REGISTRY
+from src.services.anti_pattern_detectors import (
+    MintingAuthorityEscapeDetector,
+    TokenPairValidationDetector,
+    UnboundedMintDetector,
+)
+from src.services.cashtokens_token_detectors import CASHTOKENS_INVALID_DETECTOR_REGISTRY
 from src.services.invariant_engine_core import build_audit_profile, validate_with_profile
+
+
+def audit_detector_registry():
+    """Audit TollGate registry: audit-native + CashTokens generation parity detectors."""
+    return [
+        *AUDIT_DETECTOR_REGISTRY,
+        TokenPairValidationDetector(),
+        MintingAuthorityEscapeDetector(),
+        UnboundedMintDetector(),
+        *CASHTOKENS_INVALID_DETECTOR_REGISTRY,
+    ]
 
 logger = logging.getLogger(__name__)
 
@@ -80,8 +97,8 @@ class AuditEnforcer:
     def __init__(self, kb_path: str = "knowledge"):
         self.kb_path = kb_path
         self.anti_patterns: List[AntiPattern] = []  # Documentation
-        self.detectors = AUDIT_DETECTOR_REGISTRY  # Enforcement
-        self._profile = build_audit_profile(AUDIT_DETECTOR_REGISTRY)
+        self.detectors = audit_detector_registry()  # Enforcement
+        self._profile = build_audit_profile(self.detectors)
 
         self._load_anti_pattern_docs()
     

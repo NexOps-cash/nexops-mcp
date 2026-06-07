@@ -1,0 +1,54 @@
+# Token category/amount validation hardening — Wave 2D
+
+- id: ct_val_split_001
+  pattern: token_ft
+  difficulty: hard
+  intent: |
+    Split fungible token balance across two outputs while preserving total supply.
+  required_features:
+    - signature_verification
+    - token_category_check
+    - token_amount_check
+  critical_features:
+    - token_category_check
+    - token_amount_check
+  tags: ["cashtokens", "split", "validation"]
+
+- id: ct_val_nft_001
+  pattern: nft_immutable
+  difficulty: medium
+  intent: |
+    Transfer NFT preserving token category and nftCommitment.
+  critical_features:
+    - token_category_check
+    - nftcommitment_preservation
+  tags: ["cashtokens", "validation"]
+
+- id: ct_val_hybrid_001
+  pattern: hybrid_token
+  difficulty: hard
+  intent: |
+    Hybrid state transition preserving tokenAmount and tokenCategory.
+  critical_features:
+    - token_category_check
+    - token_amount_check
+    - covenant_self_reference
+  tags: ["cashtokens", "validation"]
+
+- id: ct_val_fail_cat_001
+  pattern: token_ft
+  difficulty: medium
+  intent: |
+    FAILURE CASE: output categories mismatch.
+  critical_features:
+    - must_fail_token_category_drift
+  tags: ["cashtokens", "failure", "vulnerability", "validation"]
+
+- id: ct_val_fail_amt_001
+  pattern: token_ft
+  difficulty: medium
+  intent: |
+    FAILURE CASE: output token amounts do not sum to input amount.
+  critical_features:
+    - must_fail_token_amount_inflation
+  tags: ["cashtokens", "failure", "vulnerability", "validation"]
