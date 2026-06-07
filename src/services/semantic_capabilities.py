@@ -267,14 +267,33 @@ def _multisig_anchors(code: str) -> List[str]:
 
 
 def _preserves_token_category_guard(code: str) -> tuple[bool, List[str]]:
-    pattern = re.compile(
-        r"outputs\[[^\]]+\]\.tokenCategory\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenCategory",
-        re.DOTALL,
+    patterns = (
+        re.compile(
+            r"outputs\[[^\]]+\]\.tokenCategory\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenCategory",
+            re.DOTALL,
+        ),
+        # FT/NFT mint: bind outputs to contract tokenCategory parameter (no input category on mint path)
+        re.compile(
+            r"outputs\[[^\]]+\]\.tokenCategory\s*==\s*tokenCategory\b",
+            re.DOTALL,
+        ),
     )
-    m = pattern.search(code)
-    if not m:
-        return False, []
-    return True, [re.sub(r"\s+", " ", m.group(0))[:120]]
+    for pattern in patterns:
+        m = pattern.search(code)
+        if m:
+            return True, [re.sub(r"\s+", " ", m.group(0))[:120]]
+    for m in re.finditer(
+        r"tx\.inputs\[this\.activeInputIndex\]\.tokenCategory\s*==\s*(\w+)",
+        code,
+    ):
+        var = m.group(1)
+        out = re.search(
+            rf"outputs\[[^\]]+\]\.tokenCategory\s*==\s*{re.escape(var)}\b",
+            code,
+        )
+        if out:
+            return True, [re.sub(r"\s+", " ", out.group(0))[:120]]
+    return False, []
 
 
 def _preserves_token_amount_guard(code: str) -> tuple[bool, List[str]]:

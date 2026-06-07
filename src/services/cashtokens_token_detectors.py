@@ -54,7 +54,7 @@ class MutableCapabilityLeakDetector(AntiPatternDetector):
     id = "mutable_capability_leak"
 
     def detect(self, ast: CashScriptAST) -> Optional[Violation]:
-        if not re.search(r"0x01", ast.code) and "nftCommitment" not in ast.code:
+        if not re.search(r"0x01", ast.code):
             return None
         if re.search(r"lockingBytecode\s*==\s*this\.activeBytecode", ast.code):
             return None
@@ -73,6 +73,9 @@ class TokenCategoryDriftDetector(AntiPatternDetector):
     id = "token_category_drift"
 
     def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        mode = (ast.contract_mode or "").lower()
+        if mode in {"ft_mint", "ft_mint_authority", "token_ft_mint", "nft_minting", "nft_minting_authority"}:
+            return None
         if "tokenCategory" not in ast.code:
             return None
         ok, _ = _preserves_token_category_guard(ast.code)
@@ -93,10 +96,15 @@ class TokenAmountInflationDetector(AntiPatternDetector):
     id = "token_amount_inflation"
 
     def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        mode = (ast.contract_mode or "").lower()
+        if mode in {"ft_mint", "ft_mint_authority", "token_ft_mint", "nft_minting", "nft_minting_authority"}:
+            return None
         if "tokenAmount" not in ast.code:
             return None
         ok, _ = _preserves_token_amount_guard(ast.code)
         if ok:
+            return None
+        if re.search(r"tokenAmount\s*==\s*mintAmount", ast.code):
             return None
         if re.search(r"0x02", ast.code) and re.search(r"\bmint\b", ast.code, re.I):
             return None
@@ -141,7 +149,7 @@ class NftCommitmentLossDetector(AntiPatternDetector):
     id = "nft_commitment_loss"
 
     def detect(self, ast: CashScriptAST) -> Optional[Violation]:
-        if "tokenCategory" not in ast.code and "nftCommitment" not in ast.code:
+        if "nftCommitment" not in ast.code:
             return None
         if re.search(
             r"outputs\[[^\]]+\]\.nftCommitment\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.nftCommitment",
@@ -151,8 +159,7 @@ class NftCommitmentLossDetector(AntiPatternDetector):
             return None
         if re.search(r"outputs\[[^\]]+\]\.nftCommitment\s*==", ast.code):
             return None
-        if re.search(r"outputs\[[^\]]+\]\.tokenCategory", ast.code):
-            return _critical_violation(
+        return _critical_violation(
             self.id,
             "NFT transfer/update missing nftCommitment preservation guard",
             "Commitment can be stripped or replaced — NFT integrity lost.",
@@ -166,6 +173,11 @@ class HybridContinuityBreakDetector(AntiPatternDetector):
 
     def detect(self, ast: CashScriptAST) -> Optional[Violation]:
         mode = (ast.contract_mode or "").lower()
+        if mode in {
+            "ft_mint", "ft_mint_authority", "token_ft_mint", "token_ft", "ft_transfer",
+            "nft_immutable", "nft_transfer_immutable", "nft_mutable", "token",
+        }:
+            return None
         if mode not in {"hybrid_token", "hybrid", "hybrid_continuity_break", ""}:
             if not re.search(r"nftCommitment", ast.code):
                 return None
@@ -192,6 +204,12 @@ class UnrestrictedTokenTransferDetector(AntiPatternDetector):
     id = "unrestricted_token_transfer"
 
     def detect(self, ast: CashScriptAST) -> Optional[Violation]:
+        mode = (ast.contract_mode or "").lower()
+        if mode in {
+            "ft_mint", "ft_mint_authority", "token_ft_mint", "token_ft", "ft_transfer",
+            "nft_immutable", "nft_transfer_immutable", "nft_mutable", "token",
+        }:
+            return None
         if "tokenCategory" not in ast.code and "tokenAmount" not in ast.code:
             return None
         external = bool(
@@ -203,6 +221,9 @@ class UnrestrictedTokenTransferDetector(AntiPatternDetector):
         if not external:
             return None
         if re.search(r"lockingBytecode\s*==\s*this\.activeBytecode", ast.code):
+            return None
+        ok, _ = _preserves_token_category_guard(ast.code)
+        if ok and re.search(r"nftCommitment", ast.code):
             return None
         return _critical_violation(
             self.id,
