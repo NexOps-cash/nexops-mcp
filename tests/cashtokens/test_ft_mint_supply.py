@@ -5,7 +5,11 @@ from pathlib import Path
 import pytest
 
 from src.services.anti_pattern_detectors import UnboundedMintDetector
-from src.services.dsl_lint import DSLLinter, _mint_supply_cap_in_requires
+from src.services.dsl_lint import (
+    DSLLinter,
+    _check_token_mint_supply_enforcement,
+    _mint_supply_cap_in_requires,
+)
 from src.services.semantic_capabilities import extract_semantic_capabilities
 from src.utils.cashscript_ast import CashScriptAST
 
@@ -79,14 +83,37 @@ def test_mint_supply_cap_helper():
 
 
 def test_lnc_017_blocks_ft_mint_without_cap():
-    linter = DSLLinter()
-    result = linter.lint(
+    """
+    LNC-017 rule flags uncapped mint bodies (blocking for capped_mint / ft_mint*).
+
+    The ft_mint pattern profile disables LNC-017 in DSLLinter so Phase 2 does not
+    fight mint-specific lint (LNC-014/LNC-016); supply is enforced in Phase 3 via
+    UnboundedMintDetector and enforces_supply_cap instead.
+    """
+    violations = _check_token_mint_supply_enforcement(
         UNBOUNDED_MINT,
         contract_mode="ft_mint_authority",
         semantic={"supply_mode": "capped_mint"},
     )
-    assert result["passed"] is False
-    assert any(v["rule_id"] == "LNC-017" for v in result["violations"])
+    assert len(violations) == 1
+    assert violations[0]["rule_id"] == "LNC-017"
+    assert violations[0].get("severity") != "warning"
+
+    result = DSLLinter().lint(
+        UNBOUNDED_MINT,
+        contract_mode="ft_mint_authority",
+        semantic={"supply_mode": "capped_mint"},
+    )
+    assert not any(v["rule_id"] == "LNC-017" for v in result["violations"])
+
+    # Outside ft_mint profile the rule is active and blocks lint pass.
+    generic = DSLLinter().lint(
+        UNBOUNDED_MINT,
+        contract_mode="generic",
+        semantic={"supply_mode": "capped_mint"},
+    )
+    assert generic["passed"] is False
+    assert any(v["rule_id"] == "LNC-017" for v in generic["violations"])
 
 
 def test_lnc_017_passes_golden(golden_code):
