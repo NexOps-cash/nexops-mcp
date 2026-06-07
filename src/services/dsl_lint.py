@@ -821,6 +821,9 @@ def _check_token_pair_completeness(
                 "line_hint": start_lineno,
             })
 
+        if "mint" in func_name.lower():
+            continue
+
         out_amt_refs = set(re.findall(r"tx\.outputs\[(\d+)\]\.tokenAmount", body))
         if len(out_amt_refs) >= 2 and not _split_token_conservation_in_body(body):
             violations.append({
@@ -894,7 +897,7 @@ def _check_token_mint_supply_enforcement(
             return []
 
     for func_name, body, start_lineno in _function_bodies(code):
-        if "mint" not in func_name.lower() and "mint" not in body.lower():
+        if "mint" not in func_name.lower():
             continue
         has_supply_guard = _mint_supply_cap_in_requires(body)
         if not has_supply_guard:

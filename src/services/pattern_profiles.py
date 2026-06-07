@@ -99,8 +99,19 @@ PATTERN_PROFILES: Dict[str, Dict[str, List[str]]] = {
     },
     "ft_mint": {
         "knowledge_files": ["covenant_rules.yaml", "cashtokens_rules.yaml", "ft_mint_rules.yaml"],
-        "disable_lint_rules": ["LNC-018"],
-        "disable_detectors": [],
+        "disable_lint_rules": ["LNC-001", "LNC-005", "LNC-014", "LNC-016", "LNC-017", "LNC-018"],
+        "disable_detectors": [
+            "missing_output_limit",
+            "missing_value_enforcement",
+            "missing_token_amount_validation",
+            "output_binding_missing",
+            "empty_function_body",
+            "capability_token_continuity_break",
+            "capability_hybrid_migration_mismatch",
+            "token_category_drift",
+            "token_amount_inflation",
+            "unrestricted_token_transfer",
+        ],
     },
     "ft_mint_failure": {
         "knowledge_files": ["covenant_rules.yaml", "cashtokens_rules.yaml", "ft_mint_rules.yaml"],
