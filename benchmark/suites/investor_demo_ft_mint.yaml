@@ -1,0 +1,44 @@
+# Investor Demo — 1️⃣ Fungible Token Mint (supply enforcement)
+# python -m benchmark.runner benchmark/suites/investor_demo_ft_mint.yaml
+
+- id: demo_ft_mint_retail_001
+  pattern: ft_mint
+  difficulty: medium
+  intent: |
+    Retail chain loyalty token. Only the treasury can mint new reward points.
+    Total supply must never exceed 100 million tokens.
+  required_features:
+    - signature_verification
+    - token_category_check
+  critical_features:
+    - valid_signature_check
+    - supply_cap_enforcement
+    - mint_cap_guard
+  tags: ["investor_demo", "cashtokens", "ft_mint", "category_1_ft_mint"]
+
+- id: demo_ft_mint_university_002
+  pattern: ft_mint
+  difficulty: medium
+  intent: |
+    Student achievement token for a university. Admin may mint tokens for completed
+    certifications but cumulative supply must remain below a fixed cap.
+  required_features:
+    - signature_verification
+  critical_features:
+    - valid_signature_check
+    - supply_cap_enforcement
+  tags: ["investor_demo", "cashtokens", "ft_mint", "category_1_ft_mint"]
+
+- id: demo_ft_mint_gaming_003
+  pattern: ft_mint
+  difficulty: medium
+  intent: |
+    In-game gold token with capped supply. Game operator can mint rewards while
+    enforcing a maximum total supply across all mint operations.
+  required_features:
+    - signature_verification
+    - token_category_check
+  critical_features:
+    - supply_cap_enforcement
+    - mint_cap_guard
+  tags: ["investor_demo", "cashtokens", "ft_mint", "category_1_ft_mint"]
