@@ -24,7 +24,6 @@ mappings:
     fallback: detected_feature
     detected: output_value_validation
   time_validation:
-    capability: terminating_output
     fallback: regex_alias
     alias_pool_key: locktime_check
 
@@ -113,11 +112,48 @@ mappings:
     capability: terminating_output
     fallback: regex_alias
   locktime_check:
-    capability: terminating_output
+    capability: time_validation
     fallback: regex_alias
+    alias_pool_key: locktime_check
+  time_validation:
+    fallback: regex_alias
+    alias_pool_key: locktime_check
+  timestamp_based:
+    fallback: regex_alias
+    alias_pool_key: timestamp_based
+  block_height_based:
+    fallback: regex_alias
+    alias_pool_key: block_height_based
+  relative_timelock:
+    fallback: regex_alias
+    alias_pool_key: relative_timelock
+  sequence_check:
+    fallback: regex_alias
+    alias_pool_key: sequence_check
+  must_fail_wrong_time_field:
+    fallback: regex_alias
+    alias_pool_key: must_fail_wrong_time_field
   two_of_three_logic:
     capability: has_multisig_auth
     fallback: regex_alias
+  three_of_five_logic:
+    fallback: regex_alias
+    alias_pool_key: three_of_five_logic
+  must_fail_pubkey_substitution:
+    fallback: regex_alias
+    alias_pool_key: must_fail_pubkey_substitution
+  must_fail_duplicate_signer:
+    fallback: regex_alias
+    alias_pool_key: must_fail_duplicate_signer
+  alice_signature:
+    fallback: detected_feature
+    detected: alice_signature
+  bob_signature:
+    fallback: detected_feature
+    detected: bob_signature
+  carol_signature:
+    fallback: detected_feature
+    detected: carol_signature
 
   # escrow.yaml / escrow_suite role-based features
   multisig:

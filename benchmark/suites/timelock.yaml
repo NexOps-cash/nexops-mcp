@@ -8,7 +8,7 @@
     Create a contract where funds can only be spent after block height 800000.
   required_features:
     - time_validation
-    - signature_verification
+    - block_height_based
   critical_features:
     - locktime_check
   expected_structure:
@@ -51,8 +51,7 @@
   difficulty: hard
   intent: |
     FAILURE CASE: Contract uses tx.timestamp instead of tx.locktime for timelock validation.
-  required_features:
-    - time_validation
+  required_features: []
   critical_features:
     - must_fail_wrong_time_field
   expected_structure:
@@ -66,7 +65,6 @@
     Create a contract with relative timelock that requires waiting 144 blocks after funding before spending.
   required_features:
     - time_validation
-    - signature_verification
     - relative_timelock
   critical_features:
     - sequence_check

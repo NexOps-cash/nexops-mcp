@@ -5,6 +5,18 @@ features:
   timelock_refund:
     rule: 'require\s*\(\s*(tx\.(time|age)|this\.age)\s*>=\s*\w+\s*\)'
     description: "Timelock using tx.time, tx.age, or this.age in a require"
+  timestamp_based:
+    rule: '(?:unlockTimestamp|UnlockTimestamp)\b'
+    description: "Absolute Unix timestamp CLTV (constructor or param naming)"
+  block_height_based:
+    rule: '(?:unlockHeight|BlockHeight|blockHeight|lockBlocks|unlockBlocks)\b|(?:this\.age|tx\.age)\s*>=\s*(?:lockBlocks|unlockBlocks)\b'
+    description: "Block-height CLTV or block-count CSV maturity"
+  relative_timelock:
+    rule: '(?:tx\.age|this\.age)\s*>=\s*\w+'
+    description: "Relative timelock via CSV (tx.age or this.age)"
+  sequence_check:
+    rule: 'this\.age\s*>=\s*\w+'
+    description: "Relative sequence maturity via this.age"
   multisig_2of2:
     rule: 'checkSig\([^)]+\)\s*&&\s*checkSig\([^)]+\)'
     description: "Two signature checks present in the same require statement"
