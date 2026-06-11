@@ -98,22 +98,66 @@ def _paren_delta(code: str) -> int:
     return stripped.count("(") - stripped.count(")")
 
 
-def _dangling_require(code: str) -> bool:
-    """Unclosed require( at EOF or end of a function body."""
-    if re.search(r"require\s*\(\s*[^)]*$", code.rstrip(), re.MULTILINE):
-        return True
-    for m in re.finditer(r"function\s+(\w+)\s*\([^)]*\)\s*\{", code):
-        start = m.end()
-        depth = 1
-        i = start
-        while i < len(code) and depth > 0:
-            if code[i] == "{":
-                depth += 1
-            elif code[i] == "}":
-                depth -= 1
+def _closing_paren_index(code: str, open_paren_idx: int) -> Optional[int]:
+    """Index after matching ')' for '(' at open_paren_idx, or None if unclosed."""
+    if open_paren_idx < 0 or open_paren_idx >= len(code) or code[open_paren_idx] != "(":
+        return None
+
+    depth = 0
+    i = open_paren_idx
+    in_line_comment = False
+    in_block = False
+    in_str = False
+    quote = ""
+    n = len(code)
+    while i < n:
+        ch = code[i]
+        nxt = code[i + 1] if i + 1 < n else ""
+        if in_line_comment:
+            if ch == "\n":
+                in_line_comment = False
             i += 1
-        body = code[start : i - 1] if depth == 0 else code[start:]
-        if re.search(r"require\s*\(\s*[^)]*$", body.rstrip(), re.MULTILINE):
+            continue
+        if in_block:
+            if ch == "*" and nxt == "/":
+                in_block = False
+                i += 2
+            else:
+                i += 1
+            continue
+        if in_str:
+            if ch == quote and code[i - 1] != "\\":
+                in_str = False
+            i += 1
+            continue
+        if ch == "/" and nxt == "/":
+            in_line_comment = True
+            i += 2
+            continue
+        if ch == "/" and nxt == "*":
+            in_block = True
+            i += 2
+            continue
+        if ch in ('"', "'"):
+            in_str = True
+            quote = ch
+            i += 1
+            continue
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return None
+
+
+def _dangling_require(code: str) -> bool:
+    """True when any require( has no balanced closing ')' (supports multiline blocks)."""
+    for m in re.finditer(r"\brequire\s*\(", code):
+        open_paren = m.end() - 1
+        if _closing_paren_index(code, open_paren) is None:
             return True
     return False
 
