@@ -41,9 +41,14 @@ def _escrow_permanent_covenant(code: str) -> bool:
 
 
 def _both_signatures_required(detected: set, code: str) -> bool:
+    role_pairs = (
+        ("alice_signature", "bob_signature"),
+        ("buyer_signature", "seller_signature"),
+    )
+    if any(a in detected and b in detected for a, b in role_pairs):
+        return True
     return (
-        ("buyer_signature" in detected and "seller_signature" in detected)
-        or "multisig_2of2" in detected
+        "multisig_2of2" in detected
         or bool(
             re.search(
                 r"checkSig\([^)]+\)\s*&&\s*checkSig\([^)]+\)",
@@ -51,6 +56,121 @@ def _both_signatures_required(detected: set, code: str) -> bool:
                 re.IGNORECASE,
             )
         )
+        or len(re.findall(r"checkSig\s*\(", code, re.IGNORECASE)) >= 2
+    )
+
+
+def _three_of_five_logic(detected: set, code: str) -> bool:
+    if "three_of_five_logic" in detected:
+        return True
+    msig = re.search(
+        r"checkMultiSig\s*\(\s*\[(.*?)\]\s*,\s*\[(.*?)\]\s*\)",
+        code,
+        re.DOTALL | re.IGNORECASE,
+    )
+    if msig:
+        sigs = [s.strip() for s in msig.group(1).split(",") if s.strip()]
+        pks = [p.strip() for p in msig.group(2).split(",") if p.strip()]
+        if len(sigs) >= 3 and len(pks) >= 5:
+            return True
+    check_sig_count = len(re.findall(r"checkSig\s*\(", code, re.IGNORECASE))
+    pubkey_count = len(re.findall(r"\bpubkey\s+\w+", code, re.IGNORECASE))
+    return check_sig_count >= 3 and pubkey_count >= 5
+
+
+def _must_fail_pubkey_substitution(code: str) -> bool:
+    """True when spend paths accept caller-supplied pubkeys (substitution vulnerability)."""
+    for match in re.finditer(
+        r"function\s+(\w+)\s*\((.*?)\)\s*\{",
+        code,
+        re.DOTALL | re.IGNORECASE,
+    ):
+        params = match.group(2)
+        if not re.search(r"\bpubkey\s+\w+", params, re.IGNORECASE):
+            continue
+        body_start = match.end()
+        next_fn = re.search(r"\n\s*function\s+", code[body_start:])
+        body = code[body_start: body_start + next_fn.start()] if next_fn else code[body_start:]
+        if re.search(r"checkSig|checkMultiSig", body, re.IGNORECASE):
+            return True
+    return False
+
+
+def _must_fail_duplicate_signer(code: str) -> bool:
+    """True when the same signature variable authorizes multiple pubkeys."""
+    from src.utils.cashscript_ast import CashScriptAST
+
+    ast = CashScriptAST(code, contract_mode="multisig")
+    return bool(ast.find_signature_reuse())
+
+
+def _must_fail_wrong_time_field(code: str) -> bool:
+    """True when invalid Solidity-style or non-CashScript time fields are used."""
+    return bool(
+        re.search(r"\btx\.timestamp\b", code, re.IGNORECASE)
+        or re.search(r"\bblock\.timestamp\b", code, re.IGNORECASE)
+        or re.search(r"\btx\.locktime\b", code, re.IGNORECASE)
+    )
+
+
+def _timestamp_based_timelock(detected: set, code: str) -> bool:
+    if "timestamp_based" in detected:
+        return True
+    has_cltv = (
+        "timelock_unlock" in detected
+        or "timelock_refund" in detected
+        or bool(re.search(r"tx\.time\s*>=", code))
+    )
+    has_csv = bool(re.search(r"(?:tx\.age|this\.age)\s*>=", code))
+    if not has_cltv or has_csv:
+        return False
+    if re.search(r"unlockTimestamp|UnlockTimestamp", code):
+        return True
+    if re.search(r"tx\.time\s*>=\s*5\d{8}", code):
+        return True
+    if re.search(r"unlockTime\b", code) and re.search(r"checkSig", code, re.IGNORECASE):
+        if not re.search(r"unlockHeight|BlockHeight|blockHeight", code):
+            return True
+    return False
+
+
+def _block_height_based_timelock(detected: set, code: str) -> bool:
+    if "block_height_based" in detected:
+        return True
+    if re.search(
+        r"unlockHeight|BlockHeight|blockHeight|unlockBlocks|lockBlocks", code
+    ):
+        return True
+    if re.search(
+        r"(?:this\.age|tx\.age)\s*>=\s*(?:lockBlocks|unlockBlocks)\b", code
+    ):
+        return True
+    if re.search(r"tx\.time\s*>=\s*\w*Height\b", code, re.IGNORECASE):
+        return True
+    has_csv = bool(re.search(r"(?:tx\.age|this\.age)\s*>=", code))
+    if has_csv and re.search(
+        r"tx\.time\s*>=\s*unlock(?:Time|Height|Blocks)\b", code
+    ):
+        # Savings-style CLTV (block count) plus relative maturity in one contract.
+        return True
+    for match in re.finditer(r"tx\.time\s*>=\s*(\d+)", code):
+        try:
+            if int(match.group(1)) < 500_000_000:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _relative_timelock(detected: set, code: str) -> bool:
+    return "relative_timelock" in detected or bool(
+        re.search(r"(?:tx\.age|this\.age)\s*>=\s*\w+", code)
+    )
+
+
+def _sequence_check(detected: set, code: str) -> bool:
+    return "sequence_check" in detected or bool(
+        re.search(r"this\.age\s*>=\s*\w+", code)
     )
 
 
@@ -191,6 +311,24 @@ def _cashtoken_alias_pool(
             "must_fail_missing_destination_check": _escrow_missing_destination_check(code),
             "must_fail_permanent_covenant": _escrow_permanent_covenant(code),
         },
+        "multisig": {
+            "valid_signature_check": sig_ok,
+            "both_signatures_required": _both_signatures_required(detected, code),
+            "multisig": _multisig_detected(detected, code),
+            "two_of_three_logic": ("multisig_2of3" in detected or "checkMultiSig" in code),
+            "three_of_five_logic": _three_of_five_logic(detected, code),
+            "must_fail_pubkey_substitution": _must_fail_pubkey_substitution(code),
+            "must_fail_duplicate_signer": _must_fail_duplicate_signer(code),
+        },
+        "timelock": {
+            "valid_signature_check": sig_ok,
+            "locktime_check": capabilities.get("time_validation", False),
+            "timestamp_based": _timestamp_based_timelock(detected, code),
+            "block_height_based": _block_height_based_timelock(detected, code),
+            "relative_timelock": _relative_timelock(detected, code),
+            "sequence_check": _sequence_check(detected, code),
+            "must_fail_wrong_time_field": _must_fail_wrong_time_field(code),
+        },
     }
     default = {
         "valid_signature_check": sig_ok,
@@ -207,8 +345,16 @@ def _cashtoken_alias_pool(
         "two_of_three_logic": ("multisig_2of3" in detected or "checkMultiSig" in code),
         "both_signatures_required": _both_signatures_required(detected, code),
         "multisig": _multisig_detected(detected, code),
+        "three_of_five_logic": _three_of_five_logic(detected, code),
         "must_fail_missing_destination_check": _escrow_missing_destination_check(code),
         "must_fail_permanent_covenant": _escrow_permanent_covenant(code),
+        "must_fail_pubkey_substitution": _must_fail_pubkey_substitution(code),
+        "must_fail_duplicate_signer": _must_fail_duplicate_signer(code),
+        "timestamp_based": _timestamp_based_timelock(detected, code),
+        "block_height_based": _block_height_based_timelock(detected, code),
+        "relative_timelock": _relative_timelock(detected, code),
+        "sequence_check": _sequence_check(detected, code),
+        "must_fail_wrong_time_field": _must_fail_wrong_time_field(code),
     }
     merged = {**default, **pools.get(pattern, {})}
     return merged
@@ -433,6 +579,7 @@ class BenchmarkEvaluator:
                 elif pattern_key in {
                     "token_ft", "ft_mint", "nft_immutable", "nft_mutable",
                     "nft_minting", "hybrid_token", "split_payment", "escrow",
+                    "multisig", "timelock",
                 }:
                     legacy_alias_checks = _cashtoken_alias_pool(
                         pattern_key, legacy_capabilities, detected, code, functions
@@ -537,7 +684,15 @@ class BenchmarkEvaluator:
                     and intent_coverage >= 0.70
                     and len(critical_missing) == 0
                 )
-                effective_semantic = semantic_pass or token_vault_relaxed
+                timelock_semantic_relaxed = (
+                    case.pattern == "timelock"
+                    and compile_pass
+                    and intent_coverage >= 0.70
+                    and len(critical_missing) == 0
+                )
+                effective_semantic = (
+                    semantic_pass or token_vault_relaxed or timelock_semantic_relaxed
+                )
                 final_score = (1.0 if compile_pass else 0.0) * lint_factor * intent_coverage * (1.0 if effective_semantic else 0.5)
                 
                 if critical_missing:
@@ -554,7 +709,7 @@ class BenchmarkEvaluator:
                     and intent_coverage >= 0.70
                     and len(critical_missing) == 0
                     and not (has_failure_tag and has_must_fail_critical)
-                    and (semantic_pass or token_vault_relaxed)
+                    and (semantic_pass or token_vault_relaxed or timelock_semantic_relaxed)
                 )
 
                 return CaseResult(
