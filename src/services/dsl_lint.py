@@ -199,12 +199,9 @@ def _check_value_anchoring(
             body, re.DOTALL
         ))
 
-        # Accept sum-preservation pattern (up to 2 outputs + remainder)
-        # require(tx.outputs[0].value + tx.outputs[1].value == tx.inputs[this.activeInputIndex].value)
-        sum_anchor = bool(re.search(
-            r"require\s*\(\s*tx\.outputs\[\d+\]\.value\s*\+\s*tx\.outputs\[\d+\]\.value\s*==\s*" + input_pattern + r"\s*\)",
-            body, re.DOTALL
-        ))
+        # Accept N-output sum-preservation (2+ terms)
+        from src.utils.split_conservation import has_bch_value_conservation
+        sum_anchor = has_bch_value_conservation(body, input_pattern)
 
         # Accept partial anchor: value == inputValue - withdrawalAmount (valid for multi-output vaults)
         # require(tx.outputs[N].value == tx.inputs[this.activeInputIndex].value - amount)
@@ -839,11 +836,8 @@ def _check_token_pair_completeness(
 
 
 def _split_token_conservation_in_body(body: str) -> bool:
-    patterns = [
-        r"outputs\[\d+\]\.tokenAmount\s*\+\s*tx\.outputs\[\d+\]\.tokenAmount\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenAmount",
-        r"tx\.outputs\[\d+\]\.tokenAmount\s*\+\s*tx\.outputs\[\d+\]\.tokenAmount\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenAmount",
-    ]
-    return any(re.search(p, body, re.DOTALL) for p in patterns)
+    from src.utils.split_conservation import has_token_amount_conservation
+    return has_token_amount_conservation(body)
 
 
 def _check_token_mint_supply_enforcement(

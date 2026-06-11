@@ -13,6 +13,14 @@ from src.services.pipeline_engine import get_guarded_pipeline_engine
 from src.services.semantic_capabilities import extract_semantic_capabilities, save_capability_trace
 
 
+def _split_output_amount_ok(code: str, capabilities: Dict[str, Any]) -> bool:
+    from src.utils.split_conservation import has_bch_value_conservation
+    return bool(
+        capabilities.get("output_value_validation", False)
+        or has_bch_value_conservation(code)
+    )
+
+
 def _cashtoken_alias_pool(
     pattern: str,
     capabilities: Dict[str, Any],
@@ -122,6 +130,14 @@ def _cashtoken_alias_pool(
             "covenant_self_reference": bool(
                 re.search(r"lockingBytecode\s*==\s*this\.activeBytecode", code)
             ),
+        },
+        "split_payment": {
+            "valid_signature_check": sig_ok,
+            "output_amount_check": _split_output_amount_ok(code, capabilities),
+            "two_of_three_logic": ("multisig_2of3" in detected or "checkMultiSig" in code),
+            "token_category_check": cat_in and cat_out,
+            "token_amount_check": amt_ok,
+            "three_way_split": bool(re.search(r"tx\.outputs\.length\s*==\s*3", code)),
         },
     }
     default = {
@@ -359,7 +375,7 @@ class BenchmarkEvaluator:
                     )
                 elif pattern_key in {
                     "token_ft", "ft_mint", "nft_immutable", "nft_mutable",
-                    "nft_minting", "hybrid_token",
+                    "nft_minting", "hybrid_token", "split_payment",
                 }:
                     legacy_alias_checks = _cashtoken_alias_pool(
                         pattern_key, legacy_capabilities, detected, code, functions

@@ -69,9 +69,16 @@ class SanityChecker:
                 violations.append(f"{ctype} intent requires covenant continuation signal (this.activeBytecode).")
 
         if ctype == "split_payment" or "split" in features:
+            from src.utils.split_conservation import (
+                has_bch_value_conservation,
+                has_token_amount_conservation,
+            )
             if not re.search(r"tx\.outputs\.length", code):
                 violations.append("Split payment intent requires explicit output-count validation.")
-            if not re.search(r"tx\.outputs\[\d+\]\.value\s*\+\s*tx\.outputs\[\d+\]\.value", code):
+            has_conservation = has_bch_value_conservation(code)
+            if "tokenAmount" in code:
+                has_conservation = has_conservation or has_token_amount_conservation(code)
+            if not has_conservation:
                 violations.append("Split payment intent requires sum-preservation check across multiple outputs.")
 
         if ctype in {"decay", "streaming", "dutch_auction", "linear_vesting"}:

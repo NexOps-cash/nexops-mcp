@@ -18,6 +18,7 @@ def canonical_pattern(contract_mode: str) -> str:
         "linear_vesting": "decay",
         "streaming": "decay",
         "distribution": "single_sig_transfer",
+        "split": "split_payment",
         "swap": "conditional_spend",
         "stateful": "covenant",
         "token": "token",
