@@ -40,6 +40,25 @@ def test_no_multisig(extractor):
     assert "multisig" not in features
     assert "buyer_signature" in features
 
+
+def test_dual_checksig_multisig(extractor):
+    code = """
+    require(checkSig(buyerSig, buyer));
+    require(checkSig(sellerSig, seller));
+    """
+    features = extractor.extract(code)["features"]
+    assert "multisig" in features
+    assert "multisig_2of2" in features
+    assert "buyer_signature" in features
+    assert "seller_signature" in features
+
+
+def test_arbiter_alias(extractor):
+    code = "require(checkSig(sig, arbiter));"
+    features = extractor.extract(code)["features"]
+    assert "arbiter_signature" in features
+    assert "arbitrator_signature" in features
+
 def test_multisig_with_complex_params(extractor):
     # Testing that regex doesn't break with non-simple names (though roles are usually simple)
     code = "checkMultiSig([sig1, sig2], [tx.inputs[0].pubkey, seller])"

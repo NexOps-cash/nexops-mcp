@@ -118,3 +118,47 @@ mappings:
   two_of_three_logic:
     capability: has_multisig_auth
     fallback: regex_alias
+
+  # escrow.yaml / escrow_suite role-based features
+  multisig:
+    fallback: regex_alias
+    alias_pool_key: multisig
+  both_signatures_required:
+    fallback: regex_alias
+    alias_pool_key: both_signatures_required
+  buyer_signature:
+    fallback: detected_feature
+    detected: buyer_signature
+  seller_signature:
+    fallback: detected_feature
+    detected: seller_signature
+  arbitrator_signature:
+    fallback: detected_feature
+    detected: arbitrator_signature
+  arbiter_signature:
+    fallback: detected_feature
+    detected: arbitrator_signature
+  multisig_2of3:
+    fallback: detected_feature
+    detected: multisig_2of3
+  multisig_2of2:
+    fallback: detected_feature
+    detected: multisig_2of2
+  timelock_refund:
+    fallback: detected_feature
+    detected: timelock_refund
+  locking_bytecode:
+    fallback: detected_feature
+    detected: locking_bytecode
+  multiple_paths:
+    fallback: regex_alias
+    alias_pool_key: multiple_paths
+  output_lockingbytecode_check:
+    fallback: regex_alias
+    alias_pool_key: output_lockingbytecode_check
+  must_fail_missing_destination_check:
+    fallback: regex_alias
+    alias_pool_key: must_fail_missing_destination_check
+  must_fail_permanent_covenant:
+    fallback: regex_alias
+    alias_pool_key: must_fail_permanent_covenant
