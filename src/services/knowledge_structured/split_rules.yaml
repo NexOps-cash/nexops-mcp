@@ -5,6 +5,8 @@ must:
     rule: "require(tx.outputs.length == N); // N = exact recipient count from intent"
   - id: SPLIT-SUM-INVARIANT
     rule: "require(tx.outputs[0].value + tx.outputs[1].value + ... + tx.outputs[N-1].value == tx.inputs[this.activeInputIndex].value);"
+  - id: SPLIT-PROPORTIONAL-PLUS-SUM
+    rule: "Revenue/proportional splits: per-output share requires allowed ONLY with explicit chained sum require (never division-only conservation)"
   - id: SPLIT-TOKEN-SUM
     rule: "When tokens involved: require(sum of tx.outputs[i].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount); preserve tokenCategory on each output"
   - id: SPLIT-LOCKING-BYTECODE

@@ -204,10 +204,13 @@ FORBIDDEN SYNTAX (CashScript does NOT support these — causes compile failure):
 _SPLIT_RAIL = """
 [RAIL: SPLIT MODE]
 - require(tx.outputs.length == N); // N = exact recipient count from intent
-- require(tx.outputs[0].value + tx.outputs[1].value + ... + tx.outputs[N-1].value == tx.inputs[this.activeInputIndex].value);
+- MANDATORY explicit sum (even when using proportional/revenue-share math):
+  require(tx.outputs[0].value + tx.outputs[1].value + ... + tx.outputs[N-1].value == tx.inputs[this.activeInputIndex].value);
+- Revenue/proportional splits: per-output share requires are allowed ONLY alongside the explicit sum require above (never sum-only implicit via division)
 - When tokens: require(sum of tx.outputs[i].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount); tokenCategory preserved per output
 - Pass recipient lockingBytecode as bytes constructor params — NEVER LockingBytecodeP2PKH(pubkey)
 - FORBIDDEN: direct_anchor_only_single_output
+- FORBIDDEN: proportional-share splits without explicit chained sum require
 """
 
 _NFT_RAIL = """
@@ -1194,7 +1197,10 @@ def _build_phase2_prompt(
         covenant_rule = (
             "SPLIT MODE: "
             "require(tx.outputs.length == N); "
+            "ALWAYS emit explicit sum conservation: "
             "require(tx.outputs[0].value + ... + tx.outputs[N-1].value == tx.inputs[this.activeInputIndex].value); "
+            "Revenue-share / proportional: per-output require(out[i].value == input * share_i / total) is OK "
+            "but MUST also include the explicit chained sum require (sanity gate requires it). "
             "When tokens: require(sum tx.outputs[i].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount); "
             "per-output tokenCategory == input tokenCategory. "
             "Use bytes lockingBytecode params, not LockingBytecodeP2PKH(pubkey). "

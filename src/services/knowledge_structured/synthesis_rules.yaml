@@ -84,6 +84,29 @@ multisig:
       - "Sum-preservation across ALL outputs is NON-NEGOTIABLE."
       - "No loops. Unroll checks for each output index."
 
+  canonical_revenue_share_split:
+    description: "4-way (or N-way) revenue share with predetermined shares. MUST include explicit sum require."
+    shape: |
+      require(checkSig(ownerSig, owner));
+      require(tx.outputs.length == 4);
+
+      int inputValue = tx.inputs[this.activeInputIndex].value;
+      int totalShares = share1 + share2 + share3 + share4;
+      require(totalShares > 0);
+
+      require(tx.outputs[0].value == (inputValue * share1) / totalShares);
+      require(tx.outputs[1].value == (inputValue * share2) / totalShares);
+      require(tx.outputs[2].value == (inputValue * share3) / totalShares);
+      require(tx.outputs[3].value == (inputValue * share4) / totalShares);
+
+      require(
+          tx.outputs[0].value + tx.outputs[1].value + tx.outputs[2].value + tx.outputs[3].value ==
+          tx.inputs[this.activeInputIndex].value
+      );
+    notes:
+      - "Per-output proportional requires are NOT sufficient alone — explicit chained sum is mandatory."
+      - "Unroll for N partners; keep the final sum require."
+
 timelock:
   rules:
     - id: TIMELOCK-GTE
