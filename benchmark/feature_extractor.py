@@ -37,13 +37,57 @@ class FeatureExtractor:
             pubkey_array_str = match.group(2)
             pubkeys = [r.strip() for r in pubkey_array_str.split(",") if r.strip()]
             for pk in pubkeys:
-                detected.add(f"{pk.lower()}_signature")
+                pk_name = pk.lower()
+                detected.add(f"{pk_name}_signature")
+                if pk_name == "arbiter":
+                    detected.add("arbitrator_signature")
             detected.add("multisig")
             
+        _ROLE_SIGNATURE_ALIASES = {"arbiter": "arbitrator_signature"}
+
         sig_pattern = r'checkSig\s*\(\s*\w+\s*,\s*(\w+)\s*\)'
         for match in re.finditer(sig_pattern, code, re.IGNORECASE):
             role_name = match.group(1).lower()
             detected.add(f"{role_name}_signature")
+            if role_name in _ROLE_SIGNATURE_ALIASES:
+                detected.add(_ROLE_SIGNATURE_ALIASES[role_name])
+
+        check_sig_count = len(re.findall(r"checkSig\s*\(", code, re.IGNORECASE))
+        if check_sig_count >= 2:
+            detected.add("multisig")
+        if check_sig_count >= 2 and not re.search(
+            r"checkMultiSig\s*\(", code, re.IGNORECASE
+        ):
+            detected.add("multisig_2of2")
+
+        has_buyer = bool(re.search(r"\bpubkey\s+buyer\b", code, re.IGNORECASE))
+        has_seller = bool(re.search(r"\bpubkey\s+seller\b", code, re.IGNORECASE))
+        has_arbiter = bool(
+            re.search(r"\bpubkey\s+arbiter\b", code, re.IGNORECASE)
+            or re.search(r"\bpubkey\s+arbitrator\b", code, re.IGNORECASE)
+        )
+        dynamic_2of3 = bool(
+            re.search(
+                r"\b(pk\d?|pubkey\w*)\s*==\s*(buyer|seller|arbiter|arbitrator)\b",
+                code,
+                re.IGNORECASE,
+            )
+            or re.search(
+                r"\b(buyer|seller|arbiter|arbitrator)\s*==\s*(buyer|seller|arbiter|arbitrator|pk\d?)\b",
+                code,
+                re.IGNORECASE,
+            )
+        )
+        if has_buyer and has_seller and has_arbiter and (
+            "checkMultiSig" in code or (check_sig_count >= 2 and dynamic_2of3)
+        ):
+            detected.add("multisig_2of3")
+            detected.add("multisig")
+            detected.add("buyer_signature")
+            detected.add("seller_signature")
+            detected.add("arbitrator_signature")
+            if re.search(r"\barbiter\b", code, re.IGNORECASE):
+                detected.add("arbiter_signature")
 
         # 3. Function Role Analysis
         functions = []

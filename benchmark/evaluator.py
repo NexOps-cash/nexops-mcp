@@ -21,6 +21,48 @@ def _split_output_amount_ok(code: str, capabilities: Dict[str, Any]) -> bool:
     )
 
 
+def _escrow_missing_destination_check(code: str) -> bool:
+    """True when spend paths lack output lockingBytecode validation."""
+    if not re.search(r"checkSig|checkMultiSig", code, re.IGNORECASE):
+        return False
+    return not bool(re.search(r"tx\.outputs\[\d+\]\.lockingBytecode\s*==", code))
+
+
+def _escrow_permanent_covenant(code: str) -> bool:
+    """True when funds are locked via this.activeBytecode without signature-gated exit."""
+    has_self_anchor = bool(
+        re.search(
+            r"tx\.outputs\[\d+\]\.lockingBytecode\s*==\s*this\.activeBytecode",
+            code,
+        )
+    )
+    has_sig_exit = bool(re.search(r"checkSig|checkMultiSig", code, re.IGNORECASE))
+    return has_self_anchor and not has_sig_exit
+
+
+def _both_signatures_required(detected: set, code: str) -> bool:
+    return (
+        ("buyer_signature" in detected and "seller_signature" in detected)
+        or "multisig_2of2" in detected
+        or bool(
+            re.search(
+                r"checkSig\([^)]+\)\s*&&\s*checkSig\([^)]+\)",
+                code,
+                re.IGNORECASE,
+            )
+        )
+    )
+
+
+def _multisig_detected(detected: set, code: str) -> bool:
+    return (
+        "multisig" in detected
+        or "multisig_2of2" in detected
+        or "multisig_2of3" in detected
+        or "checkMultiSig" in code
+    )
+
+
 def _cashtoken_alias_pool(
     pattern: str,
     capabilities: Dict[str, Any],
@@ -139,6 +181,16 @@ def _cashtoken_alias_pool(
             "token_amount_check": amt_ok,
             "three_way_split": bool(re.search(r"tx\.outputs\.length\s*==\s*3", code)),
         },
+        "escrow": {
+            "valid_signature_check": sig_ok,
+            "both_signatures_required": _both_signatures_required(detected, code),
+            "multisig": _multisig_detected(detected, code),
+            "two_of_three_logic": ("multisig_2of3" in detected or "checkMultiSig" in code),
+            "locktime_check": capabilities.get("time_validation", False),
+            "output_lockingbytecode_check": "locking_bytecode" in detected,
+            "must_fail_missing_destination_check": _escrow_missing_destination_check(code),
+            "must_fail_permanent_covenant": _escrow_permanent_covenant(code),
+        },
     }
     default = {
         "valid_signature_check": sig_ok,
@@ -153,6 +205,10 @@ def _cashtoken_alias_pool(
         "locktime_check": capabilities.get("time_validation", False),
         "output_amount_check": capabilities.get("output_value_validation", False),
         "two_of_three_logic": ("multisig_2of3" in detected or "checkMultiSig" in code),
+        "both_signatures_required": _both_signatures_required(detected, code),
+        "multisig": _multisig_detected(detected, code),
+        "must_fail_missing_destination_check": _escrow_missing_destination_check(code),
+        "must_fail_permanent_covenant": _escrow_permanent_covenant(code),
     }
     merged = {**default, **pools.get(pattern, {})}
     return merged
@@ -348,6 +404,7 @@ class BenchmarkEvaluator:
                         or ("token_nft" in detected)
                         or ("tokenCategory" in code and "tokenAmount" in code)
                     ),
+                    "multisig": _multisig_detected(set(detected), code),
                     "output_destination_validation": "locking_bytecode" in detected,
                     "output_value_validation": (
                         ("output_value_validation" in detected) or ("value_check" in detected)
@@ -375,7 +432,7 @@ class BenchmarkEvaluator:
                     )
                 elif pattern_key in {
                     "token_ft", "ft_mint", "nft_immutable", "nft_mutable",
-                    "nft_minting", "hybrid_token", "split_payment",
+                    "nft_minting", "hybrid_token", "split_payment", "escrow",
                 }:
                     legacy_alias_checks = _cashtoken_alias_pool(
                         pattern_key, legacy_capabilities, detected, code, functions
@@ -431,7 +488,18 @@ class BenchmarkEvaluator:
                     intent_coverage = len(matched_required) / len(case.required_features)
                 else:
                     intent_coverage = 1.0
-                
+
+                has_failure_tag = any(
+                    t in {"failure", "vulnerability"} for t in (case.tags or [])
+                )
+                must_fail_criticals = [
+                    c for c in (case.critical_features or [])
+                    if str(c).startswith("must_fail_")
+                ]
+                if has_failure_tag and must_fail_criticals:
+                    if all(requirement_satisfied(c) for c in must_fail_criticals):
+                        intent_coverage = 1.0
+
                 # 4. Vault-Specific Semantic Guard (Production-Grade)
                 semantic_pass = True
                 
@@ -479,8 +547,7 @@ class BenchmarkEvaluator:
                 # Convergence should represent usable production quality, not only "compiled".
                 # For failure/vulnerability benchmark cases, force non-converged unless
                 # the "must_fail_*" critical expectation is actually detected.
-                has_failure_tag = any(t in {"failure", "vulnerability"} for t in (case.tags or []))
-                has_must_fail_critical = any(str(c).startswith("must_fail_") for c in (case.critical_features or []))
+                has_must_fail_critical = bool(must_fail_criticals)
                 converged = (
                     (not fallback_used)
                     and compile_pass
