@@ -203,8 +203,10 @@ FORBIDDEN SYNTAX (CashScript does NOT support these — causes compile failure):
 
 _SPLIT_RAIL = """
 [RAIL: SPLIT MODE]
-- require(tx.outputs.length == 2); // Or exact expected count
-- require(tx.outputs[0].value + tx.outputs[1].value == tx.inputs[this.activeInputIndex].value);
+- require(tx.outputs.length == N); // N = exact recipient count from intent
+- require(tx.outputs[0].value + tx.outputs[1].value + ... + tx.outputs[N-1].value == tx.inputs[this.activeInputIndex].value);
+- When tokens: require(sum of tx.outputs[i].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount); tokenCategory preserved per output
+- Pass recipient lockingBytecode as bytes constructor params — NEVER LockingBytecodeP2PKH(pubkey)
 - FORBIDDEN: direct_anchor_only_single_output
 """
 
@@ -368,7 +370,8 @@ def build_pattern_rails(
         rails.append(_FT_MINT_RAIL)
     if mode in ("hybrid_token", "stablecoin_minter_sidecar"):
         rails.append(_HYBRID_RAIL)
-    if "split" in tags: rails.append(_SPLIT_RAIL)
+    if "split" in tags or mode == "split":
+        rails.append(_SPLIT_RAIL)
     if "tokens" in tags or "nft" in tags: rails.append(_NFT_RAIL)
     if "escrow" in tags: rails.append(_ESCROW_RAIL)
     if "swap" in tags or "htlc" in tags: rails.append(_SWAP_RAIL)
@@ -577,9 +580,13 @@ def build_structured_knowledge(ir: ContractIR) -> str:
 
     # Inject pattern-specific YAML overlays for generation control.
     pattern_layers = {}
-    for filename in pattern_profile.get("knowledge_files", []):
+    profile_files = list(pattern_profile.get("knowledge_files", []))
+    for filename in profile_files:
         layer_name = f"pattern_{filename.replace('.yaml', '')}"
         pattern_layers[layer_name] = _load_yaml(filename)
+    # Split overlay when tagged but profile is not split (e.g. ft_transfer + split payroll)
+    if "split" in tags and "split_rules.yaml" not in profile_files:
+        pattern_layers["pattern_split_rules"] = _load_yaml("split_rules.yaml")
     if pattern_layers:
         knowledge["pattern_overlays"] = pattern_layers
 
@@ -649,6 +656,16 @@ class Phase1:
         if any(word in intent.lower() for word in _ESCROW_KEYWORDS):
             if "multisig" in tags:
                 tags.append("escrow")
+
+        # Multisig + distribution: ensure split feature for conservation rails
+        intent_lower = intent.lower()
+        _SPLIT_DIST_KEYS = (
+            "split", "distribute", "distribution", "recipients",
+            "payroll", "treasury", "partners", "employees", "revenue",
+        )
+        if "multisig" in tags and any(k in intent_lower for k in _SPLIT_DIST_KEYS):
+            if "split" not in tags:
+                tags.append("split")
 
         # Deduplicate while preserving order
         seen = set()
@@ -1176,9 +1193,11 @@ def _build_phase2_prompt(
     elif effective_mode == "split":
         covenant_rule = (
             "SPLIT MODE: "
-            "require(tx.outputs.length == 2); "
-            "require(tx.outputs[0].value + tx.outputs[1].value == tx.inputs[this.activeInputIndex].value); "
-            "require(tx.outputs[0].tokenAmount + tx.outputs[1].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount); "
+            "require(tx.outputs.length == N); "
+            "require(tx.outputs[0].value + ... + tx.outputs[N-1].value == tx.inputs[this.activeInputIndex].value); "
+            "When tokens: require(sum tx.outputs[i].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount); "
+            "per-output tokenCategory == input tokenCategory. "
+            "Use bytes lockingBytecode params, not LockingBytecodeP2PKH(pubkey). "
         )
     elif effective_mode in ("token_ft", "ft_transfer"):
         covenant_rule = (

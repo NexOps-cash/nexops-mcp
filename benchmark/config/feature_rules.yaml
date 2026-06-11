@@ -44,3 +44,6 @@ features:
   self_anchor_minting:
     rule: 'this\.activeBytecode'
     description: "Contract self-anchor reference (minting custody heuristic)"
+  multiple_outputs:
+    rule: 'tx\.outputs\.length\s*==\s*(?:[3-9]|\d{2,})'
+    description: "Explicit output count of three or more"

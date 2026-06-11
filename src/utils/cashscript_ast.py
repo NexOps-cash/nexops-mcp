@@ -378,12 +378,8 @@ class CashScriptAST:
         )
 
     def has_split_token_supply_conservation(self) -> bool:
-        patterns = [
-            r"outputs\[\d+\]\.tokenAmount\s*\+\s*tx\.outputs\[\d+\]\.tokenAmount\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenAmount",
-            r"tx\.outputs\[\d+\]\.tokenAmount\s*\+\s*tx\.outputs\[\d+\]\.tokenAmount\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenAmount",
-            r"outputs\[\d+\]\.tokenAmount\s*\+\s*outputs\[\d+\]\.tokenAmount\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenAmount",
-        ]
-        return any(re.search(p, self.code, re.DOTALL) for p in patterns)
+        from src.utils.split_conservation import has_token_amount_conservation
+        return has_token_amount_conservation(self.code)
 
     def find_token_pair_violations(self) -> List[int]:
         """Find output indices with tokenCategory check but no tokenAmount check.

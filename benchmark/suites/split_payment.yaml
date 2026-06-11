@@ -100,3 +100,68 @@
   expected_structure:
     require_count_min: 6
   tags: ["split_payment", "time_based"]
+
+# =========================
+# Phase 1: real-world N-output cases
+# =========================
+
+- id: split_001_treasury
+  pattern: split_payment
+  difficulty: hard
+  intent: |
+    Split treasury funds between operations, marketing, and reserves. Total BCH value across all outputs must equal the input value. Owner must sign.
+  required_features:
+    - signature_verification
+    - output_value_validation
+  critical_features:
+    - valid_signature_check
+    - output_amount_check
+  expected_structure:
+    require_count_min: 5
+  tags: ["split_payment", "treasury", "n_output"]
+
+- id: split_002_payroll
+  pattern: split_payment
+  difficulty: hard
+  intent: |
+    Distribute payroll tokens to three employees. Sum of all output token amounts must equal the input token amount. Preserve token category across all outputs. Owner must sign.
+  required_features:
+    - signature_verification
+    - token_validation
+  critical_features:
+    - valid_signature_check
+    - token_category_check
+    - token_amount_check
+  expected_structure:
+    require_count_min: 6
+  tags: ["split_payment", "payroll", "cashtokens", "token_ft", "split"]
+
+- id: split_003_multisig_distribution
+  pattern: split_payment
+  difficulty: hard
+  intent: |
+    2-of-3 treasury multisig distributes BCH to three recipients. Total BCH value across all outputs must equal the input value.
+  required_features:
+    - signature_verification
+    - output_value_validation
+  critical_features:
+    - two_of_three_logic
+    - output_amount_check
+  expected_structure:
+    require_count_min: 6
+  tags: ["split_payment", "multisig", "n_output"]
+
+- id: split_004_revenue_share
+  pattern: split_payment
+  difficulty: hard
+  intent: |
+    Distribute revenue among four partners according to predetermined shares. Total BCH value across all outputs must equal the input value.
+  required_features:
+    - signature_verification
+    - output_value_validation
+  critical_features:
+    - valid_signature_check
+    - output_amount_check
+  expected_structure:
+    require_count_min: 6
+  tags: ["split_payment", "revenue_share", "n_output"]

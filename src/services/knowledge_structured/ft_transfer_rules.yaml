@@ -25,4 +25,6 @@ must:
     rule: "require(tx.outputs[changeIndex].tokenCategory == 0x); // BCH-only change output"
 split:
   - id: FT-SPLIT-SUM
-    rule: "require(tx.outputs[0].tokenAmount + tx.outputs[1].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount);"
+    rule: "require(tx.outputs[0].tokenAmount + ... + tx.outputs[N-1].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount);"
+  - id: FT-SPLIT-CATEGORY
+    rule: "require(tx.outputs[i].tokenCategory == tx.inputs[this.activeInputIndex].tokenCategory) for each split output"
