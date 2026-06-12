@@ -1,0 +1,27 @@
+// NexOps canonical refundable: timed partial claim + sender refund (rp_004)
+// Lint-safe: standalone tx.time guards, no nested time math, no 3-output covenant
+pragma cashscript ^0.13.0;
+
+contract GradualRefundable(
+    pubkey recipient,
+    pubkey sender,
+    int periodEnd,
+    int inactiveEnd
+) {
+    function claim(sig recipientSig, int payoutAmount) {
+        require(recipient != sender);
+        require(checkSig(recipientSig, recipient));
+        require(tx.time >= periodEnd);
+        require(payoutAmount > 0);
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].value == payoutAmount);
+    }
+
+    function refund(sig senderSig) {
+        require(recipient != sender);
+        require(checkSig(senderSig, sender));
+        require(tx.time >= inactiveEnd);
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+    }
+}

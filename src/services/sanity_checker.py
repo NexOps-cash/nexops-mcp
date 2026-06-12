@@ -82,11 +82,26 @@ class SanityChecker:
                 violations.append("Split payment intent requires sum-preservation check across multiple outputs.")
 
         if ctype in {"decay", "streaming", "dutch_auction", "linear_vesting"}:
-            # Require evidence of elapsed-time arithmetic so model doesn't hallucinate unrelated logic.
-            has_elapsed = bool(re.search(r"(elapsed|passed|age|timeDiff|blocksPassed)", code, re.IGNORECASE))
-            has_arith = bool(re.search(r"[\+\-\*/]", code))
-            if not (has_elapsed and has_arith):
-                violations.append("Decay/streaming intent requires explicit elapsed-time arithmetic formula.")
+            # Refundable canonical shapes use standalone CLTV guards (lint-safe) — not elapsed formulas.
+            has_refundable_dual_path = bool(
+                re.search(r"function\s+\w*(?:claim|release)\w*\s*\(", code, re.IGNORECASE)
+                and re.search(
+                    r"function\s+\w*(?:cancel|refund|reclaim)\w*\s*\(",
+                    code,
+                    re.IGNORECASE,
+                )
+                and re.search(r"require\s*\(\s*tx\.time\s*>=", code)
+            )
+            if not has_refundable_dual_path:
+                # Require evidence of elapsed-time arithmetic so model doesn't hallucinate unrelated logic.
+                has_elapsed = bool(
+                    re.search(r"(elapsed|passed|age|timeDiff|blocksPassed)", code, re.IGNORECASE)
+                )
+                has_arith = bool(re.search(r"[\+\-\*/]", code))
+                if not (has_elapsed and has_arith):
+                    violations.append(
+                        "Decay/streaming intent requires explicit elapsed-time arithmetic formula."
+                    )
 
         _skip_token_amount_pairing = ctype in {
             "nft_minting_authority",
