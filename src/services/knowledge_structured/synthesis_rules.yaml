@@ -202,6 +202,64 @@ distribution:
       - "tokenCategory and tokenAmount MUST both be preserved unless explicitly minting/burning."
       - "DO NOT use this.activeBytecode — this is a distribution, not a covenant."
 
+vault:
+  description: "Delayed-withdrawal covenant vaults. Prefer canonical shapes below over multi-output exploration."
+  rules:
+    - id: VAULT-OUTPUT-ORDER
+      rule: "require(tx.outputs.length == N) MUST be the first guard in every function that touches outputs."
+    - id: VAULT-NO-MULTI-EXPLORE
+      rule: "Do NOT use 3+ output announce shapes unless intent explicitly requires split staging."
+
+  canonical_backup_cancel:
+    description: "Announce (1-output re-anchor) → claim after delay → backup cancel. vr_010."
+    constructor_params: "pubkey owner, pubkey backupKey, int delaySeconds"
+    shape: |
+      function announce(sig ownerSig) {
+          require(tx.outputs.length == 1);
+          require(tx.outputs[0].lockingBytecode == this.activeBytecode);
+          require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+      }
+      function claim(sig ownerSig) {
+          require(this.age >= delaySeconds);
+          require(tx.outputs.length == 1);
+          require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+      }
+      function cancel(sig backupSig) {
+          require(tx.outputs.length == 1);
+          require(tx.outputs[0].lockingBytecode == this.activeBytecode);
+          require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+      }
+    notes:
+      - "Use exactly 3 functions — no extra staged withdrawal outputs."
+      - "cancel MUST be named cancel or emergencyCancel for cancellation_path detection."
+
+  canonical_founder_treasury:
+    description: "Founder ops limit + staged large withdrawal + cold recovery. vr_023 / vr_009."
+    constructor_params: "pubkey founder, pubkey coldKey, int opsLimitSats, int largeDelaySeconds, bytes recipientLockingBytecode"
+    shape: |
+      function instantSpend(sig founderSig, int amount) {
+          require(amount <= opsLimitSats);
+          require(tx.outputs.length == 2);
+          require(tx.outputs[0].lockingBytecode == this.activeBytecode);
+          require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value - amount);
+      }
+      function stageLargeWithdrawal(sig founderSig, int amount) {
+          require(amount > opsLimitSats);
+          require(tx.outputs.length == 2);
+          require(tx.outputs[0].lockingBytecode == this.activeBytecode);
+          require(tx.outputs[1].lockingBytecode == this.activeBytecode);
+      }
+      function finalizeLargeWithdrawal(sig founderSig) {
+          require(this.age >= largeDelaySeconds);
+          require(tx.outputs.length == 1);
+      }
+      function emergencyRecover(sig coldKeySig) {
+          require(tx.outputs.length == 1);
+      }
+    notes:
+      - "instantSpend for amounts <= opsLimitSats; stageLargeWithdrawal when amount > opsLimitSats."
+      - "emergencyRecover / coldKeyRecovery for immediate cold-key recovery without delay."
+
 streaming:
   description: "Continuous linear release or decay of funds over time (streaming)."
   rules:

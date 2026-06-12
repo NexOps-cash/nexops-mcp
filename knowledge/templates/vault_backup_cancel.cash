@@ -1,0 +1,36 @@
+// NexOps canonical vault: announce → delay → claim, with backup cancel (vr_010)
+// Source: bench_20260401_2030_ceb2 (intent coverage 1.0, ~33s)
+pragma cashscript ^0.13.0;
+
+contract TimeLockVault(
+    pubkey owner,
+    pubkey backupKey,
+    int delaySeconds
+) {
+    function announce(sig ownerSig) {
+        require(owner != backupKey);
+        require(checkSig(ownerSig, owner));
+
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].lockingBytecode == this.activeBytecode);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+    }
+
+    function claim(sig ownerSig) {
+        require(owner != backupKey);
+        require(this.age >= delaySeconds);
+        require(checkSig(ownerSig, owner));
+
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+    }
+
+    function cancel(sig backupSig) {
+        require(owner != backupKey);
+        require(checkSig(backupSig, backupKey));
+
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].lockingBytecode == this.activeBytecode);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+    }
+}

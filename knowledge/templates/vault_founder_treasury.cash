@@ -1,0 +1,59 @@
+// NexOps canonical vault: founder ops limit + staged large withdrawal + cold recovery (vr_023)
+// Pattern: instantSpend / stageLargeWithdrawal / finalizeLargeWithdrawal / emergencyRecover
+pragma cashscript ^0.13.0;
+
+contract FounderTreasuryVault(
+    pubkey founder,
+    pubkey coldKey,
+    int opsLimitSats,
+    int largeDelaySeconds,
+    bytes recipientLockingBytecode
+) {
+    function instantSpend(sig founderSig, int amount) {
+        require(founder != coldKey);
+        require(amount > 0);
+        require(amount <= opsLimitSats);
+
+        require(checkSig(founderSig, founder));
+
+        require(tx.outputs.length == 2);
+        require(tx.outputs[0].lockingBytecode == this.activeBytecode);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value - amount);
+        require(tx.outputs[1].lockingBytecode == recipientLockingBytecode);
+        require(tx.outputs[1].value == amount);
+    }
+
+    function stageLargeWithdrawal(sig founderSig, int amount) {
+        require(founder != coldKey);
+        require(amount > opsLimitSats);
+
+        require(checkSig(founderSig, founder));
+
+        require(tx.outputs.length == 2);
+        require(tx.outputs[0].lockingBytecode == this.activeBytecode);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value - amount);
+        require(tx.outputs[1].lockingBytecode == this.activeBytecode);
+        require(tx.outputs[1].value == amount);
+    }
+
+    function finalizeLargeWithdrawal(sig founderSig) {
+        require(founder != coldKey);
+        require(this.age >= largeDelaySeconds);
+
+        require(checkSig(founderSig, founder));
+
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].lockingBytecode == recipientLockingBytecode);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+    }
+
+    function emergencyRecover(sig coldKeySig) {
+        require(founder != coldKey);
+
+        require(checkSig(coldKeySig, coldKey));
+
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].lockingBytecode == recipientLockingBytecode);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+    }
+}
