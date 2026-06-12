@@ -27,8 +27,23 @@ features:
     rule: 'this\.activeBytecode\b'
     description: "Covenant self-continuity via this.activeBytecode"
   hashlock:
-    rule: 'require\s*\(\s*(hash160|sha256|hash256|ripemd160)\s*\(\s*\w+\s*\)\s*==\s*\w+\s*\)'
-    description: "Hashlock preimage verification"
+    rule: '(?:hash160|sha256|hash256|ripemd160)\s*\(\s*\w+\s*\)\s*==\s*\w+'
+    description: "Hashlock preimage verification (hash256/sha256/hash160)"
+  hash_verification:
+    rule: '(?:hash160|sha256|hash256|ripemd160)\s*\(\s*\w+\s*\)\s*==\s*\w+'
+    description: "Preimage hash equality check"
+  preimage_validation:
+    rule: 'function\s+\w+\s*\([^)]*\b(?:preimage|secret)\b'
+    description: "Spend function accepts preimage or secret bytes"
+  sha256_check:
+    rule: '(?:hash256|sha256)\s*\(\s*\w+\s*\)\s*==\s*\w+'
+    description: "SHA256 / hash256 preimage check"
+  ripemd160_check:
+    rule: '(?:hash160|ripemd160)\s*\(\s*\w+\s*\)\s*==\s*\w+'
+    description: "RIPEMD160 / hash160 preimage check"
+  multiple_preimages:
+    rule: '(?:hash256|sha256|hash160|ripemd160)\s*\(\s*\w+\s*\)\s*==[^;]{0,200}(?:hash256|sha256|hash160|ripemd160)\s*\(\s*\w+\s*\)\s*=='
+    description: "Two hash preimage checks in one contract"
   token_amount:
     rule: '\.tokenAmount\s*==\s*\w+'
     description: "Token amount equality check"
@@ -59,3 +74,33 @@ features:
   multiple_outputs:
     rule: 'tx\.outputs\.length\s*==\s*(?:[3-9]|\d{2,})'
     description: "Explicit output count of three or more"
+  announce_phase:
+    rule: 'function\s+\w*(?:announce|stage)\w*\s*\('
+    description: "Vault announcement / staging function"
+  finalize_phase:
+    rule: 'function\s+\w*(?:finalize|claim)\w*\s*\('
+    description: "Vault delayed claim / finalize function"
+  reanchor_pattern:
+    rule: 'tx\.outputs\[\d+\]\.lockingBytecode\s*==\s*this\.activeBytecode'
+    description: "Covenant re-anchor to this.activeBytecode"
+  value_preservation:
+    rule: 'tx\.outputs\[\d+\]\.value\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.value'
+    description: "Full input value preserved on output"
+  staged_spending:
+    rule: 'tx\.outputs\.length\s*==\s*2'
+    description: "Two-output staged withdrawal pattern"
+  emergency_path_feature:
+    rule: 'function\s+\w*(?:emergency|recover|cold|backup)\w*\s*\('
+    description: "Emergency / recovery spend path naming"
+  refund_path:
+    rule: 'function\s+\w*refund\w*\s*\('
+    description: "Timeout refund spend path"
+  claim_path:
+    rule: 'function\s+\w*(?:claim|release)\w*\s*\('
+    description: "Recipient claim / release path"
+  goal_threshold_logic:
+    rule: '\bgoalAmount\b'
+    description: "Crowdfund goal threshold CSV or comparison"
+  crowdfund_refund_path:
+    rule: 'function\s+\w*refund\w*[\s\S]*goalAmount'
+    description: "Contributor refund when goal not met"

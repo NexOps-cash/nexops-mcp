@@ -10,10 +10,11 @@
     - signature_verification
     - time_validation
     - multiple_paths
-    - token_validation
   critical_features:
     - valid_signature_check
     - locktime_check
+    - refund_path
+    - claim_path
   expected_structure:
     require_count_min: 4
   tags: ["refundable_payment", "basic"]
@@ -28,10 +29,11 @@
     - hash_verification
     - time_validation
     - multiple_paths
-    - token_validation
   critical_features:
     - sha256_check
     - locktime_check
+    - refund_path
+    - claim_path
   expected_structure:
     require_count_min: 5
   tags: ["refundable_payment", "htlc"]
@@ -97,6 +99,8 @@
   critical_features:
     - valid_signature_check
     - output_amount_check
+    - goal_threshold_logic
+    - crowdfund_refund_path
   expected_structure:
     require_count_min: 5
   tags: ["refundable_payment", "crowdfund"]

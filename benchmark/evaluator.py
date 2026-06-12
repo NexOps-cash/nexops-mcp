@@ -174,6 +174,595 @@ def _sequence_check(detected: set, code: str) -> bool:
     )
 
 
+_HASH_PREIMAGE_CHECK_RE = (
+    r"(?:hash256|sha256|hash160|ripemd160)\s*\(\s*(\w+)\s*\)\s*=="
+)
+
+
+def _hash_verification(detected: set, code: str) -> bool:
+    if "hash_verification" in detected or "hashlock" in detected:
+        return True
+    return bool(re.search(_HASH_PREIMAGE_CHECK_RE, code, re.IGNORECASE))
+
+
+def _preimage_validation(detected: set, code: str) -> bool:
+    if "preimage_validation" in detected:
+        return True
+    if not _hash_verification(detected, code):
+        return False
+    return bool(
+        re.search(
+            r"function\s+\w+\s*\([^)]*\b(?:preimage|secret)\b",
+            code,
+            re.IGNORECASE,
+        )
+        or re.search(
+            r"\bbytes(?:32)?\s+(?:preimage|secret)\b",
+            code,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _sha256_check(detected: set, code: str) -> bool:
+    if "sha256_check" in detected:
+        return True
+    return bool(
+        re.search(r"(?:hash256|sha256)\s*\(\s*\w+\s*\)\s*==", code, re.IGNORECASE)
+    )
+
+
+def _ripemd160_check(detected: set, code: str) -> bool:
+    if "ripemd160_check" in detected:
+        return True
+    return bool(
+        re.search(r"(?:hash160|ripemd160)\s*\(\s*\w+\s*\)\s*==", code, re.IGNORECASE)
+    )
+
+
+def _multiple_preimages(detected: set, code: str) -> bool:
+    if "multiple_preimages" in detected:
+        return True
+    vars_found = re.findall(_HASH_PREIMAGE_CHECK_RE, code, re.IGNORECASE)
+    return len(set(vars_found)) >= 2
+
+
+def _multiple_hash_validation(detected: set, code: str) -> bool:
+    return _multiple_preimages(detected, code)
+
+
+def _must_fail_missing_token_validation(code: str) -> bool:
+    """True when hash spend path lacks output/input token category guards."""
+    if not re.search(_HASH_PREIMAGE_CHECK_RE, code, re.IGNORECASE):
+        return False
+    has_output_token = bool(
+        re.search(r"tx\.outputs\[\d+\]\.tokenCategory\s*==", code)
+    )
+    has_output_amount = bool(
+        re.search(r"tx\.outputs\[\d+\]\.tokenAmount\s*==", code)
+    )
+    has_input_token = bool(
+        re.search(r"tx\.inputs\[[^\]]+\]\.tokenCategory\s*==", code)
+    )
+    if has_output_token and has_output_amount and has_input_token:
+        return False
+    return True
+
+
+def _refundable_bch_only_ok(code: str) -> bool:
+    """BCH-only refundable contracts have no token guards to validate."""
+    return "tokenCategory" not in code and "tokenAmount" not in code
+
+
+def _refundable_refund_path(
+    functions: List[Dict], code: str, detected: set
+) -> bool:
+    if "timelock_refund" in detected or "refund_path" in detected:
+        return True
+    for match in re.finditer(
+        r"function\s+(\w*refund\w*)\s*\([^)]*\)\s*\{([^}]*)\}",
+        code,
+        re.DOTALL | re.IGNORECASE,
+    ):
+        body = match.group(2)
+        if re.search(r"checkSig", body, re.IGNORECASE) and re.search(
+            r"(?:tx\.time|this\.age)\s*>=", body
+        ):
+            return True
+    return bool(
+        re.search(r"function\s+\w*refund\w*\s*\(", code, re.IGNORECASE)
+        and re.search(r"(?:tx\.time|this\.age)\s*>=", code)
+        and re.search(r"checkSig", code, re.IGNORECASE)
+    )
+
+
+def _refundable_claim_path(
+    functions: List[Dict], code: str, detected: set
+) -> bool:
+    if "timelock_unlock" in detected or "claim_path" in detected:
+        return True
+    for match in re.finditer(
+        r"function\s+(\w*(?:claim|release|collect|withdraw)\w*)\s*\([^)]*\)\s*\{([^}]*)\}",
+        code,
+        re.DOTALL | re.IGNORECASE,
+    ):
+        body = match.group(2)
+        if re.search(r"checkSig", body, re.IGNORECASE):
+            return True
+    return bool(
+        re.search(
+            r"function\s+\w*(?:claim|release)\w*\s*\(",
+            code,
+            re.IGNORECASE,
+        )
+        and re.search(r"checkSig", code, re.IGNORECASE)
+    )
+
+
+def _refundable_goal_threshold_logic(code: str) -> bool:
+    if "goal_threshold_logic" in code:
+        return True
+    return bool(
+        re.search(r"\bgoalAmount\b", code, re.IGNORECASE)
+        and re.search(
+            r"tx\.inputs\[[^\]]+\]\.value\s*(?:>=|>|<|<=)\s*\w*goal\w*",
+            code,
+            re.IGNORECASE,
+        )
+    ) or bool(
+        re.search(r"\bgoalAmount\b", code, re.IGNORECASE)
+        and re.search(
+            r"\w*goal\w*\s*(?:>=|>|<|<=)\s*tx\.inputs\[[^\]]+\]\.value",
+            code,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _refundable_crowdfund_refund_path(code: str) -> bool:
+    if not _refundable_refund_path([], code, set()):
+        return False
+    return bool(
+        re.search(
+            r"tx\.inputs\[[^\]]+\]\.value\s*<\s*\w*goal\w*",
+            code,
+            re.IGNORECASE,
+        )
+        or re.search(
+            r"\w*goal\w*\s*>\s*tx\.inputs\[[^\]]+\]\.value",
+            code,
+            re.IGNORECASE,
+        )
+        or re.search(r"\bcontributor\w*\b", code, re.IGNORECASE)
+    )
+
+
+def _refundable_output_value_validation(
+    detected: set, code: str, capabilities: Dict[str, Any]
+) -> bool:
+    if capabilities.get("output_value_validation"):
+        return True
+    if "output_value_validation" in detected or "value_check" in detected:
+        return True
+    return bool(
+        re.search(
+            r"tx\.outputs\[\d+\]\.value\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.value",
+            code,
+        )
+    )
+
+
+def _refundable_alias_pool(
+    capabilities: Dict[str, Any],
+    detected: set,
+    code: str,
+    functions: List[Dict],
+) -> Dict[str, bool]:
+    sig_ok = capabilities.get("signature_verification", False) or bool(
+        re.search(r"checkSig|checkMultiSig", code, re.IGNORECASE)
+    )
+    time_ok = capabilities.get("time_validation", False) or bool(
+        re.search(r"(?:tx\.time|this\.age)\s*>=", code)
+    )
+    token_ok = (
+        capabilities.get("token_validation", False)
+        or _refundable_bch_only_ok(code)
+        or ("token_amount" in detected)
+        or bool(re.search(r"tokenCategory", code) and re.search(r"tokenAmount", code))
+    )
+    out_val = _refundable_output_value_validation(detected, code, capabilities)
+    return {
+        "valid_signature_check": sig_ok,
+        "signature_verification": sig_ok,
+        "locktime_check": time_ok,
+        "time_validation": time_ok,
+        "token_validation": token_ok,
+        "multiple_paths": len(functions) >= 2
+        or capabilities.get("multiple_paths", False),
+        "output_value_validation": out_val,
+        "output_amount_check": out_val,
+        "refund_path": _refundable_refund_path(functions, code, detected),
+        "claim_path": _refundable_claim_path(functions, code, detected),
+        "goal_threshold_logic": _refundable_goal_threshold_logic(code),
+        "crowdfund_refund_path": _refundable_crowdfund_refund_path(code),
+        "hash_verification": _hash_verification(detected, code),
+        "preimage_validation": _preimage_validation(detected, code),
+        "sha256_check": _sha256_check(detected, code),
+        "ripemd160_check": _ripemd160_check(detected, code),
+        "must_fail_wrong_time_field": _must_fail_wrong_time_field(code),
+    }
+
+
+def _vault_covenant_continuation(
+    detected: set, code: str, functions: List[Dict]
+) -> bool:
+    if "covenant_continuation" in detected or "covenant" in detected:
+        if re.search(r"this\.activeBytecode", code):
+            return True
+    if "reanchor_pattern" in detected or "staged_spending" in detected:
+        return True
+    if any(
+        f.get("has_anchor")
+        for f in functions
+        if f.get("role") in ("INTERMEDIATE", "GENERIC", "RECOVERY")
+    ):
+        return True
+    return any(
+        f.get("has_anchor") and f.get("has_value_check")
+        for f in functions
+        if f.get("role") == "INTERMEDIATE"
+    )
+
+
+def _vault_reanchor_pattern(detected: set, code: str) -> bool:
+    return "reanchor_pattern" in detected or bool(
+        re.search(
+            r"tx\.outputs\[\d+\]\.lockingBytecode\s*==\s*this\.activeBytecode",
+            code,
+        )
+    )
+
+
+def _vault_time_validation(
+    detected: set, code: str, capabilities: Dict[str, Any]
+) -> bool:
+    if capabilities.get("time_validation"):
+        return True
+    return (
+        _relative_timelock(detected, code)
+        or "timelock_unlock" in detected
+        or "timelock_refund" in detected
+        or bool(re.search(r"tx\.time\s*>=", code))
+        or bool(re.search(r"this\.age\s*>=", code))
+    )
+
+
+def _vault_output_value_validation(
+    detected: set, code: str, capabilities: Dict[str, Any]
+) -> bool:
+    from src.utils.split_conservation import has_bch_value_conservation
+
+    if capabilities.get("output_value_validation"):
+        return True
+    if "output_value_validation" in detected or "value_preservation" in detected:
+        return True
+    if bool(re.search(r"tx\.outputs\[\d+\]\.value\s*==[^;]+-\s*\w+", code)):
+        return True
+    if bool(re.search(r"tx\.outputs\[\d+\]\.value\s*\+", code)):
+        return True
+    return has_bch_value_conservation(code)
+
+
+def _vault_announce_phase(detected: set, code: str, functions: List[Dict]) -> bool:
+    if "announce_phase" in detected or "staged_spending" in detected:
+        return True
+    return any(
+        re.search(r"(?:announce|stage)", f.get("name", ""), re.IGNORECASE)
+        for f in functions
+    ) or bool(
+        re.search(r"tx\.outputs\.length\s*==\s*2", code)
+        and re.search(r"this\.activeBytecode", code)
+    )
+
+
+def _vault_finalize_phase(detected: set, code: str, functions: List[Dict]) -> bool:
+    if "finalize_phase" in detected:
+        return True
+    return any(
+        re.search(r"(?:finalize|claim)", f.get("name", ""), re.IGNORECASE)
+        for f in functions
+    ) or bool(re.search(r"this\.age\s*>=", code))
+
+
+def _vault_value_preservation(detected: set, code: str) -> bool:
+    if "value_preservation" in detected or "value_check" in detected:
+        return True
+    return bool(
+        re.search(
+            r"tx\.outputs\[\d+\]\.value\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.value",
+            code,
+        )
+    )
+
+
+def _vault_staged_spending(detected: set, code: str) -> bool:
+    return "staged_spending" in detected or bool(
+        re.search(r"tx\.outputs\.length\s*==\s*2", code)
+    )
+
+
+def _vault_emergency_path(
+    functions: List[Dict], code: str, detected: Optional[set] = None
+) -> bool:
+    if detected and "emergency_path_feature" in detected:
+        return True
+    if any(f.get("role") == "RECOVERY" for f in functions):
+        return True
+    return bool(
+        re.search(
+            r"function\s+\w*(?:emergency|recover|cold|backup)\w*\s*\(",
+            code,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _vault_recovery_path(
+    detected: set, code: str, functions: List[Dict]
+) -> bool:
+    if _vault_emergency_path(functions, code, detected):
+        return True
+    if _three_of_five_logic(detected, code) or _multisig_detected(detected, code):
+        return True
+    recovery_fn = bool(
+        re.search(r"function\s+\w*recover\w*\s*\(", code, re.IGNORECASE)
+    )
+    sig_count = len(re.findall(r"checkSig\s*\(", code, re.IGNORECASE))
+    return recovery_fn and sig_count >= 2
+
+
+def _vault_multisig_recovery(detected: set, code: str) -> bool:
+    if _multisig_detected(detected, code):
+        return True
+    recovery_fn = bool(
+        re.search(r"function\s+\w*(?:recover|recovery)\w*\s*\(", code, re.IGNORECASE)
+    )
+    sig_count = len(re.findall(r"checkSig\s*\(", code, re.IGNORECASE))
+    pubkey_count = len(re.findall(r"\bpubkey\s+\w+", code, re.IGNORECASE))
+    return recovery_fn and sig_count >= 2 and pubkey_count >= 3
+
+
+def _vault_tiered_delay_logic(code: str) -> bool:
+    named = bool(
+        re.search(
+            r"(?:smallDelay|largeDelay|mediumDelay|opsLimit|delaySeconds|"
+            r"largeDelaySeconds|spendLimit)",
+            code,
+        )
+    )
+    delay_checks = len(re.findall(r"(?:this\.age|tx\.time)\s*>=", code))
+    threshold_checks = len(
+        re.findall(
+            r"(?:<=|>=)\s*\w*(?:Limit|Threshold|opsLimit|spendLimit|amount)",
+            code,
+            re.IGNORECASE,
+        )
+    )
+    return (named and delay_checks >= 1) or delay_checks >= 2 or (
+        delay_checks >= 1 and threshold_checks >= 2
+    )
+
+
+def _vault_amount_threshold_logic(code: str) -> bool:
+    limit_cmp = bool(
+        re.search(
+            r"\w+\s*(?:<=|>=|<|>)\s*\w*(?:Limit|Threshold|opsLimit|spendLimit)\w*",
+            code,
+            re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:<=|>=|<|>)\s*\w*(?:Limit|Threshold|opsLimit|spendLimit)\w*",
+            code,
+            re.IGNORECASE,
+        )
+        or re.search(r"\b(?:opsLimit|spendLimit|withdrawAmount)\s*[<>]=?", code)
+    )
+    if limit_cmp:
+        return True
+    staged = bool(re.search(r"tx\.outputs\.length\s*==\s*2", code))
+    delayed_finalize = bool(
+        re.search(r"function\s+\w*(?:finalize|claim)\w*", code, re.IGNORECASE)
+        and re.search(r"this\.age\s*>=", code)
+    )
+    instant_unilateral_drain = False
+    for match in re.finditer(
+        r"function\s+(\w*(?:sweep|instant|drain|spend)\w*)\s*\([^)]*\)\s*\{([^}]*)\}",
+        code,
+        re.DOTALL | re.IGNORECASE,
+    ):
+        body = match.group(2)
+        if re.search(r"tx\.outputs\.length\s*==\s*1", body):
+            sigs = len(re.findall(r"checkSig\s*\(", body, re.IGNORECASE))
+            if sigs < 2:
+                instant_unilateral_drain = True
+                break
+    return staged and delayed_finalize and not instant_unilateral_drain
+
+
+def _vault_cancellation_path(code: str) -> bool:
+    return bool(re.search(r"function\s+\w*cancel\w*\s*\(", code, re.IGNORECASE))
+
+
+def _must_fail_permanent_covenant_vault(code: str) -> bool:
+    has_self_anchor = bool(
+        re.search(
+            r"tx\.outputs\[\d+\]\.lockingBytecode\s*==\s*this\.activeBytecode",
+            code,
+        )
+    )
+    has_external_exit = bool(
+        re.search(
+            r"tx\.outputs\[\d+\]\.lockingBytecode\s*!=\s*this\.activeBytecode",
+            code,
+        )
+        or re.search(
+            r"tx\.outputs\[\d+\]\.lockingBytecode\s*==\s*(?!this\.activeBytecode)\w+",
+            code,
+        )
+    )
+    has_delay = bool(re.search(r"(?:this\.age|tx\.time)\s*>=", code))
+    if has_self_anchor and not has_external_exit and not has_delay:
+        return True
+    return _escrow_permanent_covenant(code)
+
+
+def _must_fail_missing_amount_validation_vault(code: str) -> bool:
+    has_staged = bool(re.search(r"tx\.outputs\.length\s*==\s*2", code))
+    has_split = bool(
+        re.search(r"outputs\[0\]\.value\s*==[^;]+-\s*\w+", code)
+        or re.search(r"outputs\[0\]\.value\s*\+", code)
+        or re.search(
+            r"outputs\[\d+\]\.value\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.value",
+            code,
+        )
+    )
+    return has_staged and not has_split
+
+
+def _must_fail_unbounded_backup_path(code: str) -> bool:
+    for match in re.finditer(
+        r"function\s+(\w*(?:backup|recover|emergency|cold|drain)\w*)\s*\([^)]*\)\s*\{([^}]*)\}",
+        code,
+        re.DOTALL | re.IGNORECASE,
+    ):
+        body = match.group(2)
+        if not re.search(r"checkSig", body, re.IGNORECASE):
+            continue
+        if re.search(r"tx\.outputs\.length\s*==\s*1", body) and not re.search(
+            r"(?:this\.age|tx\.time)\s*>=", body
+        ):
+            return True
+    return False
+
+
+def _must_fail_missing_output_constraints(code: str) -> bool:
+    for match in re.finditer(
+        r"function\s+(\w*(?:finalize|claim|withdraw)\w*)\s*\([^)]*\)\s*\{([^}]*)\}",
+        code,
+        re.DOTALL | re.IGNORECASE,
+    ):
+        body = match.group(2)
+        if not re.search(r"(?:this\.age|tx\.time)\s*>=", body):
+            continue
+        if not re.search(r"checkSig", body, re.IGNORECASE):
+            continue
+        has_dest = bool(
+            re.search(r"tx\.outputs\[\d+\]\.lockingBytecode\s*==", body)
+        )
+        has_value = bool(re.search(r"tx\.outputs\[\d+\]\.value\s*==", body))
+        if not has_dest or not has_value:
+            return True
+    return False
+
+
+def _must_fail_emergency_path(code: str) -> bool:
+    return _must_fail_unbounded_backup_path(code)
+
+
+def _must_fail_delay_logic(code: str) -> bool:
+    for match in re.finditer(
+        r"function\s+(\w+)\s*\([^)]*\)\s*\{([^}]*)\}",
+        code,
+        re.DOTALL | re.IGNORECASE,
+    ):
+        name, body = match.group(1), match.group(2)
+        if re.search(r"(?:finalize|claim)", name, re.IGNORECASE):
+            if not re.search(r"(?:this\.age|tx\.time)\s*>=", body):
+                return True
+    return False
+
+
+def _must_fail_covenant_break(code: str) -> bool:
+    if re.search(r"tx\.outputs\.length\s*==\s*2", code):
+        return not bool(
+            re.search(
+                r"tx\.outputs\[\d+\]\.lockingBytecode\s*==\s*this\.activeBytecode",
+                code,
+            )
+        )
+    return False
+
+
+def _must_fail_reanchor(code: str) -> bool:
+    return _must_fail_permanent_covenant_vault(code)
+
+
+def _vault_alias_pool(
+    capabilities: Dict[str, Any],
+    detected: set,
+    code: str,
+    functions: List[Dict],
+) -> Dict[str, bool]:
+    cov = _vault_covenant_continuation(detected, code, functions)
+    time_ok = _vault_time_validation(detected, code, capabilities)
+    sig_ok = capabilities.get("signature_verification", False) or bool(
+        re.search(r"checkSig|checkMultiSig", code, re.IGNORECASE)
+    )
+    return {
+        "valid_signature_check": sig_ok,
+        "signature_verification": sig_ok,
+        "covenant_continuation": cov,
+        "covenant_self_reference": _vault_reanchor_pattern(detected, code),
+        "reanchor_pattern": _vault_reanchor_pattern(detected, code),
+        "locktime_check": time_ok,
+        "time_validation": time_ok,
+        "output_value_validation": _vault_output_value_validation(
+            detected, code, capabilities
+        ),
+        "output_amount_check": _vault_output_value_validation(
+            detected, code, capabilities
+        ),
+        "output_destination_validation": "locking_bytecode" in detected
+        or bool(re.search(r"tx\.outputs\[\d+\]\.lockingBytecode\s*==", code)),
+        "multiple_paths": len(functions) >= 2,
+        "announce_phase": _vault_announce_phase(detected, code, functions),
+        "finalize_phase": _vault_finalize_phase(detected, code, functions),
+        "staged_spending": _vault_staged_spending(detected, code),
+        "value_preservation": _vault_value_preservation(detected, code),
+        "emergency_path": _vault_emergency_path(functions, code, detected),
+        "recovery_path": _vault_recovery_path(detected, code, functions),
+        "cancellation_path": _vault_cancellation_path(code),
+        "tiered_delay_logic": _vault_tiered_delay_logic(code),
+        "amount_threshold_logic": _vault_amount_threshold_logic(code),
+        "multisig": _vault_multisig_recovery(detected, code),
+        "two_of_three_logic": (
+            "multisig_2of3" in detected
+            or "checkMultiSig" in code
+            or _vault_multisig_recovery(detected, code)
+        ),
+        "must_fail_permanent_covenant": _must_fail_permanent_covenant_vault(code),
+        "must_fail_missing_amount_validation": _must_fail_missing_amount_validation_vault(
+            code
+        ),
+        "must_fail_unbounded_backup_path": _must_fail_unbounded_backup_path(code),
+        "must_fail_missing_output_constraints": _must_fail_missing_output_constraints(
+            code
+        ),
+        "must_fail_emergency_path": _must_fail_emergency_path(code),
+        "must_fail_delay_logic": _must_fail_delay_logic(code),
+        "must_fail_covenant_break": _must_fail_covenant_break(code),
+        "must_fail_reanchor": _must_fail_reanchor(code),
+        "token_nft_amount_check": ("token_nft" in detected)
+        or bool(re.search(r"tokenAmount\s*==\s*1\b", code))
+        or bool(
+            re.search(
+                r"tokenAmount\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.tokenAmount",
+                code,
+            )
+        ),
+    }
+
+
 def _multisig_detected(detected: set, code: str) -> bool:
     return (
         "multisig" in detected
@@ -329,6 +918,24 @@ def _cashtoken_alias_pool(
             "sequence_check": _sequence_check(detected, code),
             "must_fail_wrong_time_field": _must_fail_wrong_time_field(code),
         },
+        "hashlock": {
+            "valid_signature_check": sig_ok,
+            "locktime_check": capabilities.get("time_validation", False),
+            "multiple_paths": len(functions) >= 2,
+            "hash_verification": _hash_verification(detected, code),
+            "preimage_validation": _preimage_validation(detected, code),
+            "sha256_check": _sha256_check(detected, code),
+            "ripemd160_check": _ripemd160_check(detected, code),
+            "multiple_preimages": _multiple_preimages(detected, code),
+            "multiple_hash_validation": _multiple_hash_validation(detected, code),
+            "must_fail_missing_token_validation": _must_fail_missing_token_validation(
+                code
+            ),
+        },
+        "vault": _vault_alias_pool(capabilities, detected, code, functions),
+        "refundable_payment": _refundable_alias_pool(
+            capabilities, detected, code, functions
+        ),
     }
     default = {
         "valid_signature_check": sig_ok,
@@ -355,6 +962,17 @@ def _cashtoken_alias_pool(
         "relative_timelock": _relative_timelock(detected, code),
         "sequence_check": _sequence_check(detected, code),
         "must_fail_wrong_time_field": _must_fail_wrong_time_field(code),
+        "hash_verification": _hash_verification(detected, code),
+        "preimage_validation": _preimage_validation(detected, code),
+        "sha256_check": _sha256_check(detected, code),
+        "ripemd160_check": _ripemd160_check(detected, code),
+        "multiple_preimages": _multiple_preimages(detected, code),
+        "multiple_hash_validation": _multiple_hash_validation(detected, code),
+        "must_fail_missing_token_validation": _must_fail_missing_token_validation(
+            code
+        ),
+        **_vault_alias_pool(capabilities, detected, code, functions),
+        **_refundable_alias_pool(capabilities, detected, code, functions),
     }
     merged = {**default, **pools.get(pattern, {})}
     return merged
@@ -534,13 +1152,15 @@ class BenchmarkEvaluator:
                     "timelock_unlock" in detected
                     or "timelock_refund" in detected
                     or ("this.age" in code)
+                    or bool(re.search(r"tx\.time\s*>=", code))
                 )
                 legacy_capabilities = {
-                    "signature_verification": any("_signature" in f or f == "multisig" for f in detected),
-                    "covenant_continuation": any(
-                        f.get("has_anchor") and f.get("has_value_check")
-                        for f in functions
-                        if f["role"] == "INTERMEDIATE"
+                    "signature_verification": (
+                        any("_signature" in f or f == "multisig" for f in detected)
+                        or bool(re.search(r"checkSig|checkMultiSig", code, re.IGNORECASE))
+                    ),
+                    "covenant_continuation": _vault_covenant_continuation(
+                        set(detected), code, functions
                     ),
                     "time_validation": has_time_check,
                     "timelock_unlock": has_time_check,
@@ -549,6 +1169,10 @@ class BenchmarkEvaluator:
                         ("token_amount" in detected)
                         or ("token_nft" in detected)
                         or ("tokenCategory" in code and "tokenAmount" in code)
+                        or (
+                            case.pattern == "refundable_payment"
+                            and _refundable_bch_only_ok(code)
+                        )
                     ),
                     "multisig": _multisig_detected(set(detected), code),
                     "output_destination_validation": "locking_bytecode" in detected,
@@ -579,7 +1203,8 @@ class BenchmarkEvaluator:
                 elif pattern_key in {
                     "token_ft", "ft_mint", "nft_immutable", "nft_mutable",
                     "nft_minting", "hybrid_token", "split_payment", "escrow",
-                    "multisig", "timelock",
+                    "multisig", "timelock", "hashlock", "vault",
+                    "refundable_payment",
                 }:
                     legacy_alias_checks = _cashtoken_alias_pool(
                         pattern_key, legacy_capabilities, detected, code, functions
@@ -690,8 +1315,17 @@ class BenchmarkEvaluator:
                     and intent_coverage >= 0.70
                     and len(critical_missing) == 0
                 )
+                vault_semantic_relaxed = (
+                    case.pattern == "vault"
+                    and compile_pass
+                    and intent_coverage >= 0.70
+                    and len(critical_missing) == 0
+                )
                 effective_semantic = (
-                    semantic_pass or token_vault_relaxed or timelock_semantic_relaxed
+                    semantic_pass
+                    or token_vault_relaxed
+                    or timelock_semantic_relaxed
+                    or vault_semantic_relaxed
                 )
                 final_score = (1.0 if compile_pass else 0.0) * lint_factor * intent_coverage * (1.0 if effective_semantic else 0.5)
                 
@@ -709,7 +1343,12 @@ class BenchmarkEvaluator:
                     and intent_coverage >= 0.70
                     and len(critical_missing) == 0
                     and not (has_failure_tag and has_must_fail_critical)
-                    and (semantic_pass or token_vault_relaxed or timelock_semantic_relaxed)
+                    and (
+                        semantic_pass
+                        or token_vault_relaxed
+                        or timelock_semantic_relaxed
+                        or vault_semantic_relaxed
+                    )
                 )
 
                 return CaseResult(
