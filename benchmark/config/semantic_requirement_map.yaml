@@ -12,17 +12,18 @@ mappings:
     capability: token_category_constrained
     any_capabilities: [preserves_token_amount, burns_output_tokens]
     fallback: regex_alias
+    alias_pool_key: token_validation
   covenant_continuation:
     capability: reanchors_covenant
     fallback: regex_alias
+    alias_pool_key: covenant_continuation
   output_destination_validation:
     capability: migratory_output
     fallback: detected_feature
     detected: locking_bytecode
   output_value_validation:
-    capability: terminating_output
-    fallback: detected_feature
-    detected: output_value_validation
+    fallback: regex_alias
+    alias_pool_key: output_value_validation
   time_validation:
     fallback: regex_alias
     alias_pool_key: locktime_check
@@ -38,10 +39,15 @@ mappings:
   token_amount_check:
     capability: preserves_token_amount
     any_capabilities: [preserves_split_token_supply, burns_output_tokens]
-    fallback: none
+    fallback: regex_alias
+    alias_pool_key: token_amount_check
+  token_nft_amount_check:
+    fallback: regex_alias
+    alias_pool_key: token_nft_amount_check
   covenant_self_reference:
     capability: reanchors_covenant
     fallback: regex_alias
+    alias_pool_key: reanchor_pattern
   soulbound_no_external_transfer:
     capability: unrestricted_external_transfer
     negate: true
@@ -133,6 +139,27 @@ mappings:
   must_fail_wrong_time_field:
     fallback: regex_alias
     alias_pool_key: must_fail_wrong_time_field
+  hash_verification:
+    fallback: regex_alias
+    alias_pool_key: hash_verification
+  preimage_validation:
+    fallback: regex_alias
+    alias_pool_key: preimage_validation
+  sha256_check:
+    fallback: regex_alias
+    alias_pool_key: sha256_check
+  ripemd160_check:
+    fallback: regex_alias
+    alias_pool_key: ripemd160_check
+  multiple_preimages:
+    fallback: regex_alias
+    alias_pool_key: multiple_preimages
+  multiple_hash_validation:
+    fallback: regex_alias
+    alias_pool_key: multiple_hash_validation
+  must_fail_missing_token_validation:
+    fallback: regex_alias
+    alias_pool_key: must_fail_missing_token_validation
   two_of_three_logic:
     capability: has_multisig_auth
     fallback: regex_alias
@@ -198,3 +225,66 @@ mappings:
   must_fail_permanent_covenant:
     fallback: regex_alias
     alias_pool_key: must_fail_permanent_covenant
+  announce_phase:
+    fallback: regex_alias
+    alias_pool_key: announce_phase
+  finalize_phase:
+    fallback: regex_alias
+    alias_pool_key: finalize_phase
+  reanchor_pattern:
+    fallback: regex_alias
+    alias_pool_key: reanchor_pattern
+  value_preservation:
+    fallback: regex_alias
+    alias_pool_key: value_preservation
+  staged_spending:
+    fallback: regex_alias
+    alias_pool_key: staged_spending
+  emergency_path:
+    fallback: regex_alias
+    alias_pool_key: emergency_path
+  recovery_path:
+    fallback: regex_alias
+    alias_pool_key: recovery_path
+  cancellation_path:
+    fallback: regex_alias
+    alias_pool_key: cancellation_path
+  tiered_delay_logic:
+    fallback: regex_alias
+    alias_pool_key: tiered_delay_logic
+  amount_threshold_logic:
+    fallback: regex_alias
+    alias_pool_key: amount_threshold_logic
+  must_fail_missing_amount_validation:
+    fallback: regex_alias
+    alias_pool_key: must_fail_missing_amount_validation
+  must_fail_unbounded_backup_path:
+    fallback: regex_alias
+    alias_pool_key: must_fail_unbounded_backup_path
+  must_fail_missing_output_constraints:
+    fallback: regex_alias
+    alias_pool_key: must_fail_missing_output_constraints
+  must_fail_emergency_path:
+    fallback: regex_alias
+    alias_pool_key: must_fail_emergency_path
+  must_fail_delay_logic:
+    fallback: regex_alias
+    alias_pool_key: must_fail_delay_logic
+  must_fail_covenant_break:
+    fallback: regex_alias
+    alias_pool_key: must_fail_covenant_break
+  must_fail_reanchor:
+    fallback: regex_alias
+    alias_pool_key: must_fail_reanchor
+  refund_path:
+    fallback: regex_alias
+    alias_pool_key: refund_path
+  claim_path:
+    fallback: regex_alias
+    alias_pool_key: claim_path
+  goal_threshold_logic:
+    fallback: regex_alias
+    alias_pool_key: goal_threshold_logic
+  crowdfund_refund_path:
+    fallback: regex_alias
+    alias_pool_key: crowdfund_refund_path
