@@ -23,6 +23,7 @@ from src.services.llm.factory import LLMFactory
 from src.services.anti_pattern_enforcer import get_anti_pattern_enforcer
 from src.services.rule_engine import get_rule_engine
 from src.services.pattern_profiles import get_pattern_profile, canonical_pattern
+from src.services.refundable_canonical import resolve_refundable_canonical_code
 from src.services.vault_canonical import resolve_vault_canonical_code
 from src.services.semantic_normalization import (
     apply_semantic_normalization,
@@ -845,6 +846,18 @@ class Phase2:
                     f"Phase 2A complete: {len(canonical_code)} chars, retry={retry_count}"
                 )
                 return canonical_code
+
+        # ─── Refundable canonical templates (Phase 1B — deterministic, no LLM) ─
+        if retry_count == 0 and not violations:
+            refundable_code = resolve_refundable_canonical_code(ir.metadata.intent or "")
+            if refundable_code:
+                logger.info("[Phase 2] Routing: REFUNDABLE_CANONICAL_TEMPLATE")
+                ir.metadata.generation_phase = 2
+                ir.metadata.retry_count = retry_count
+                logger.info(
+                    f"Phase 2A complete: {len(refundable_code)} chars, retry={retry_count}"
+                )
+                return refundable_code
 
         # ─── Routing Bridge ────────────────────────────────────────────
         disable_golden = ir.metadata.disable_golden if ir.metadata else False

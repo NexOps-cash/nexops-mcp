@@ -260,6 +260,51 @@ vault:
       - "instantSpend for amounts <= opsLimitSats; stageLargeWithdrawal when amount > opsLimitSats."
       - "emergencyRecover / coldKeyRecovery for immediate cold-key recovery without delay."
 
+refundable_payment:
+  description: "Refundable payment patterns — prefer lint-safe dual-path shapes over covenant remainder splits."
+  rules:
+    - id: REFUND-NO-REMAINDER-SPLIT
+      rule: "Subscription/refundable flows MUST NOT use input.value - payoutAmount unless profile disables LNC-005."
+    - id: REFUND-TIME-STANDALONE
+      rule: "Use require(tx.time >= deadline) only — no nested tx.time arithmetic (LNC-010)."
+    - id: REFUND-DIVISION-GUARD
+      rule: "Before division require(divisor > 0) (LNC-011)."
+
+  canonical_subscription:
+    description: "Monthly service claim + subscriber cancel with full-value paths. rp_003."
+    constructor_params: "pubkey service, pubkey subscriber, int monthlyPeriod"
+    shape: |
+      function claim(sig serviceSig) {
+          require(tx.time >= monthlyPeriod);
+          require(tx.outputs.length == 1);
+          require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+      }
+      function cancel(sig subscriberSig) {
+          require(tx.outputs.length == 1);
+          require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+      }
+    notes:
+      - "Do NOT stage remainder with 2-output covenant — triggers LNC-005 in escrow mode."
+
+  canonical_gradual_release:
+    description: "Timed partial claim + sender refund after inactivity. rp_004."
+    constructor_params: "pubkey recipient, pubkey sender, int periodEnd, int inactiveEnd"
+    shape: |
+      function claim(sig recipientSig, int payoutAmount) {
+          require(tx.time >= periodEnd);
+          require(payoutAmount > 0);
+          require(tx.outputs.length == 1);
+          require(tx.outputs[0].value == payoutAmount);
+      }
+      function refund(sig senderSig) {
+          require(tx.time >= inactiveEnd);
+          require(tx.outputs.length == 1);
+          require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+      }
+    notes:
+      - "Avoid 3-output self-anchor vesting without explicit sum conservation (LNC-016)."
+      - "Pass releaseAfterTime / inactiveAfterTime as ints; do not compute tx.time - startTime in-body."
+
 streaming:
   description: "Continuous linear release or decay of funds over time (streaming)."
   rules:
