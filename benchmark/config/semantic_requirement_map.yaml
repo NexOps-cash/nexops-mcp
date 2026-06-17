@@ -216,6 +216,18 @@ mappings:
   multiple_paths:
     fallback: regex_alias
     alias_pool_key: multiple_paths
+  path_isolation:
+    fallback: regex_alias
+    alias_pool_key: path_isolation
+  must_fail_path_isolation:
+    fallback: regex_alias
+    alias_pool_key: must_fail_path_isolation
+  reclaim_path:
+    fallback: regex_alias
+    alias_pool_key: reclaim_path
+  conditional_release:
+    fallback: regex_alias
+    alias_pool_key: conditional_release
   output_lockingbytecode_check:
     fallback: regex_alias
     alias_pool_key: output_lockingbytecode_check
