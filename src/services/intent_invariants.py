@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import List, Optional
+from enum import Enum
+from typing import List, Optional, Tuple
 
 from src.models import (
     AuditIssue,
@@ -17,6 +18,7 @@ from src.models import (
     FindingKind,
     IntentModel,
     Provenance,
+    Severity,
     Triggerability,
 )
 from src.services.finding_policy import finalize
@@ -67,12 +69,30 @@ _FIXED_AMOUNT_MARKERS = (
 )
 
 
+class InvariantTier(str, Enum):
+    """Security controls vs business/policy rules."""
+
+    SECURITY = "security"
+    BUSINESS = "business"
+
+
+# Per-invariant tier: missing security controls enable unauthorized value movement.
+INVARIANT_TIER_BY_ID: dict[str, InvariantTier] = {
+    "auth_gate": InvariantTier.SECURITY,
+    "value_conservation": InvariantTier.SECURITY,
+    "fixed_amount_per_recipient": InvariantTier.BUSINESS,
+    "recipient_binding": InvariantTier.BUSINESS,
+    "token_category_preservation": InvariantTier.BUSINESS,
+}
+
+
 @dataclass
 class InvariantStatus:
     invariant_id: str
     label: str
     status: str  # ENFORCED | MISSING | NOT_ENFORCEABLE_ONCHAIN
     detail: str = ""
+    tier: InvariantTier = InvariantTier.BUSINESS
 
 
 @dataclass
@@ -227,6 +247,53 @@ def _has_fixed_per_output_amounts(code: str) -> bool:
     return False
 
 
+def _tier_for_sanity_violation(violation: str) -> InvariantTier:
+    """Classify SanityChecker messages as security-critical or business/policy."""
+    v = violation.lower()
+    if "multisig" in v:
+        return InvariantTier.SECURITY
+    if "timelock" in v:
+        return InvariantTier.SECURITY
+    if "activebytecode" in v or "covenant" in v:
+        return InvariantTier.SECURITY
+    if "sum-preservation" in v or "output-count" in v:
+        return InvariantTier.SECURITY
+    return InvariantTier.BUSINESS
+
+
+def _classification_for_tier(
+    tier: InvariantTier,
+) -> Tuple[FindingKind, Severity, ExploitSeverity]:
+    if tier == InvariantTier.SECURITY:
+        return (
+            FindingKind.VULNERABILITY,
+            Severity.HIGH,
+            ExploitSeverity.DIRECT_FUND_LOSS,
+        )
+    return (
+        FindingKind.INVARIANT_GAP,
+        Severity.MEDIUM,
+        ExploitSeverity.PARTIAL_VIOLATION,
+    )
+
+
+def _append_missing(
+    matrix: InvariantMatrix,
+    invariant_id: str,
+    label: str,
+    detail: str,
+) -> None:
+    matrix.missing.append(
+        InvariantStatus(
+            invariant_id=invariant_id,
+            label=label,
+            status="MISSING",
+            detail=detail,
+            tier=INVARIANT_TIER_BY_ID.get(invariant_id, InvariantTier.BUSINESS),
+        )
+    )
+
+
 def build_invariant_matrix(
     code: str,
     intent: str = "",
@@ -244,13 +311,11 @@ def build_invariant_matrix(
             InvariantStatus("auth_gate", "authorization gate (signature)", "ENFORCED")
         )
     elif any(w in text for w in ("sign", "multisig", "owner must", "treasury")):
-        matrix.missing.append(
-            InvariantStatus(
-                "auth_gate",
-                "authorization gate (signature)",
-                "MISSING",
-                "Intent requires signer but no checkSig/checkMultiSig found.",
-            )
+        _append_missing(
+            matrix,
+            "auth_gate",
+            "authorization gate (signature)",
+            "Intent requires signer but no checkSig/checkMultiSig found.",
         )
 
     if not _is_split_intent(text, intent_model):
@@ -262,13 +327,11 @@ def build_invariant_matrix(
             InvariantStatus("recipient_binding", "recipient binding", "ENFORCED")
         )
     elif _requires_recipient_binding(text):
-        matrix.missing.append(
-            InvariantStatus(
-                "recipient_binding",
-                "recipient binding",
-                "MISSING",
-                "Intent names recipients but outputs lack lockingBytecode binding.",
-            )
+        _append_missing(
+            matrix,
+            "recipient_binding",
+            "recipient binding",
+            "Intent names recipients but outputs lack lockingBytecode binding.",
         )
 
     if _has_value_or_token_conservation(code):
@@ -276,13 +339,11 @@ def build_invariant_matrix(
             InvariantStatus("value_conservation", "value conservation", "ENFORCED")
         )
     else:
-        matrix.missing.append(
-            InvariantStatus(
-                "value_conservation",
-                "value conservation",
-                "MISSING",
-                "Split intent requires sum-preservation across outputs.",
-            )
+        _append_missing(
+            matrix,
+            "value_conservation",
+            "value conservation",
+            "Split intent requires sum-preservation across outputs.",
         )
 
     if "token" in text or (intent_model and "tokens" in (intent_model.features or [])):
@@ -295,13 +356,11 @@ def build_invariant_matrix(
                 )
             )
         else:
-            matrix.missing.append(
-                InvariantStatus(
-                    "token_category_preservation",
-                    "token category preservation",
-                    "MISSING",
-                    "Token split requires tokenCategory checks on outputs.",
-                )
+            _append_missing(
+                matrix,
+                "token_category_preservation",
+                "token category preservation",
+                "Token split requires tokenCategory checks on outputs.",
             )
 
     if _requires_fixed_amounts(text):
@@ -314,13 +373,11 @@ def build_invariant_matrix(
                 )
             )
         else:
-            matrix.missing.append(
-                InvariantStatus(
-                    "fixed_amount_per_recipient",
-                    "fixed amount per recipient",
-                    "MISSING",
-                    "Intent requires fixed per-recipient amounts but only sum conservation or variable splits found.",
-                )
+            _append_missing(
+                matrix,
+                "fixed_amount_per_recipient",
+                "fixed amount per recipient",
+                "Intent requires fixed per-recipient amounts but only sum conservation or variable splits found.",
             )
 
     if _requires_treasury_prefunding(text):
@@ -334,6 +391,44 @@ def build_invariant_matrix(
         )
 
     return matrix
+
+
+def _emit_invariant_issue(
+    *,
+    rule_id: str,
+    summary: str,
+    description: str,
+    recommendation: str,
+    tier: InvariantTier,
+) -> AuditIssue:
+    kind, proposed_severity, exploit = _classification_for_tier(tier)
+    finalized = finalize(
+        kind=kind,
+        proposed_severity=proposed_severity,
+        summary=summary,
+        rule_id=rule_id,
+        text=description,
+        exploit_severity=exploit,
+        provenance=Provenance.DETERMINISTIC,
+        triggerability=Triggerability.ATTACKER,
+    )
+    return AuditIssue(
+        title=finalized.title,
+        severity=finalized.severity,
+        line=0,
+        description=description,
+        recommendation=recommendation,
+        rule_id=rule_id,
+        can_fix=True,
+        source="deterministic",
+        issue_class=finalized.issue_class,
+        exploit_severity=finalized.exploit_severity,
+        kind=finalized.kind,
+        confidence=ConfidenceLevel.PROVEN,
+        confidence_score=1.0,
+        provenance=Provenance.DETERMINISTIC,
+        triggerability=finalized.triggerability,
+    )
 
 
 def verify_intent_invariants(
@@ -350,33 +445,13 @@ def verify_intent_invariants(
     for item in matrix.missing:
         summary = item.label.replace("_", " ")
         description = item.detail or f"Declared intent requires {item.label} but it is not enforced in code."
-        finalized = finalize(
-            kind=FindingKind.INVARIANT_GAP,
-            proposed_severity=None,
-            summary=summary,
-            rule_id=f"intent_{item.invariant_id}",
-            text=description,
-            exploit_severity=ExploitSeverity.PARTIAL_VIOLATION,
-            provenance=Provenance.DETERMINISTIC,
-            triggerability=Triggerability.ATTACKER,
-        )
         issues.append(
-            AuditIssue(
-                title=finalized.title,
-                severity=finalized.severity,
-                line=0,
+            _emit_invariant_issue(
+                rule_id=f"intent_{item.invariant_id}",
+                summary=summary,
                 description=description,
                 recommendation=f"Add on-chain enforcement for: {item.label}.",
-                rule_id=f"intent_{item.invariant_id}",
-                can_fix=True,
-                source="deterministic",
-                issue_class=finalized.issue_class,
-                exploit_severity=finalized.exploit_severity,
-                kind=finalized.kind,
-                confidence=ConfidenceLevel.PROVEN,
-                confidence_score=1.0,
-                provenance=Provenance.DETERMINISTIC,
-                triggerability=finalized.triggerability,
+                tier=item.tier,
             )
         )
 
@@ -386,32 +461,14 @@ def verify_intent_invariants(
         for violation in sanity.get("violations", []):
             if any(i.description == violation for i in issues):
                 continue
-            finalized = finalize(
-                kind=FindingKind.INVARIANT_GAP,
-                summary="intent sanity check",
-                rule_id="intent_sanity_check",
-                text=violation,
-                exploit_severity=ExploitSeverity.PARTIAL_VIOLATION,
-                provenance=Provenance.DETERMINISTIC,
-                triggerability=Triggerability.ATTACKER,
-            )
+            tier = _tier_for_sanity_violation(violation)
             issues.append(
-                AuditIssue(
-                    title=finalized.title,
-                    severity=finalized.severity,
-                    line=0,
+                _emit_invariant_issue(
+                    rule_id="intent_sanity_check",
+                    summary="intent sanity check",
                     description=violation,
                     recommendation="Align contract with declared intent features.",
-                    rule_id="intent_sanity_check",
-                    can_fix=True,
-                    source="deterministic",
-                    issue_class=finalized.issue_class,
-                    exploit_severity=finalized.exploit_severity,
-                    kind=finalized.kind,
-                    confidence=ConfidenceLevel.PROVEN,
-                    confidence_score=1.0,
-                    provenance=Provenance.DETERMINISTIC,
-                    triggerability=finalized.triggerability,
+                    tier=tier,
                 )
             )
 

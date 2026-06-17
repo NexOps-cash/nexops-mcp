@@ -1,6 +1,6 @@
 # Audit Classification Validation Report
 
-**Generated:** 2026-06-17 09:00 UTC
+**Generated:** 2026-06-17 09:08 UTC
 **Scenarios:** 22 | **Passed:** 22 | **Failed:** 0
 
 ## Summary
@@ -93,21 +93,21 @@ All classification matrix scenarios passed. Payroll-style false positives are su
 
 **Description:** Missing admin signature on payout path
 
-**Expected:** rule_id=intent_auth_gate; kind=invariant_gap|vulnerability; trigger=attacker; confidence=proven; title_prefix=Policy Gap|Security Vulnerability
+**Expected:** rule_id=intent_auth_gate; kind=vulnerability; severity=HIGH; trigger=attacker; confidence=proven; title_prefix=Security Vulnerability
 
 | Field | Actual |
 |-------|--------|
 | rule_id | `intent_auth_gate` |
-| FindingKind | `invariant_gap` |
-| Severity | `MEDIUM` |
+| FindingKind | `vulnerability` |
+| Severity | `HIGH` |
 | Triggerability | `attacker` |
 | Confidence | `proven` |
 | Provenance | `deterministic` |
-| Title | Policy Gap: authorization gate (signature) |
+| Title | Security Vulnerability: authorization gate (signature) |
 
 <details><summary>All findings</summary>
 
-- `intent_auth_gate | invariant_gap | MEDIUM | attacker | proven | deterministic | Policy Gap: authorization gate (signature)`
+- `intent_auth_gate | vulnerability | HIGH | attacker | proven | deterministic | Security Vulnerability: authorization gate (signature)`
 
 </details>
 
@@ -161,22 +161,22 @@ All classification matrix scenarios passed. Payroll-style false positives are su
 
 **Description:** Threshold bypass — single signature on 2-of-3 intent
 
-**Expected:** rule_id=intent_sanity_check; kind=invariant_gap|vulnerability; trigger=attacker|unknown; confidence=proven
+**Expected:** rule_id=intent_sanity_check; kind=vulnerability; severity=HIGH; trigger=attacker; confidence=proven; title_prefix=Security Vulnerability
 
 | Field | Actual |
 |-------|--------|
 | rule_id | `intent_sanity_check` |
-| FindingKind | `invariant_gap` |
-| Severity | `MEDIUM` |
+| FindingKind | `vulnerability` |
+| Severity | `HIGH` |
 | Triggerability | `attacker` |
 | Confidence | `proven` |
 | Provenance | `deterministic` |
-| Title | Policy Gap: intent sanity check |
+| Title | Security Vulnerability: intent sanity check |
 
 <details><summary>All findings</summary>
 
-- `intent_value_conservation | invariant_gap | MEDIUM | attacker | proven | deterministic | Policy Gap: value conservation`
-- `intent_sanity_check | invariant_gap | MEDIUM | attacker | proven | deterministic | Policy Gap: intent sanity check`
+- `intent_value_conservation | vulnerability | HIGH | attacker | proven | deterministic | Security Vulnerability: value conservation`
+- `intent_sanity_check | vulnerability | HIGH | attacker | proven | deterministic | Security Vulnerability: intent sanity check`
 
 </details>
 
@@ -188,7 +188,7 @@ All classification matrix scenarios passed. Payroll-style false positives are su
 
 <details><summary>All findings</summary>
 
-- `intent_value_conservation | invariant_gap | MEDIUM | attacker | proven | deterministic | Policy Gap: value conservation`
+- `intent_value_conservation | vulnerability | HIGH | attacker | proven | deterministic | Security Vulnerability: value conservation`
 
 </details>
 
@@ -196,22 +196,22 @@ All classification matrix scenarios passed. Payroll-style false positives are su
 
 **Description:** Missing timelock on delayed withdrawal intent
 
-**Expected:** rule_id=intent_sanity_check; kind=invariant_gap; confidence=proven
+**Expected:** rule_id=intent_sanity_check; kind=vulnerability; severity=HIGH; trigger=attacker; confidence=proven; title_prefix=Security Vulnerability
 
 | Field | Actual |
 |-------|--------|
 | rule_id | `intent_sanity_check` |
-| FindingKind | `invariant_gap` |
-| Severity | `MEDIUM` |
+| FindingKind | `vulnerability` |
+| Severity | `HIGH` |
 | Triggerability | `attacker` |
 | Confidence | `proven` |
 | Provenance | `deterministic` |
-| Title | Policy Gap: intent sanity check |
+| Title | Security Vulnerability: intent sanity check |
 
 <details><summary>All findings</summary>
 
 - `output_binding_missing | invariant_gap | MEDIUM | attacker | proven | deterministic | Policy Gap: output binding missing`
-- `intent_sanity_check | invariant_gap | MEDIUM | attacker | proven | deterministic | Policy Gap: intent sanity check`
+- `intent_sanity_check | vulnerability | HIGH | attacker | proven | deterministic | Security Vulnerability: intent sanity check`
 
 </details>
 
@@ -407,21 +407,21 @@ All classification matrix scenarios passed. Payroll-style false positives are su
 
 **Description:** Unrestricted payout path
 
-**Expected:** rule_id=intent_auth_gate; kind=invariant_gap|vulnerability; trigger=attacker
+**Expected:** rule_id=intent_auth_gate; kind=vulnerability; severity=HIGH; trigger=attacker
 
 | Field | Actual |
 |-------|--------|
 | rule_id | `intent_auth_gate` |
-| FindingKind | `invariant_gap` |
-| Severity | `MEDIUM` |
+| FindingKind | `vulnerability` |
+| Severity | `HIGH` |
 | Triggerability | `attacker` |
 | Confidence | `proven` |
 | Provenance | `deterministic` |
-| Title | Policy Gap: authorization gate (signature) |
+| Title | Security Vulnerability: authorization gate (signature) |
 
 <details><summary>All findings</summary>
 
-- `intent_auth_gate | invariant_gap | MEDIUM | attacker | proven | deterministic | Policy Gap: authorization gate (signature)`
+- `intent_auth_gate | vulnerability | HIGH | attacker | proven | deterministic | Security Vulnerability: authorization gate (signature)`
 
 </details>
 

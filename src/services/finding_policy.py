@@ -20,6 +20,14 @@ from src.models import (
     Triggerability,
 )
 
+# Security-critical intent rule_ids (explicit kind passed at emission; fallback for infer_kind).
+INTENT_SECURITY_RULE_IDS = frozenset(
+    {
+        "intent_auth_gate",
+        "intent_value_conservation",
+    }
+)
+
 RULE_KIND_HINTS: dict[str, FindingKind] = {
     "output_binding_missing": FindingKind.INVARIANT_GAP,
     "partial_aggregation_risk": FindingKind.DESIGN_TRADE_OFF,
@@ -235,6 +243,9 @@ def infer_kind(
     rid = (rule_id or "").lower()
     if rid in RULE_KIND_HINTS:
         return RULE_KIND_HINTS[rid]
+
+    if rid in INTENT_SECURITY_RULE_IDS:
+        return FindingKind.VULNERABILITY
 
     if rid.startswith("intent_"):
         return FindingKind.INVARIANT_GAP

@@ -127,3 +127,32 @@ def test_intent_model_split_payment_triggers_checks():
     intent = "Distribute payroll with fixed salary amounts to employees."
     matrix = build_invariant_matrix(PAYROLL_CODE_RECIPIENTS_ONLY, intent, model)
     assert any(x.invariant_id == "fixed_amount_per_recipient" for x in matrix.missing)
+
+
+PAYROLL_NO_AUTH = """
+pragma cashscript ^0.13.0;
+contract PayrollNoAuth(bytes employee1Lock, bytes employee2Lock) {
+    function distribute() {
+        require(tx.outputs.length == 2);
+        require(tx.outputs[0].lockingBytecode == employee1Lock);
+        require(tx.outputs[1].lockingBytecode == employee2Lock);
+        require(
+            tx.outputs[0].value + tx.outputs[1].value ==
+            tx.inputs[this.activeInputIndex].value
+        );
+    }
+}
+"""
+
+
+def test_missing_auth_gate_is_vulnerability_high():
+    issues = verify_intent_invariants(
+        PAYROLL_NO_AUTH,
+        "Payroll distribution to employees. Owner must sign.",
+    )
+    auth = next((i for i in issues if i.rule_id == "intent_auth_gate"), None)
+    assert auth is not None
+    assert auth.kind == FindingKind.VULNERABILITY
+    assert auth.severity == Severity.HIGH
+    assert auth.triggerability == Triggerability.ATTACKER
+    assert "Security Vulnerability" in auth.title
