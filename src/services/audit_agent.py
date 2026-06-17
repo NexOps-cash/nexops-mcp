@@ -1,10 +1,30 @@
 import logging
 from typing import List, Optional
 
-from src.models import AuditIssue, AuditReport, Severity, IssueClass, ExploitSeverity
+from src.models import (
+    AuditIssue,
+    AuditReport,
+    ConfidenceLevel,
+    ExploitSeverity,
+    FindingKind,
+    IntentModel,
+    IssueClass,
+    Provenance,
+    Severity,
+    Triggerability,
+)
 from src.services.audit_engine.audit_lint import get_audit_linter as get_dsl_linter
 from src.services.audit_engine.audit_phase import validate_audit
 from src.services.compiler import get_compiler_service
+from src.services.finding_policy import (
+    finalize,
+    is_exploitable,
+    kind_to_semantic_category,
+)
+from src.services.intent_invariants import (
+    build_invariant_matrix,
+    verify_intent_invariants,
+)
 from src.services.scoring import calculate_audit_report, ALLOWED_CATEGORIES
 from src.services.semantic_capabilities import extract_semantic_capabilities
 
@@ -31,7 +51,13 @@ Classify semantic risk with UTXO-aware reasoning only.
 UTXO / BCH guardrails (must respect):
 - Every input to a valid transaction is consumed when the spend succeeds; the spending path authorizes that input.
 - If a required authorization or policy token appears on an input, that input is a controlled, signed spend of that UTXO — it is not automatically an "attacker-injected bypass" of the authorizer merely because a token with the right category also appears on a different input in the same transaction.
-- Distinguish (a) a concrete on-chain value-loss or authorization-bypass from (b) design tradeoffs or off-chain/issuer assumptions. Do not label (b) as EXPLOIT without a clear on-chain break.
+- Distinguish (a) a concrete on-chain value-loss or authorization-bypass from (b) design tradeoffs, operational failures, or off-chain/issuer assumptions. Do not label (b) as EXPLOIT.
+
+Operational vs security (critical):
+- Treasury underfunding, insufficient input balance, liquidity shortages, fee/dust handling, and missing change outputs are NOT exploits — they are operational or deployment concerns unless an attacker can extract more value than entitled.
+- Script failure for honest users due to rigid equality is a design tradeoff, not a security vulnerability.
+
+You will receive an INVARIANT MATRIX listing ENFORCED and MISSING intent checks. Do NOT re-report invariants already listed as ENFORCED or MISSING in that matrix.
 
 Use exactly one category:
 - EXPLOIT
@@ -79,21 +105,12 @@ SEMANTIC_CLASS_TO_INTERNAL = {
     "assumption": "minor_design_risk",
     "design_tradeoff": "moderate_logic_risk",
     "exploit": "major_protocol_flaw",
-    # Backward-compatible semantic labels from existing tests/providers.
     "none": "none",
     "minor_design_risk": "minor_design_risk",
     "moderate_logic_risk": "moderate_logic_risk",
     "major_protocol_flaw": "major_protocol_flaw",
     "funds_unspendable": "funds_unspendable",
 }
-
-
-def _downgrade_issue_class(issue_class: IssueClass) -> IssueClass:
-    if issue_class == IssueClass.REAL_ISSUE:
-        return IssueClass.CONTEXTUAL
-    if issue_class == IssueClass.CONTEXTUAL:
-        return IssueClass.NOISE
-    return IssueClass.NOISE
 
 
 def _severity_from_string(raw_severity: str) -> Severity:
@@ -108,54 +125,6 @@ def _severity_from_string(raw_severity: str) -> Severity:
         return Severity.HIGH
 
 
-def is_exploitable(
-    reason: str = "",
-    exploit: str = "",
-    message: str = "",
-) -> bool:
-    """
-    Heuristic for deterministic (lint/toll) text: return False when the finding only
-    describes grief/DoS/abort/self-failure and not concrete theft/drain/direct loss.
-    """
-    t = f"{reason} {exploit} {message}".lower()
-    loss_markers = (
-        "drain",
-        "steal",
-        "theft",
-        "direct fund loss",
-        "lose fund",
-        "take fund",
-        "funds to attacker",
-        "funds 'leaked'",
-        "double spend",
-        "redirect",
-        "wrong recipient",
-        "bypass",
-        "unauthorized",
-    )
-    if any(m in t for m in loss_markers):
-        return True
-    grief_markers = (
-        "grief",
-        "griefing",
-        "denial-of-service",
-        "denial of service",
-        " dos",
-        "bricking",
-        "self-grief",
-        "non-deployable",
-        "script failure",
-        "fail at runtime",
-        "script can fail",
-        "placement-driven",
-        "subset processing",
-        "input-order",
-    )
-    if any(m in t for m in grief_markers):
-        return False
-    return True
-
-
 # Compile-time critical finding — never severity-cap via grief-only heuristic
 _NO_GRIEF_CAP_TOLL_RULES = frozenset(
     {
@@ -164,37 +133,98 @@ _NO_GRIEF_CAP_TOLL_RULES = frozenset(
 )
 
 
-def _build_semantic_user_prompt(code: str, intent: str) -> str:
+def _build_semantic_user_prompt(
+    code: str,
+    intent: str,
+    invariant_matrix_text: str = "",
+) -> str:
+    parts: List[str] = []
     if intent:
-        return (
-            f"DECLARED INTENT:\n{intent}\n\n"
-            f"CONTRACT TO AUDIT:\n{code}\n\n"
-            "Classify the semantic risk category. Output strict JSON only."
-        )
-    return (
-        f"CONTRACT TO AUDIT:\n{code}\n\n"
-        "Identify the intended pattern (Escrow, Swap, Multisig, Vault, etc.) "
-        "and classify the semantic risk category. Output strict JSON only."
+        parts.append(f"DECLARED INTENT:\n{intent}\n")
+    if invariant_matrix_text:
+        parts.append(f"INVARIANT MATRIX:\n{invariant_matrix_text}\n")
+    parts.append(f"CONTRACT TO AUDIT:\n{code}\n")
+    parts.append(
+        "Classify semantic risk for issues NOT already covered by the invariant matrix. "
+        "Output strict JSON only."
+    )
+    return "\n".join(parts)
+
+
+def _emit_issue(
+    *,
+    summary: str,
+    description: str,
+    recommendation: str,
+    rule_id: str,
+    line: int = 0,
+    can_fix: bool = True,
+    source: str = "deterministic",
+    proposed_severity: Optional[Severity] = None,
+    semantic_label: str = "",
+    exploit_severity: ExploitSeverity = ExploitSeverity.NOT_APPLICABLE,
+    provenance: Provenance = Provenance.DETERMINISTIC,
+    confidence_score: Optional[float] = None,
+    kind: Optional[FindingKind] = None,
+    triggerability: Optional[Triggerability] = None,
+    deferred_validation: bool = False,
+) -> AuditIssue:
+    text = f"{summary} {description}"
+    finalized = finalize(
+        kind=kind,
+        proposed_severity=proposed_severity,
+        summary=summary,
+        rule_id=rule_id,
+        semantic_label=semantic_label,
+        text=text,
+        exploit_severity=exploit_severity,
+        provenance=provenance,
+        confidence_score=confidence_score,
+        deferred_validation=deferred_validation,
+        triggerability=triggerability,
+    )
+    return AuditIssue(
+        title=finalized.title,
+        severity=finalized.severity,
+        line=line,
+        description=description,
+        recommendation=recommendation,
+        rule_id=rule_id,
+        can_fix=can_fix,
+        source=source,
+        issue_class=finalized.issue_class,
+        exploit_severity=finalized.exploit_severity,
+        deferred_validation=deferred_validation,
+        kind=finalized.kind,
+        confidence=finalized.confidence,
+        confidence_score=confidence_score,
+        provenance=provenance,
+        triggerability=finalized.triggerability,
     )
 
 
 class AuditAgent:
     """
     Audits any CashScript contract through the full NexOps validation stack:
-    Compile → DSL Lint → Phase 3 (TollGate / AntiPatterns) → Semantic Classification → Scoring
+    Compile → DSL Lint → Phase 3 (TollGate / AntiPatterns) → Intent Invariants
+    → Semantic Classification → Scoring
     """
 
     @staticmethod
     async def audit(
-        code: str, 
-        intent: str = "", 
-        effective_mode: str = "", 
-        api_key: Optional[str] = None, 
+        code: str,
+        intent: str = "",
+        effective_mode: str = "",
+        intent_model: Optional[IntentModel] = None,
+        api_key: Optional[str] = None,
         provider: Optional[str] = None,
-        openrouter_key: Optional[str] = None
+        openrouter_key: Optional[str] = None,
     ) -> AuditReport:
         issues: List[AuditIssue] = []
         semantic_confidence: Optional[float] = None
+
+        invariant_matrix = build_invariant_matrix(code, intent, intent_model)
+        invariant_matrix_text = invariant_matrix.format_for_prompt()
 
         # ── 1. Compile Check ──────────────────────────────────────────────
         compiler = get_compiler_service()
@@ -207,9 +237,6 @@ class AuditAgent:
             err_type = err.get("type", "UnknownError")
             rule_id = COMPILE_ERROR_MAP.get(err_type, "compile_unknown_error")
 
-            # Internal/unknown compiler errors (e.g. Node.js runtime failures like
-            # "sourceTags is not iterable") are environment issues, not security
-            # defects — demote so they don't falsely block otherwise valid contracts.
             INTERNAL_ERR_TYPES = {
                 "UnknownError",
                 "InternalError",
@@ -217,9 +244,7 @@ class AuditAgent:
                 "TimeoutError",
                 "ToolchainError",
             }
-            compile_severity = Severity.HIGH if err_type in INTERNAL_ERR_TYPES else Severity.CRITICAL
-            compile_issue_class = IssueClass.CONTEXTUAL if err_type in INTERNAL_ERR_TYPES else IssueClass.REAL_ISSUE
-            compile_exploit = ExploitSeverity.GRIEFING if err_type in INTERNAL_ERR_TYPES else ExploitSeverity.DIRECT_FUND_LOSS
+            is_internal = err_type in INTERNAL_ERR_TYPES
             if err_type == "ToolchainError":
                 compile_title = "Compiler toolchain error (cashc/Node)"
                 compile_desc = (
@@ -229,18 +254,19 @@ class AuditAgent:
             else:
                 compile_title = f"Compilation Failed: {err_type}"
                 compile_desc = f"The contract failed to compile: {err.get('raw', 'Unknown compiler error')}"
+
             issues.append(
-                AuditIssue(
-                    title=compile_title,
-                    severity=compile_severity,
-                    line=err.get("line") or 0,
+                _emit_issue(
+                    summary=compile_title,
                     description=compile_desc.strip(),
                     recommendation=err.get("hint", "Review syntax and compiler output."),
                     rule_id=rule_id,
-                    can_fix=True,
-                    source="deterministic",
-                    issue_class=compile_issue_class,
-                    exploit_severity=compile_exploit,
+                    line=err.get("line") or 0,
+                    proposed_severity=Severity.HIGH if is_internal else Severity.HIGH,
+                    kind=FindingKind.OPERATIONAL_RISK,
+                    triggerability=Triggerability.NON_ATTACKER,
+                    exploit_severity=ExploitSeverity.NOT_APPLICABLE,
+                    provenance=Provenance.DETERMINISTIC,
                 )
             )
 
@@ -252,26 +278,25 @@ class AuditAgent:
         for violation in lint_result.get("violations", []):
             rule_id = violation.get("rule_id", "unknown_lint")
             lint_severity = _severity_from_string(violation.get("severity") or "HIGH")
-            issue_class = IssueClass.NOISE if rule_id == "LNC-002" else IssueClass.CONTEXTUAL
             is_info = violation.get("severity", "").lower() == "info"
+            message = violation.get("message", "")
             if (
                 lint_severity == Severity.HIGH
-                and not is_exploitable(message=violation.get("message", ""))
+                and not is_exploitable(message=message)
             ):
                 lint_severity = Severity.MEDIUM
-                issue_class = IssueClass.CONTEXTUAL
+
             issues.append(
-                AuditIssue(
-                    title=f"DSL Structure Warning ({rule_id})",
-                    severity=lint_severity,
-                    line=violation.get("line_hint", 0),
-                    description=violation.get("message", "Lint rule violated."),
+                _emit_issue(
+                    summary=f"DSL Structure Warning ({rule_id})",
+                    description=message or "Lint rule violated.",
                     recommendation="Adhere to NexOps CashScript DSL conventions.",
                     rule_id=rule_id,
+                    line=violation.get("line_hint", 0),
                     can_fix=not is_info,
-                    source="deterministic",
-                    issue_class=issue_class,
-                    exploit_severity=ExploitSeverity.NOT_APPLICABLE,
+                    proposed_severity=lint_severity,
+                    kind=FindingKind.OBSERVATION if rule_id == "LNC-002" else None,
+                    provenance=Provenance.DETERMINISTIC,
                 )
             )
 
@@ -284,17 +309,11 @@ class AuditAgent:
             severity = _severity_from_string(
                 violation.severity if hasattr(violation, "severity") else "HIGH"
             )
-            issue_class = (
-                IssueClass.REAL_ISSUE
-                if severity in (Severity.CRITICAL, Severity.HIGH)
-                else IssueClass.CONTEXTUAL
-            )
             exploit_severity = ExploitSeverity.PARTIAL_VIOLATION
             deferred_validation = False
 
             if rule_id == "index_underflow":
                 exploit_severity = ExploitSeverity.GRIEFING
-                issue_class = IssueClass.REAL_ISSUE
             elif rule_id in {"commitment_length_missing", "vulnerable_covenant.cash"}:
                 exploit_severity = ExploitSeverity.DIRECT_FUND_LOSS
             elif rule_id in {"unbounded_numeric_field", "authorization_model_classifier"}:
@@ -303,12 +322,10 @@ class AuditAgent:
                 exploit_severity = ExploitSeverity.DIRECT_FUND_LOSS
 
             if rule_id == "authorization_model_classifier" and severity == Severity.INFO:
-                issue_class = IssueClass.NOISE
                 exploit_severity = ExploitSeverity.NOT_APPLICABLE
 
             if (effective_mode or "").lower() == "parser" and "missing" in rule_id:
                 deferred_validation = True
-                issue_class = IssueClass.CONTEXTUAL
 
             v_reason = violation.reason or ""
             v_exploit = violation.exploit or ""
@@ -318,30 +335,32 @@ class AuditAgent:
                 and not is_exploitable(v_reason, v_exploit)
             ):
                 severity = Severity.MEDIUM
-                issue_class = IssueClass.CONTEXTUAL
                 exploit_severity = ExploitSeverity.GRIEFING
 
+            description = v_exploit or v_reason
             issues.append(
-                AuditIssue(
-                    title=f"Security Violation: {rule_id}",
-                    severity=severity,
-                    line=violation.location.get("line", 0) if violation.location else 0,
-                    description=violation.exploit or violation.reason,
+                _emit_issue(
+                    summary=rule_id.replace("_", " "),
+                    description=description,
                     recommendation=violation.fix_hint
                     or "Review contract architecture and apply secure patterns.",
                     rule_id=rule_id,
-                    can_fix=True,
-                    source="deterministic",
-                    issue_class=issue_class,
+                    line=violation.location.get("line", 0) if violation.location else 0,
+                    proposed_severity=severity,
                     exploit_severity=exploit_severity,
                     deferred_validation=deferred_validation,
+                    provenance=Provenance.DETERMINISTIC,
                 )
             )
 
+        # ── 3.5 Intent invariant verification (deterministic) ─────────────
+        if compile_success and (intent or intent_model):
+            intent_issues = verify_intent_invariants(code, intent, intent_model)
+            issues.extend(intent_issues)
+
         # ── 4. Semantic Classification (LLM) ─────────────────────────────
-        # Skip entirely if compile failed — no point classifying broken code.
         semantic_category = "none"
-        business_logic_score = 5   # conservative default if LLM skipped/fails
+        business_logic_score = 5
 
         if compile_success:
             try:
@@ -349,18 +368,19 @@ class AuditAgent:
                 import json
 
                 audit_provider = LLMFactory.get_provider(
-                    "audit", 
-                    api_key=api_key, 
+                    "audit",
+                    api_key=api_key,
                     provider_type=provider,
-                    openrouter_key=openrouter_key
+                    openrouter_key=openrouter_key,
                 )
-                user_prompt = _build_semantic_user_prompt(code, intent)
+                user_prompt = _build_semantic_user_prompt(
+                    code, intent, invariant_matrix_text
+                )
 
                 raw_response = await audit_provider.complete(
                     user_prompt, system=SEMANTIC_SYSTEM_PROMPT
                 )
 
-                # Extract first valid JSON object from the response.
                 decoder = json.JSONDecoder()
                 start = raw_response.find("{")
                 if start == -1:
@@ -376,20 +396,19 @@ class AuditAgent:
                     mapped_category = "none"
 
                 semantic_category = mapped_category
-                # Only treat as major flaw when the model claims direct fund loss.
                 if semantic_category == "major_protocol_flaw":
-                    semantic_exploit_check = str(semantic_data.get("exploit_severity", "n/a")).strip().lower()
+                    semantic_exploit_check = str(
+                        semantic_data.get("exploit_severity", "n/a")
+                    ).strip().lower()
                     if semantic_exploit_check != "direct_fund_loss":
                         semantic_category = "moderate_logic_risk"
+
                 confidence = semantic_data.get("confidence", 0.0)
                 try:
                     semantic_confidence = max(0.0, min(1.0, float(confidence)))
                 except (TypeError, ValueError):
                     semantic_confidence = 0.0
 
-                # Multi-contract system context: the LLM only sees one contract
-                # and cannot verify sibling contract invariants.  Cap confidence
-                # so high-confidence ratings do not propagate from partial analysis.
                 _MULTI_CONTRACT_SIGNALS = [
                     "startupContract",
                     "fundContract",
@@ -399,17 +418,21 @@ class AuditAgent:
                 if any(signal in code for signal in _MULTI_CONTRACT_SIGNALS):
                     if semantic_confidence is not None:
                         semantic_confidence = min(semantic_confidence, 0.72)
+
                 explanation = semantic_data.get("explanation", "")
-                semantic_exploit = str(semantic_data.get("exploit_severity", "n/a")).strip().lower()
+                semantic_exploit = str(
+                    semantic_data.get("exploit_severity", "n/a")
+                ).strip().lower()
                 exploit_map = {
                     "direct_fund_loss": ExploitSeverity.DIRECT_FUND_LOSS,
                     "partial_violation": ExploitSeverity.PARTIAL_VIOLATION,
                     "griefing": ExploitSeverity.GRIEFING,
                     "n/a": ExploitSeverity.NOT_APPLICABLE,
                 }
-                semantic_exploit_severity = exploit_map.get(semantic_exploit, ExploitSeverity.NOT_APPLICABLE)
+                semantic_exploit_severity = exploit_map.get(
+                    semantic_exploit, ExploitSeverity.NOT_APPLICABLE
+                )
 
-                # Free-form business logic score (0-10)
                 raw_biz = semantic_data.get("business_logic_score", 5)
                 try:
                     business_logic_score = max(0, min(10, int(raw_biz)))
@@ -423,97 +446,47 @@ class AuditAgent:
                     f"{explanation[:80]} | {biz_notes[:80]}"
                 )
 
-                # ── 4.5 Inject Semantic Issue into Report ──────────────────
                 if semantic_category != "none":
-                    title_map = {
-                        "funds_unspendable": "Critical Risk: Funds Permanently Locked",
-                        "major_protocol_flaw": "Critical Risk: Major Protocol Flaw",
-                        "moderate_logic_risk": "Security Risk: Moderate Logic Flaw",
-                        "minor_design_risk": "Design Risk: Suboptimal Architecture",
-                    }
-                    severity_map = {
-                        "funds_unspendable": Severity.CRITICAL,
-                        "major_protocol_flaw": Severity.CRITICAL,
-                        "moderate_logic_risk": Severity.HIGH,
-                        "minor_design_risk": Severity.MEDIUM,
-                    }
-                    semantic_issue_class = IssueClass.REAL_ISSUE
-                    deferred_validation = False
-                    if semantic_label == "design_tradeoff":
-                        semantic_issue_class = IssueClass.CONTEXTUAL
-                        if semantic_exploit_severity == ExploitSeverity.NOT_APPLICABLE:
-                            semantic_exploit_severity = ExploitSeverity.GRIEFING
-                    elif semantic_label == "assumption":
-                        semantic_issue_class = IssueClass.CONTEXTUAL
-                        semantic_exploit_severity = ExploitSeverity.NOT_APPLICABLE
-                        deferred_validation = True
-                    elif semantic_label == "safe":
-                        semantic_issue_class = IssueClass.NOISE
-                        semantic_exploit_severity = ExploitSeverity.NOT_APPLICABLE
-                    elif semantic_label == "exploit" and semantic_exploit_severity == ExploitSeverity.NOT_APPLICABLE:
+                    deferred_validation = semantic_label == "assumption"
+                    if semantic_label == "exploit" and semantic_exploit_severity == ExploitSeverity.NOT_APPLICABLE:
                         semantic_exploit_severity = ExploitSeverity.DIRECT_FUND_LOSS
 
-                    if semantic_confidence is not None and semantic_confidence < 0.5:
-                        semantic_issue_class = _downgrade_issue_class(semantic_issue_class)
-
-                    issue_severity = severity_map.get(semantic_category, Severity.HIGH)
-                    # DESIGN_TRADEOFF / ASSUMPTION: never HIGH/CRITICAL as semantic finding without concrete on-chain loss path.
-                    if semantic_label in ("design_tradeoff", "assumption"):
-                        issue_severity = Severity.MEDIUM
-                        semantic_issue_class = IssueClass.CONTEXTUAL
-                        if semantic_label == "assumption":
-                            semantic_exploit_severity = ExploitSeverity.NOT_APPLICABLE
-                        else:
-                            semantic_exploit_severity = ExploitSeverity.GRIEFING
-
-                    _explanation_lower = (explanation or "").lower()
-                    # Stricter: vague "any input" + "authorization token" multi-input noise.
-                    _UTXO_DOWNGRADE_PHRASES = [
-                        "category-based",
-                        "token presence",
-                        "not signature-bound",
-                        "each input independently signed",
-                        "inject input",
-                        "inject a",
-                        "attacker can include",
-                        "attacker-controlled input",
-                    ]
-                    if "any input" in _explanation_lower and "authorization token" in _explanation_lower:
-                        issue_severity = Severity.INFO
-                        semantic_issue_class = IssueClass.NOISE
-                        semantic_exploit_severity = ExploitSeverity.NOT_APPLICABLE
-                    # ── UTXO guardrail: keyword-based downgrade (less exact than special case above)
-                    elif any(phrase in _explanation_lower for phrase in _UTXO_DOWNGRADE_PHRASES):
-                        if issue_severity in (Severity.HIGH, Severity.CRITICAL):
-                            issue_severity = Severity.MEDIUM
-                        semantic_issue_class = IssueClass.CONTEXTUAL
-                        semantic_exploit_severity = ExploitSeverity.GRIEFING
-                        _semantic_reason = "utxo_guardrail_downgrade"
-                        logger.debug(
-                            f"[Semantic Audit] Downgraded to MEDIUM/contextual "
-                            f"({_semantic_reason}) — UTXO phrase matched in explanation."
-                        )
-
-                    issues.append(
-                        AuditIssue(
-                            title=title_map.get(semantic_category, f"Semantic Risk: {semantic_category}"),
-                            severity=issue_severity,
-                            line=0,
-                            description=explanation or f"Semantic risk category '{semantic_category}' detected.",
-                            recommendation=biz_notes or "Review the contract logic and ensure all spending paths are reachable.",
-                            rule_id=f"semantic_{semantic_category}",
-                            can_fix=False, # Semantic logic deadlocks usually require human redesign
-                            source="semantic",
-                            issue_class=semantic_issue_class,
-                            exploit_severity=semantic_exploit_severity,
-                            deferred_validation=deferred_validation,
-                        )
+                    semantic_issue = _emit_issue(
+                        summary=explanation[:80] if explanation else semantic_category,
+                        description=explanation
+                        or f"Semantic risk category '{semantic_category}' detected.",
+                        recommendation=biz_notes
+                        or "Review the contract logic and ensure all spending paths are reachable.",
+                        rule_id=f"semantic_{semantic_category}",
+                        can_fix=False,
+                        source="semantic",
+                        semantic_label=semantic_label,
+                        exploit_severity=semantic_exploit_severity,
+                        provenance=Provenance.LLM,
+                        confidence_score=semantic_confidence,
+                        deferred_validation=deferred_validation,
+                        proposed_severity=Severity.CRITICAL
+                        if semantic_label == "funds_unspendable"
+                        else None,
+                        kind=FindingKind.VULNERABILITY
+                        if semantic_label == "funds_unspendable"
+                        else None,
                     )
 
+                    # Re-map semantic_category from policy for non-attacker findings only.
+                    if semantic_issue.triggerability == Triggerability.NON_ATTACKER:
+                        policy_category = kind_to_semantic_category(semantic_issue.kind)
+                        if policy_category != "none":
+                            semantic_category = policy_category
+
+                    issues.append(semantic_issue)
+
             except Exception as e:
-                logger.error(f"[Semantic Audit] LLM classification failed: {e} — defaulting to 'none'.")
+                logger.error(
+                    f"[Semantic Audit] LLM classification failed: {e} — defaulting to 'none'."
+                )
                 semantic_category = "none"
-                business_logic_score = 5   # conservative default on failure
+                business_logic_score = 5
                 semantic_confidence = None
         else:
             logger.info("[Semantic Audit] Skipped — compile failed.")

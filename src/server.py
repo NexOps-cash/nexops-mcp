@@ -94,12 +94,13 @@ async def audit_endpoint(req: AuditRequest):
     provider = req.context.get("provider") if req.context else None
     openrouter_key = req.context.get("openrouter_key") if req.context else None
     report = await agent.audit(
-        code=req.code, 
-        intent=req.intent, 
+        code=req.code,
+        intent=req.intent,
         effective_mode=req.effective_mode,
+        intent_model=req.intent_model,
         api_key=api_key,
         provider=provider,
-        openrouter_key=openrouter_key
+        openrouter_key=openrouter_key,
     )
     return report.model_dump()
 

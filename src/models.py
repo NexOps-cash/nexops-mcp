@@ -216,6 +216,36 @@ class ExploitSeverity(str, Enum):
     GRIEFING = "griefing"
     NOT_APPLICABLE = "n/a"
 
+
+class FindingKind(str, Enum):
+    VULNERABILITY = "vulnerability"
+    INVARIANT_GAP = "invariant_gap"
+    OPERATIONAL_RISK = "operational_risk"
+    DEPLOYMENT_REQUIREMENT = "deployment_requirement"
+    DESIGN_TRADE_OFF = "design_trade_off"
+    OBSERVATION = "observation"
+
+
+class ConfidenceLevel(str, Enum):
+    PROVEN = "proven"
+    FIRM = "firm"
+    LIKELY = "likely"
+    SPECULATIVE = "speculative"
+    INFORMATIONAL = "informational"
+
+
+class Provenance(str, Enum):
+    DETERMINISTIC = "deterministic"
+    LLM = "llm"
+    HYBRID = "hybrid"
+
+
+class Triggerability(str, Enum):
+    ATTACKER = "attacker"
+    NON_ATTACKER = "non_attacker"
+    UNKNOWN = "unknown"
+
+
 class AuditIssue(BaseModel):
     title: str
     severity: Severity
@@ -228,6 +258,11 @@ class AuditIssue(BaseModel):
     issue_class: IssueClass = IssueClass.REAL_ISSUE
     exploit_severity: ExploitSeverity = ExploitSeverity.NOT_APPLICABLE
     deferred_validation: bool = False
+    kind: FindingKind = FindingKind.OBSERVATION
+    confidence: ConfidenceLevel = ConfidenceLevel.LIKELY
+    confidence_score: Optional[float] = None
+    provenance: Provenance = Provenance.DETERMINISTIC
+    triggerability: Triggerability = Triggerability.UNKNOWN
 
 class AuditMetadata(BaseModel):
     compile_success: bool
@@ -263,6 +298,7 @@ class AuditRequest(BaseModel):
     code: str
     effective_mode: str = ""
     intent: str = ""  # Optional: declared intent for semantic logic audit
+    intent_model: Optional[IntentModel] = None
     context: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 class RepairRequest(BaseModel):
