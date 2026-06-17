@@ -3,7 +3,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.models import AuditIssue, ExploitSeverity, IssueClass, Severity
+from src.models import (
+    AuditIssue,
+    ConfidenceLevel,
+    ExploitSeverity,
+    FindingKind,
+    IssueClass,
+    Provenance,
+    Severity,
+    Triggerability,
+)
 from src.services.anti_pattern_detectors import AuthorizationModelClassifierDetector, IndexUnderflowDetector
 from src.services.audit_agent import AuditAgent
 from src.services.scoring import calculate_audit_report
@@ -62,6 +71,9 @@ async def test_semantic_exploit_low_confidence_downgrades_issue_class():
     assert report.semantic_category == "major_protocol_flaw"
     assert semantic_issue.issue_class == IssueClass.CONTEXTUAL
     assert semantic_issue.exploit_severity == ExploitSeverity.DIRECT_FUND_LOSS
+    assert semantic_issue.kind == FindingKind.VULNERABILITY
+    assert semantic_issue.provenance == Provenance.LLM
+    assert semantic_issue.confidence == ConfidenceLevel.SPECULATIVE
     assert report.metadata.semantic_confidence == pytest.approx(0.40, abs=1e-9)
 
 
@@ -84,7 +96,8 @@ async def test_semantic_assumption_sets_deferred_validation():
 
     semantic_issue = next(i for i in report.issues if i.rule_id.startswith("semantic_"))
     assert report.semantic_category == "minor_design_risk"
-    assert semantic_issue.severity == Severity.MEDIUM
+    assert semantic_issue.severity == Severity.LOW
+    assert semantic_issue.kind == FindingKind.DEPLOYMENT_REQUIREMENT
     assert semantic_issue.issue_class == IssueClass.CONTEXTUAL
     assert semantic_issue.deferred_validation is True
     assert semantic_issue.exploit_severity == ExploitSeverity.NOT_APPLICABLE
@@ -110,7 +123,8 @@ async def test_semantic_design_tradeoff_caps_severity_and_exploit_severity():
 
     semantic_issue = next(i for i in report.issues if i.rule_id.startswith("semantic_"))
     assert report.semantic_category == "moderate_logic_risk"
-    assert semantic_issue.severity == Severity.MEDIUM
+    assert semantic_issue.severity == Severity.INFO
+    assert semantic_issue.kind == FindingKind.DESIGN_TRADE_OFF
     assert semantic_issue.issue_class == IssueClass.CONTEXTUAL
     assert semantic_issue.exploit_severity == ExploitSeverity.GRIEFING
 
@@ -190,3 +204,78 @@ async def test_compile_unknown_error_is_tagged_deterministic():
     assert compile_issue.source == "deterministic"
     assert compile_issue.severity == Severity.HIGH
     assert compile_issue.issue_class == IssueClass.CONTEXTUAL
+    assert compile_issue.kind == FindingKind.OPERATIONAL_RISK
+
+
+@pytest.mark.anyio
+async def test_semantic_operational_treasury_not_critical():
+    """Treasury underfunding must not be labeled as a security vulnerability."""
+    payload = {
+        "category": "EXPLOIT",
+        "exploit_severity": "direct_fund_loss",
+        "explanation": "Treasury may be underfunded relative to payroll obligations.",
+        "confidence": 0.92,
+        "business_logic_score": 4,
+        "business_logic_notes": "Ensure treasury is pre-funded off-chain.",
+    }
+
+    with patch("src.services.llm.factory.LLMFactory.get_provider", return_value=_mock_provider(payload)), \
+         patch("src.services.audit_agent.get_compiler_service", return_value=MagicMock(compile=_compile_ok)), \
+         patch("src.services.audit_agent.get_dsl_linter", return_value=MagicMock(lint=_lint_ok)), \
+         patch("src.services.audit_agent.validate_audit", side_effect=_toll_gate_ok):
+        report = await AuditAgent.audit("pragma cashscript ^0.13.0; contract T(){}")
+
+    semantic_issue = next(i for i in report.issues if i.rule_id.startswith("semantic_"))
+    assert semantic_issue.triggerability == Triggerability.NON_ATTACKER
+    assert semantic_issue.kind in (
+        FindingKind.OPERATIONAL_RISK,
+        FindingKind.DEPLOYMENT_REQUIREMENT,
+    )
+    assert semantic_issue.severity not in (Severity.CRITICAL, Severity.HIGH)
+    assert "Major Protocol Flaw" not in semantic_issue.title
+    assert "Security Vulnerability" not in semantic_issue.title
+
+
+@pytest.mark.anyio
+async def test_intent_invariant_emitted_during_audit():
+    intent = (
+        "Payroll with fixed recipients and fixed salary amounts for each employee. "
+        "Owner must sign."
+    )
+    code = """
+    pragma cashscript ^0.13.0;
+    contract Payroll(pubkey owner, bytes e1, bytes e2) {
+        function pay(sig s) {
+            require(checkSig(s, owner));
+            require(tx.outputs.length == 2);
+            require(tx.outputs[0].lockingBytecode == e1);
+            require(tx.outputs[1].lockingBytecode == e2);
+            require(
+                tx.outputs[0].value + tx.outputs[1].value ==
+                tx.inputs[this.activeInputIndex].value
+            );
+        }
+    }
+    """
+
+    with patch("src.services.audit_agent.get_compiler_service", return_value=MagicMock(compile=_compile_ok)), \
+         patch("src.services.audit_agent.get_dsl_linter", return_value=MagicMock(lint=_lint_ok)), \
+         patch("src.services.audit_agent.validate_audit", side_effect=_toll_gate_ok), \
+         patch("src.services.llm.factory.LLMFactory.get_provider", return_value=_mock_provider({
+             "category": "SAFE",
+             "exploit_severity": "n/a",
+             "explanation": "No additional issues.",
+             "confidence": 0.9,
+             "business_logic_score": 8,
+             "business_logic_notes": "",
+         })):
+        report = await AuditAgent.audit(code, intent=intent)
+
+    salary_issue = next(
+        (i for i in report.issues if i.rule_id == "intent_fixed_amount_per_recipient"),
+        None,
+    )
+    assert salary_issue is not None
+    assert salary_issue.kind == FindingKind.INVARIANT_GAP
+    assert salary_issue.confidence == ConfidenceLevel.PROVEN
+
