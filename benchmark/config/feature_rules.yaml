@@ -18,8 +18,8 @@ features:
     rule: 'this\.age\s*>=\s*\w+'
     description: "Relative sequence maturity via this.age"
   multisig_2of2:
-    rule: 'checkSig\([^)]+\)\s*&&\s*checkSig\([^)]+\)'
-    description: "Two signature checks present in the same require statement"
+    rule: 'checkSig\([^)]+\)\s*&&\s*checkSig\([^)]+\)|function\s+\w+\s*\([^)]*\)\s*\{[^}]*checkSig[^}]*checkSig'
+    description: "Two signature checks in one require or one spend function body"
   multisig_2of3:
     rule: 'checkMultiSig\s*\(\s*\[[^\]]+,[^\]]+\]\s*,\s*\[[^\]]+,[^\]]+,[^\]]+\]\s*\)'
     description: "2-of-3 threshold multisig"

@@ -763,13 +763,132 @@ def _vault_alias_pool(
     }
 
 
+def _dual_checksig_in_function(code: str) -> bool:
+    """True when any spend function requires two distinct checkSig calls."""
+    for match in re.finditer(
+        r"function\s+\w+\s*\([^)]*\)\s*\{([^}]*)\}",
+        code,
+        re.DOTALL | re.IGNORECASE,
+    ):
+        if len(re.findall(r"checkSig\s*\(", match.group(1), re.IGNORECASE)) >= 2:
+            return True
+    return False
+
+
 def _multisig_detected(detected: set, code: str) -> bool:
     return (
         "multisig" in detected
         or "multisig_2of2" in detected
         or "multisig_2of3" in detected
         or "checkMultiSig" in code
+        or _dual_checksig_in_function(code)
     )
+
+
+def _conditional_spend_time_ok(
+    capabilities: Dict[str, Any], detected: set, code: str
+) -> bool:
+    if capabilities.get("time_validation"):
+        return True
+    return (
+        "timelock_unlock" in detected
+        or "timelock_refund" in detected
+        or "relative_timelock" in detected
+        or "sequence_check" in detected
+        or bool(re.search(r"(?:tx\.time|tx\.age|this\.age)\s*>=", code))
+    )
+
+
+def _conditional_spend_output_amount(
+    capabilities: Dict[str, Any], detected: set, code: str
+) -> bool:
+    if capabilities.get("output_value_validation"):
+        return True
+    if "output_value_validation" in detected or "value_check" in detected:
+        return True
+    return bool(
+        re.search(
+            r"tx\.outputs\[\d+\]\.value\s*==\s*tx\.inputs\[this\.activeInputIndex\]\.value",
+            code,
+        )
+        or re.search(r"tx\.outputs\[\d+\]\.value\s*(?:/|>=|<=|>|<)", code)
+    )
+
+
+def _conditional_spend_path_isolation(code: str, functions: List[Dict]) -> bool:
+    """Separate spend functions with isolated require chains."""
+    if len(functions) < 2:
+        return False
+    for fn in functions:
+        name = fn.get("name", "")
+        body_match = re.search(
+            rf"function\s+{re.escape(name)}\s*\([^)]*\)\s*\{{([^}}]*)\}}",
+            code,
+            re.DOTALL | re.IGNORECASE,
+        )
+        if not body_match:
+            continue
+        body = body_match.group(1)
+        if not re.search(r"checkSig|checkMultiSig", body, re.IGNORECASE):
+            continue
+        if re.search(r"(?:tx\.time|this\.age)\s*>=", body) and re.search(
+            r"checkSig", body, re.IGNORECASE
+        ):
+            # Timelock + sig in one function without path split is weak isolation.
+            if body.count("function") > 0:
+                continue
+            if len(functions) >= 2:
+                continue
+            return False
+    return len(functions) >= 2
+
+
+def _must_fail_path_isolation(code: str) -> bool:
+    """True when a single function mixes timeout and signature without path separation."""
+    for match in re.finditer(
+        r"function\s+\w+\s*\([^)]*\)\s*\{([^}]*)\}",
+        code,
+        re.DOTALL | re.IGNORECASE,
+    ):
+        body = match.group(1)
+        if re.search(r"(?:tx\.time|this\.age)\s*>=", body) and re.search(
+            r"checkSig", body, re.IGNORECASE
+        ):
+            return True
+    return False
+
+
+def _conditional_spend_alias_pool(
+    capabilities: Dict[str, Any],
+    detected: set,
+    code: str,
+    functions: List[Dict],
+) -> Dict[str, bool]:
+    sig_ok = capabilities.get("signature_verification", False) or bool(
+        re.search(r"checkSig|checkMultiSig", code, re.IGNORECASE)
+    )
+    time_ok = _conditional_spend_time_ok(capabilities, detected, code)
+    out_amt = _conditional_spend_output_amount(capabilities, detected, code)
+    return {
+        "valid_signature_check": sig_ok,
+        "signature_verification": sig_ok,
+        "locktime_check": time_ok,
+        "time_validation": time_ok,
+        "relative_timelock": _relative_timelock(detected, code),
+        "sequence_check": _sequence_check(detected, code),
+        "multisig": _multisig_detected(detected, code),
+        "both_signatures_required": _both_signatures_required(detected, code),
+        "multiple_paths": len(functions) >= 2
+        or capabilities.get("multiple_paths", False),
+        "output_amount_check": out_amt,
+        "output_value_validation": out_amt,
+        "path_isolation": _conditional_spend_path_isolation(code, functions),
+        "must_fail_path_isolation": _must_fail_path_isolation(code),
+        "refund_path": _refundable_refund_path(functions, code, detected),
+        "reclaim_path": _refundable_refund_path(functions, code, detected),
+        "claim_path": _refundable_claim_path(functions, code, detected),
+        "conditional_release": _refundable_claim_path(functions, code, detected),
+    }
 
 
 def _cashtoken_alias_pool(
@@ -934,6 +1053,9 @@ def _cashtoken_alias_pool(
         },
         "vault": _vault_alias_pool(capabilities, detected, code, functions),
         "refundable_payment": _refundable_alias_pool(
+            capabilities, detected, code, functions
+        ),
+        "conditional_spend": _conditional_spend_alias_pool(
             capabilities, detected, code, functions
         ),
     }
@@ -1204,7 +1326,7 @@ class BenchmarkEvaluator:
                     "token_ft", "ft_mint", "nft_immutable", "nft_mutable",
                     "nft_minting", "hybrid_token", "split_payment", "escrow",
                     "multisig", "timelock", "hashlock", "vault",
-                    "refundable_payment",
+                    "refundable_payment", "conditional_spend",
                 }:
                     legacy_alias_checks = _cashtoken_alias_pool(
                         pattern_key, legacy_capabilities, detected, code, functions
@@ -1315,6 +1437,12 @@ class BenchmarkEvaluator:
                     and intent_coverage >= 0.70
                     and len(critical_missing) == 0
                 )
+                conditional_spend_semantic_relaxed = (
+                    case.pattern == "conditional_spend"
+                    and compile_pass
+                    and intent_coverage >= 0.70
+                    and len(critical_missing) == 0
+                )
                 vault_semantic_relaxed = (
                     case.pattern == "vault"
                     and compile_pass
@@ -1325,6 +1453,7 @@ class BenchmarkEvaluator:
                     semantic_pass
                     or token_vault_relaxed
                     or timelock_semantic_relaxed
+                    or conditional_spend_semantic_relaxed
                     or vault_semantic_relaxed
                 )
                 final_score = (1.0 if compile_pass else 0.0) * lint_factor * intent_coverage * (1.0 if effective_semantic else 0.5)
@@ -1347,6 +1476,7 @@ class BenchmarkEvaluator:
                         semantic_pass
                         or token_vault_relaxed
                         or timelock_semantic_relaxed
+                        or conditional_spend_semantic_relaxed
                         or vault_semantic_relaxed
                     )
                 )
