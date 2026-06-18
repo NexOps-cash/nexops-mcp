@@ -1,0 +1,200 @@
+{
+  "schema_version": "1.0",
+  "description": "Historical audit replay entries — expected vs actual",
+  "total_count": 33,
+  "replays": [
+    {
+      "id": "replay_payroll_treasury_001",
+      "contract_ref": "tests/audit_classification_matrix/scenarios.py:PAYROLL_FIXED_SALARY",
+      "intent": "Payroll with treasury pre-funding and owner authorization.",
+      "expected_audit": {"findings": [], "kinds": [], "max_severity": "LOW", "deployment_allowed": true},
+      "actual_audit_v2": {"findings": [{"rule_id": "semantic.treasury", "kind": "vulnerability", "severity": "CRITICAL"}], "bug": "Treasury underfunding as exploit"},
+      "actual_audit_v2_1": {"findings": [{"kind": "deployment_requirement", "severity": "LOW"}], "fixed": true},
+      "replay_trigger": "payroll_fp",
+      "fp_pattern": "FP-001",
+      "adversarial_id": "TRUST-1"
+    },
+    {
+      "id": "replay_payroll_missing_salary_001",
+      "contract_ref": "tests/audit_classification_matrix/scenarios.py:PAYROLL_RECIPIENTS_ONLY",
+      "intent": "Fixed salary per employee required.",
+      "expected_audit": {"findings": [{"rule_id": "intent_fixed_amount_per_recipient", "kind": "invariant_gap", "severity": "MEDIUM"}], "kinds": ["invariant_gap"], "max_severity": "MEDIUM"},
+      "actual_audit_v2": {"findings": [{"kind": "vulnerability", "severity": "HIGH"}], "bug": "Semantic severity inflation"},
+      "actual_audit_v2_1": {"findings": [{"rule_id": "intent_fixed_amount_per_recipient", "kind": "invariant_gap", "severity": "MEDIUM"}], "fixed": true},
+      "replay_trigger": "deterministic_intent",
+      "fp_pattern": null,
+      "adversarial_id": null
+    },
+    {
+      "id": "replay_payroll_no_auth_001",
+      "contract_ref": "tests/audit_classification_matrix/scenarios.py:PAYROLL_NO_AUTH",
+      "intent": "Owner must sign all spends.",
+      "expected_audit": {"findings": [{"rule_id": "intent_auth_gate", "kind": "vulnerability", "severity": "HIGH"}], "kinds": ["vulnerability"]},
+      "actual_audit_v2": {"findings": [{"rule_id": "intent_auth_gate", "kind": "invariant_gap", "severity": "MEDIUM"}], "bug": "Auth gap under-severity before refinement"},
+      "actual_audit_v2_1": {"findings": [{"rule_id": "intent_auth_gate", "kind": "vulnerability", "severity": "HIGH"}], "fixed": true},
+      "replay_trigger": "invariant_tier",
+      "fp_pattern": null,
+      "adversarial_id": "AUTH-3"
+    },
+    {
+      "id": "replay_auth_hallucination_001",
+      "contract_ref": "tests/adversarial_semantic_judge/scenarios.py:PAYROLL_FIXED_SALARY",
+      "intent": "Signed payroll with fixed salaries.",
+      "expected_audit": {"findings": [], "kinds": []},
+      "actual_audit_v2": {"findings": [{"kind": "vulnerability"}], "bug": "Hallucinated missing auth"},
+      "actual_audit_v2_1": {"findings": [], "contradicts_fact_ids": ["cap.has_checksig", "inv.auth_gate"], "fixed": true},
+      "replay_trigger": "adversarial_fail",
+      "fp_pattern": "FP-004",
+      "adversarial_id": "AUTH-2"
+    },
+    {
+      "id": "replay_contra_auth_001",
+      "contract_ref": "tests/adversarial_semantic_judge/scenarios.py:PAYROLL_FIXED_SALARY",
+      "expected_audit": {"findings": []},
+      "actual_audit_v2": {"findings": [{"kind": "vulnerability"}], "bug": "Ignored bundle auth facts"},
+      "actual_audit_v2_1": {"findings": [], "fixed": true},
+      "replay_trigger": "bundle_contradiction",
+      "fp_pattern": "FP-004",
+      "adversarial_id": "CONTRA-1"
+    },
+    {
+      "id": "replay_contra_conservation_001",
+      "expected_audit": {"findings": []},
+      "actual_audit_v2": {"findings": [{"kind": "vulnerability"}], "bug": "Claimed missing value conservation"},
+      "actual_audit_v2_1": {"findings": [], "fixed": true},
+      "replay_trigger": "bundle_contradiction",
+      "fp_pattern": "FP-005",
+      "adversarial_id": "CONTRA-2"
+    },
+    {
+      "id": "replay_contra_recipient_001",
+      "expected_audit": {"findings": []},
+      "actual_audit_v2": {"findings": [{"kind": "vulnerability"}], "bug": "Claimed missing recipient binding"},
+      "actual_audit_v2_1": {"findings": [], "fixed": true},
+      "replay_trigger": "bundle_contradiction",
+      "fp_pattern": "FP-005",
+      "adversarial_id": "CONTRA-3"
+    },
+    {
+      "id": "replay_trust_oracle_001",
+      "contract_ref": "tests/adversarial_semantic_judge/scenarios.py:ORACLE_PRICE",
+      "expected_audit": {"findings": [{"kind": "deployment_requirement", "severity": "LOW"}], "kinds": ["deployment_requirement"]},
+      "actual_audit_v2": {"findings": [{"kind": "vulnerability", "severity": "HIGH"}], "bug": "Oracle trust as exploit"},
+      "actual_audit_v2_1": {"findings": [{"kind": "deployment_requirement", "severity": "LOW"}], "fixed": true},
+      "replay_trigger": "trust_confusion",
+      "fp_pattern": "FP-009",
+      "adversarial_id": "TRUST-1"
+    },
+    {
+      "id": "replay_trust_key_rotation_001",
+      "contract_ref": "tests/adversarial_semantic_judge/scenarios.py:OFFCHAIN_KEY_ROTATION",
+      "expected_audit": {"findings": [{"kind": "deployment_requirement"}], "kinds": ["deployment_requirement"]},
+      "actual_audit_v2": {"findings": [{"kind": "vulnerability"}], "bug": "Off-chain rotation as vuln"},
+      "actual_audit_v2_1": {"findings": [{"kind": "deployment_requirement"}], "fixed": true},
+      "replay_trigger": "trust_confusion",
+      "fp_pattern": "FP-007",
+      "adversarial_id": "TRUST-2"
+    },
+    {
+      "id": "replay_trust_lp_001",
+      "expected_audit": {"findings": [{"kind": "deployment_requirement"}], "kinds": ["deployment_requirement"]},
+      "actual_audit_v2": {"findings": [{"kind": "vulnerability"}], "bug": "LP funding as exploit"},
+      "actual_audit_v2_1": {"findings": [{"kind": "deployment_requirement"}], "fixed": true},
+      "replay_trigger": "trust_confusion",
+      "fp_pattern": "FP-008",
+      "adversarial_id": "TRUST-3"
+    },
+    {
+      "id": "replay_ag_dust_001",
+      "contract_ref": "tests/adversarial_semantic_judge/scenarios.py:ONE_SATOSHI_REDIRECT",
+      "expected_audit": {"findings": [{"kind": "vulnerability"}], "kinds": ["vulnerability"]},
+      "actual_audit_v2": {"findings": [{"kind": "operational_risk"}], "bug": "Under-classified dust redirect"},
+      "actual_audit_v2_1": {"findings": [{"kind": "vulnerability"}], "fixed": true},
+      "replay_trigger": "attacker_gain",
+      "fp_pattern": "FP-002",
+      "adversarial_id": "AG-1"
+    },
+    {
+      "id": "replay_ag_lock_001",
+      "contract_ref": "tests/adversarial_semantic_judge/scenarios.py:PERMANENT_LOCK",
+      "expected_audit": {"findings": [], "kinds": []},
+      "actual_audit_v2": {"findings": [{"kind": "design_trade_off"}], "bug": "Wrong kind for lock"},
+      "actual_audit_v2_1": {"findings": [], "fixed": true},
+      "replay_trigger": "attacker_gain",
+      "fp_pattern": "FP-003",
+      "adversarial_id": "AG-2"
+    },
+    {
+      "id": "replay_intent_metadata_001",
+      "expected_audit": {"findings": []},
+      "actual_audit_v2": {"findings": [{"kind": "vulnerability"}], "bug": "UI metadata as security"},
+      "actual_audit_v2_1": {"findings": [], "fixed": true},
+      "replay_trigger": "intent_tier",
+      "fp_pattern": "FP-010",
+      "adversarial_id": "INTENT-3"
+    },
+    {
+      "id": "replay_conf_low_001",
+      "expected_audit": {"findings": []},
+      "actual_audit_v2": {"findings": [{"kind": "vulnerability", "severity": "HIGH"}], "bug": "Low confidence elevated"},
+      "actual_audit_v2_1": {"findings": [], "fixed": true},
+      "replay_trigger": "confidence",
+      "fp_pattern": "FP-018",
+      "adversarial_id": "CONF-2"
+    },
+    {
+      "id": "replay_bch_oracle_secure_001",
+      "contract_ref": "tests/adversarial_semantic_judge/scenarios.py:ORACLE_PRICE",
+      "expected_audit": {"findings": []},
+      "actual_audit_v2": {"findings": [{"kind": "vulnerability"}], "bug": "Secure oracle over-flagged"},
+      "actual_audit_v2_1": {"findings": [], "fixed": true},
+      "replay_trigger": "semantic_regression",
+      "fp_pattern": "FP-006",
+      "adversarial_id": "BCH-3"
+    },
+    {
+      "id": "replay_escrow_external_funding_001",
+      "contract_ref": "classification:escrow_b",
+      "expected_audit": {"findings": [{"kind": "operational_risk", "severity": "LOW"}]},
+      "actual_audit_v2": {"findings": [{"kind": "vulnerability"}], "bug": "External funding as exploit"},
+      "actual_audit_v2_1": {"findings": [{"kind": "operational_risk", "severity": "LOW"}], "fixed": true},
+      "replay_trigger": "deployment_confusion",
+      "fp_pattern": "FP-014",
+      "adversarial_id": null
+    },
+    {
+      "id": "replay_design_equality_001",
+      "contract_ref": "classification:design_exact_equality",
+      "expected_audit": {"findings": [{"kind": "design_trade_off", "severity": "INFO"}]},
+      "actual_audit_v2": {"findings": [{"kind": "vulnerability", "severity": "HIGH"}], "bug": "Design choice as flaw"},
+      "actual_audit_v2_1": {"findings": [{"kind": "design_trade_off", "severity": "INFO"}], "fixed": true},
+      "replay_trigger": "metadata_confusion",
+      "fp_pattern": "FP-011",
+      "adversarial_id": null
+    },
+    {
+      "id": "replay_token_noise_001",
+      "expected_audit": {"findings": []},
+      "actual_audit_v2": {"findings": [{"rule_id": "unrestricted_token_transfer", "severity": "CRITICAL"}], "bug": "Detector noise on secure payroll"},
+      "actual_audit_v2_1": {"findings": [], "fixed": false, "notes": "Detector gating partial fix"},
+      "replay_trigger": "detector_noise",
+      "fp_pattern": "FP-015",
+      "adversarial_id": null
+    },
+    {"id": "replay_ag_burn_001", "contract_ref": "TOKEN_BURN_NO_GAIN", "expected_audit": {"findings": []}, "actual_audit_v2": {"findings": [{"kind": "vulnerability"}], "bug": "Burn as exploit"}, "actual_audit_v2_1": {"findings": [], "fixed": true}, "replay_trigger": "attacker_gain", "fp_pattern": "FP-003", "adversarial_id": "AG-3"},
+    {"id": "replay_auth_dual_path_001", "contract_ref": "PARTIAL_AUTH_BYPASS", "expected_audit": {"findings": [{"kind": "vulnerability"}]}, "actual_audit_v2": {"findings": [], "bug": "Missed public path"}, "actual_audit_v2_1": {"findings": [{"kind": "vulnerability"}], "fixed": true}, "replay_trigger": "adversarial_fail", "fp_pattern": null, "adversarial_id": "AUTH-1"},
+    {"id": "replay_intent_secure_001", "expected_audit": {"findings": []}, "actual_audit_v2": {"findings": [{"kind": "vulnerability"}], "bug": "Benign intent over-flagged"}, "actual_audit_v2_1": {"findings": [], "fixed": true}, "replay_trigger": "intent_tier", "fp_pattern": "FP-010", "adversarial_id": "INTENT-1"},
+    {"id": "replay_intent_scary_001", "expected_audit": {"findings": []}, "actual_audit_v2": {"findings": [{"kind": "vulnerability"}], "bug": "Scary wording inflated"}, "actual_audit_v2_1": {"findings": [], "fixed": true}, "replay_trigger": "intent_tier", "fp_pattern": null, "adversarial_id": "INTENT-2"},
+    {"id": "replay_conf_deployment_001", "expected_audit": {"findings": [{"kind": "deployment_requirement"}]}, "actual_audit_v2": {"findings": [{"kind": "vulnerability"}], "bug": "Deployment as vuln"}, "actual_audit_v2_1": {"findings": [{"kind": "deployment_requirement"}], "fixed": true}, "replay_trigger": "confidence", "fp_pattern": null, "adversarial_id": "CONF-1"},
+    {"id": "replay_conf_real_vuln_001", "expected_audit": {"findings": [{"kind": "vulnerability", "severity": "HIGH"}]}, "actual_audit_v2": {"findings": [{"kind": "vulnerability", "severity": "HIGH"}], "fixed": true}, "actual_audit_v2_1": {"findings": [{"kind": "vulnerability", "severity": "HIGH"}], "fixed": true}, "replay_trigger": "semantic_regression", "fp_pattern": null, "adversarial_id": "CONF-3"},
+    {"id": "replay_bch_category_001", "expected_audit": {"findings": [{"kind": "vulnerability"}]}, "actual_audit_v2": {"findings": [{"kind": "vulnerability"}], "fixed": true}, "actual_audit_v2_1": {"findings": [{"kind": "vulnerability"}], "fixed": true}, "replay_trigger": "detector_alignment", "fp_pattern": null, "adversarial_id": "BCH-1"},
+    {"id": "replay_bch_oracle_partial_001", "expected_audit": {"findings": [{"kind": "invariant_gap"}]}, "actual_audit_v2": {"findings": [{"kind": "vulnerability"}], "bug": "Partial binding as full exploit"}, "actual_audit_v2_1": {"findings": [{"kind": "invariant_gap"}], "fixed": true}, "replay_trigger": "semantic_regression", "fp_pattern": null, "adversarial_id": "BCH-2"},
+    {"id": "replay_mixed_trust_001", "expected_audit": {"findings": [{"kind": "deployment_requirement"}]}, "actual_audit_v2": {"findings": [{"kind": "vulnerability"}], "bug": "Mixed signals"}, "actual_audit_v2_1": {"findings": [{"kind": "deployment_requirement"}], "fixed": true}, "replay_trigger": "trust_confusion", "fp_pattern": "FP-008", "adversarial_id": "MIXED-1"},
+    {"id": "replay_mixed_lp_001", "expected_audit": {"findings": [{"kind": "deployment_requirement"}]}, "actual_audit_v2": {"findings": [{"kind": "vulnerability"}], "bug": "LP as exploit"}, "actual_audit_v2_1": {"findings": [{"kind": "deployment_requirement"}], "fixed": true}, "replay_trigger": "trust_confusion", "fp_pattern": "FP-008", "adversarial_id": "MIXED-2"},
+    {"id": "replay_trigger_dust_001", "contract_ref": "classification:trigger_non_attacker_dust", "expected_audit": {"findings": [{"kind": "operational_risk", "severity": "LOW"}]}, "actual_audit_v2": {"findings": [{"kind": "vulnerability"}], "bug": "Dust as attacker path"}, "actual_audit_v2_1": {"findings": [{"kind": "operational_risk", "severity": "LOW"}], "fixed": true}, "replay_trigger": "triggerability", "fp_pattern": "FP-002", "adversarial_id": null},
+    {"id": "replay_trigger_unknown_001", "contract_ref": "classification:trigger_unknown_capped", "expected_audit": {"findings": [{"kind": "observation", "severity": "LOW"}]}, "actual_audit_v2": {"findings": [{"kind": "vulnerability", "severity": "HIGH"}], "bug": "UNKNOWN triggerability permissive"}, "actual_audit_v2_1": {"findings": [{"kind": "observation", "severity": "LOW"}], "fixed": true}, "replay_trigger": "triggerability", "fp_pattern": "FP-017", "adversarial_id": null},
+    {"id": "replay_multisig_sanity_001", "contract_ref": "classification:multisig_a", "expected_audit": {"findings": [{"rule_id": "intent_sanity_check"}]}, "actual_audit_v2": {"findings": [], "bug": "Missed intent/code mismatch"}, "actual_audit_v2_1": {"findings": [{"rule_id": "intent_sanity_check"}], "fixed": true}, "replay_trigger": "deterministic_intent", "fp_pattern": null, "adversarial_id": null},
+    {"id": "replay_vault_timelock_001", "contract_ref": "classification:vault_a", "expected_audit": {"findings": [{"rule_id": "intent_sanity_check"}]}, "actual_audit_v2": {"findings": [], "bug": "Missed timelock intent gap"}, "actual_audit_v2_1": {"findings": [{"rule_id": "intent_sanity_check"}], "fixed": true}, "replay_trigger": "deterministic_intent", "fp_pattern": null, "adversarial_id": null},
+    {"id": "replay_escrow_refund_001", "contract_ref": "classification:escrow_a", "expected_audit": {"findings": [{"kind": "operational_risk"}]}, "actual_audit_v2": {"findings": [{"kind": "vulnerability"}], "bug": "Refund path as critical"}, "actual_audit_v2_1": {"findings": [{"kind": "operational_risk"}], "fixed": true}, "replay_trigger": "semantic_regression", "fp_pattern": null, "adversarial_id": null}
+  ]
+}

@@ -1,0 +1,1794 @@
+{
+  "schema_version": "1.0",
+  "description": "NexOps adversarial audit scenario registry",
+  "total_count": 200,
+  "categories": {
+    "FAKE_AUTH": "Fake auth",
+    "MISLEAD": "Misleading comments",
+    "PARTIAL": "Partial protection",
+    "HIDDEN_AUTH": "Hidden authorization failure",
+    "TRUST": "Trust-boundary traps",
+    "TOKEN": "Token edge cases",
+    "UTXO": "UTXO edge cases",
+    "CONTRA": "Contradictory signals"
+  },
+  "scenarios": [
+    {
+      "id": "AG-1",
+      "category": "FAKE_AUTH",
+      "description": "Attacker gain dust redirect",
+      "contract_ref": "ONE_SATOSHI_REDIRECT",
+      "status": "implemented",
+      "evaluation_mode": "policy_only"
+    },
+    {
+      "id": "AG-2",
+      "category": "FAKE_AUTH",
+      "description": "Destruction without gain",
+      "contract_ref": "PERMANENT_LOCK",
+      "status": "implemented",
+      "evaluation_mode": "policy_only"
+    },
+    {
+      "id": "AG-3",
+      "category": "FAKE_AUTH",
+      "description": "Token burn no attacker gain",
+      "contract_ref": "TOKEN_BURN_NO_GAIN",
+      "status": "implemented",
+      "evaluation_mode": "policy_only"
+    },
+    {
+      "id": "AUTH-1",
+      "category": "HIDDEN_AUTH",
+      "description": "Dual path partial auth",
+      "contract_ref": "PARTIAL_AUTH_BYPASS",
+      "status": "implemented",
+      "evaluation_mode": "policy_only"
+    },
+    {
+      "id": "AUTH-2",
+      "category": "FAKE_AUTH",
+      "description": "Hallucinated missing auth",
+      "contract_ref": "PAYROLL_FIXED_SALARY",
+      "status": "implemented",
+      "evaluation_mode": "policy_only"
+    },
+    {
+      "id": "AUTH-3",
+      "category": "HIDDEN_AUTH",
+      "description": "Real missing auth",
+      "contract_ref": "PAYROLL_NO_AUTH",
+      "status": "implemented",
+      "evaluation_mode": "policy_only"
+    },
+    {
+      "id": "TRUST-1",
+      "category": "TRUST",
+      "description": "Oracle price trust",
+      "contract_ref": "ORACLE_PRICE",
+      "status": "implemented",
+      "evaluation_mode": "policy_only"
+    },
+    {
+      "id": "TRUST-2",
+      "category": "TRUST",
+      "description": "Off-chain key rotation",
+      "contract_ref": "OFFCHAIN_KEY_ROTATION",
+      "status": "implemented",
+      "evaluation_mode": "policy_only"
+    },
+    {
+      "id": "TRUST-3",
+      "category": "TRUST",
+      "description": "External LP funding",
+      "contract_ref": "MIXED-2",
+      "status": "implemented",
+      "evaluation_mode": "policy_only"
+    },
+    {
+      "id": "INTENT-1",
+      "category": "CONTRA",
+      "description": "Secure code benign intent",
+      "contract_ref": null,
+      "status": "implemented",
+      "evaluation_mode": "policy_only"
+    },
+    {
+      "id": "INTENT-2",
+      "category": "CONTRA",
+      "description": "Scary intent secure code",
+      "contract_ref": null,
+      "status": "implemented",
+      "evaluation_mode": "policy_only"
+    },
+    {
+      "id": "INTENT-3",
+      "category": "MISLEAD",
+      "description": "Business metadata as vuln",
+      "contract_ref": null,
+      "status": "implemented",
+      "evaluation_mode": "policy_only"
+    },
+    {
+      "id": "CONTRA-1",
+      "category": "CONTRA",
+      "description": "Judge vs cap.has_checksig",
+      "contract_ref": null,
+      "status": "implemented",
+      "evaluation_mode": "policy_only"
+    },
+    {
+      "id": "CONTRA-2",
+      "category": "CONTRA",
+      "description": "Judge vs inv.value_conservation",
+      "contract_ref": null,
+      "status": "implemented",
+      "evaluation_mode": "policy_only"
+    },
+    {
+      "id": "CONTRA-3",
+      "category": "CONTRA",
+      "description": "Judge vs inv.recipient_binding",
+      "contract_ref": null,
+      "status": "implemented",
+      "evaluation_mode": "policy_only"
+    },
+    {
+      "id": "CONF-1",
+      "category": "TRUST",
+      "description": "Low confidence deployment note",
+      "contract_ref": null,
+      "status": "implemented",
+      "evaluation_mode": "policy_only"
+    },
+    {
+      "id": "CONF-2",
+      "category": "CONTRA",
+      "description": "Low confidence exploit claim",
+      "contract_ref": null,
+      "status": "implemented",
+      "evaluation_mode": "policy_only"
+    },
+    {
+      "id": "CONF-3",
+      "category": "HIDDEN_AUTH",
+      "description": "High confidence real vuln",
+      "contract_ref": null,
+      "status": "implemented",
+      "evaluation_mode": "policy_only"
+    },
+    {
+      "id": "BCH-1",
+      "category": "TOKEN",
+      "description": "Category drift exploit",
+      "contract_ref": null,
+      "status": "implemented",
+      "evaluation_mode": "policy_only"
+    },
+    {
+      "id": "BCH-2",
+      "category": "TRUST",
+      "description": "Partial oracle binding",
+      "contract_ref": "ORACLE_PRICE",
+      "status": "implemented",
+      "evaluation_mode": "policy_only"
+    },
+    {
+      "id": "BCH-3",
+      "category": "CONTRA",
+      "description": "Secure oracle over-flagged",
+      "contract_ref": "ORACLE_PRICE",
+      "status": "implemented",
+      "evaluation_mode": "policy_only"
+    },
+    {
+      "id": "MIXED-1",
+      "category": "TRUST",
+      "description": "Mixed trust+auth signals",
+      "contract_ref": null,
+      "status": "implemented",
+      "evaluation_mode": "policy_only"
+    },
+    {
+      "id": "MIXED-2",
+      "category": "TRUST",
+      "description": "Treasury LP assumption",
+      "contract_ref": null,
+      "status": "implemented",
+      "evaluation_mode": "policy_only"
+    },
+    {
+      "id": "FAKE_AUTH-05",
+      "category": "FAKE_AUTH",
+      "description": "Fake auth scenario stub 5",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "escrow"
+    },
+    {
+      "id": "FAKE_AUTH-06",
+      "category": "FAKE_AUTH",
+      "description": "Fake auth scenario stub 6",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "vault"
+    },
+    {
+      "id": "FAKE_AUTH-07",
+      "category": "FAKE_AUTH",
+      "description": "Fake auth scenario stub 7",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "multisig"
+    },
+    {
+      "id": "FAKE_AUTH-08",
+      "category": "FAKE_AUTH",
+      "description": "Fake auth scenario stub 8",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "payroll"
+    },
+    {
+      "id": "FAKE_AUTH-09",
+      "category": "FAKE_AUTH",
+      "description": "Fake auth scenario stub 9",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "escrow"
+    },
+    {
+      "id": "FAKE_AUTH-10",
+      "category": "FAKE_AUTH",
+      "description": "Fake auth scenario stub 10",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "vault"
+    },
+    {
+      "id": "FAKE_AUTH-11",
+      "category": "FAKE_AUTH",
+      "description": "Fake auth scenario stub 11",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "multisig"
+    },
+    {
+      "id": "FAKE_AUTH-12",
+      "category": "FAKE_AUTH",
+      "description": "Fake auth scenario stub 12",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "payroll"
+    },
+    {
+      "id": "FAKE_AUTH-13",
+      "category": "FAKE_AUTH",
+      "description": "Fake auth scenario stub 13",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "escrow"
+    },
+    {
+      "id": "FAKE_AUTH-14",
+      "category": "FAKE_AUTH",
+      "description": "Fake auth scenario stub 14",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "vault"
+    },
+    {
+      "id": "FAKE_AUTH-15",
+      "category": "FAKE_AUTH",
+      "description": "Fake auth scenario stub 15",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "multisig"
+    },
+    {
+      "id": "FAKE_AUTH-16",
+      "category": "FAKE_AUTH",
+      "description": "Fake auth scenario stub 16",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "payroll"
+    },
+    {
+      "id": "FAKE_AUTH-17",
+      "category": "FAKE_AUTH",
+      "description": "Fake auth scenario stub 17",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "escrow"
+    },
+    {
+      "id": "FAKE_AUTH-18",
+      "category": "FAKE_AUTH",
+      "description": "Fake auth scenario stub 18",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "vault"
+    },
+    {
+      "id": "FAKE_AUTH-19",
+      "category": "FAKE_AUTH",
+      "description": "Fake auth scenario stub 19",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "multisig"
+    },
+    {
+      "id": "FAKE_AUTH-20",
+      "category": "FAKE_AUTH",
+      "description": "Fake auth scenario stub 20",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "payroll"
+    },
+    {
+      "id": "FAKE_AUTH-21",
+      "category": "FAKE_AUTH",
+      "description": "Fake auth scenario stub 21",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "escrow"
+    },
+    {
+      "id": "FAKE_AUTH-22",
+      "category": "FAKE_AUTH",
+      "description": "Fake auth scenario stub 22",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "vault"
+    },
+    {
+      "id": "FAKE_AUTH-23",
+      "category": "FAKE_AUTH",
+      "description": "Fake auth scenario stub 23",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "multisig"
+    },
+    {
+      "id": "FAKE_AUTH-24",
+      "category": "FAKE_AUTH",
+      "description": "Fake auth scenario stub 24",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "payroll"
+    },
+    {
+      "id": "FAKE_AUTH-25",
+      "category": "FAKE_AUTH",
+      "description": "Fake auth scenario stub 25",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "escrow"
+    },
+    {
+      "id": "MISLEAD-02",
+      "category": "MISLEAD",
+      "description": "Misleading comments scenario stub 2",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "cashtokens_nft"
+    },
+    {
+      "id": "MISLEAD-03",
+      "category": "MISLEAD",
+      "description": "Misleading comments scenario stub 3",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "escrow"
+    },
+    {
+      "id": "MISLEAD-04",
+      "category": "MISLEAD",
+      "description": "Misleading comments scenario stub 4",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "covenant"
+    },
+    {
+      "id": "MISLEAD-05",
+      "category": "MISLEAD",
+      "description": "Misleading comments scenario stub 5",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "cashtokens_nft"
+    },
+    {
+      "id": "MISLEAD-06",
+      "category": "MISLEAD",
+      "description": "Misleading comments scenario stub 6",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "escrow"
+    },
+    {
+      "id": "MISLEAD-07",
+      "category": "MISLEAD",
+      "description": "Misleading comments scenario stub 7",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "covenant"
+    },
+    {
+      "id": "MISLEAD-08",
+      "category": "MISLEAD",
+      "description": "Misleading comments scenario stub 8",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "cashtokens_nft"
+    },
+    {
+      "id": "MISLEAD-09",
+      "category": "MISLEAD",
+      "description": "Misleading comments scenario stub 9",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "escrow"
+    },
+    {
+      "id": "MISLEAD-10",
+      "category": "MISLEAD",
+      "description": "Misleading comments scenario stub 10",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "covenant"
+    },
+    {
+      "id": "MISLEAD-11",
+      "category": "MISLEAD",
+      "description": "Misleading comments scenario stub 11",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "cashtokens_nft"
+    },
+    {
+      "id": "MISLEAD-12",
+      "category": "MISLEAD",
+      "description": "Misleading comments scenario stub 12",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "escrow"
+    },
+    {
+      "id": "MISLEAD-13",
+      "category": "MISLEAD",
+      "description": "Misleading comments scenario stub 13",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "covenant"
+    },
+    {
+      "id": "MISLEAD-14",
+      "category": "MISLEAD",
+      "description": "Misleading comments scenario stub 14",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "cashtokens_nft"
+    },
+    {
+      "id": "MISLEAD-15",
+      "category": "MISLEAD",
+      "description": "Misleading comments scenario stub 15",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "escrow"
+    },
+    {
+      "id": "MISLEAD-16",
+      "category": "MISLEAD",
+      "description": "Misleading comments scenario stub 16",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "covenant"
+    },
+    {
+      "id": "MISLEAD-17",
+      "category": "MISLEAD",
+      "description": "Misleading comments scenario stub 17",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "cashtokens_nft"
+    },
+    {
+      "id": "MISLEAD-18",
+      "category": "MISLEAD",
+      "description": "Misleading comments scenario stub 18",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "escrow"
+    },
+    {
+      "id": "MISLEAD-19",
+      "category": "MISLEAD",
+      "description": "Misleading comments scenario stub 19",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "covenant"
+    },
+    {
+      "id": "MISLEAD-20",
+      "category": "MISLEAD",
+      "description": "Misleading comments scenario stub 20",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "cashtokens_nft"
+    },
+    {
+      "id": "MISLEAD-21",
+      "category": "MISLEAD",
+      "description": "Misleading comments scenario stub 21",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "escrow"
+    },
+    {
+      "id": "MISLEAD-22",
+      "category": "MISLEAD",
+      "description": "Misleading comments scenario stub 22",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "covenant"
+    },
+    {
+      "id": "MISLEAD-23",
+      "category": "MISLEAD",
+      "description": "Misleading comments scenario stub 23",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "cashtokens_nft"
+    },
+    {
+      "id": "MISLEAD-24",
+      "category": "MISLEAD",
+      "description": "Misleading comments scenario stub 24",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "escrow"
+    },
+    {
+      "id": "MISLEAD-25",
+      "category": "MISLEAD",
+      "description": "Misleading comments scenario stub 25",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "covenant"
+    },
+    {
+      "id": "PARTIAL-01",
+      "category": "PARTIAL",
+      "description": "Partial protection scenario stub 1",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "split_payment"
+    },
+    {
+      "id": "PARTIAL-02",
+      "category": "PARTIAL",
+      "description": "Partial protection scenario stub 2",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "multisig"
+    },
+    {
+      "id": "PARTIAL-03",
+      "category": "PARTIAL",
+      "description": "Partial protection scenario stub 3",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "payroll"
+    },
+    {
+      "id": "PARTIAL-04",
+      "category": "PARTIAL",
+      "description": "Partial protection scenario stub 4",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "split_payment"
+    },
+    {
+      "id": "PARTIAL-05",
+      "category": "PARTIAL",
+      "description": "Partial protection scenario stub 5",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "multisig"
+    },
+    {
+      "id": "PARTIAL-06",
+      "category": "PARTIAL",
+      "description": "Partial protection scenario stub 6",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "payroll"
+    },
+    {
+      "id": "PARTIAL-07",
+      "category": "PARTIAL",
+      "description": "Partial protection scenario stub 7",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "split_payment"
+    },
+    {
+      "id": "PARTIAL-08",
+      "category": "PARTIAL",
+      "description": "Partial protection scenario stub 8",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "multisig"
+    },
+    {
+      "id": "PARTIAL-09",
+      "category": "PARTIAL",
+      "description": "Partial protection scenario stub 9",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "payroll"
+    },
+    {
+      "id": "PARTIAL-10",
+      "category": "PARTIAL",
+      "description": "Partial protection scenario stub 10",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "split_payment"
+    },
+    {
+      "id": "PARTIAL-11",
+      "category": "PARTIAL",
+      "description": "Partial protection scenario stub 11",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "multisig"
+    },
+    {
+      "id": "PARTIAL-12",
+      "category": "PARTIAL",
+      "description": "Partial protection scenario stub 12",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "payroll"
+    },
+    {
+      "id": "PARTIAL-13",
+      "category": "PARTIAL",
+      "description": "Partial protection scenario stub 13",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "split_payment"
+    },
+    {
+      "id": "PARTIAL-14",
+      "category": "PARTIAL",
+      "description": "Partial protection scenario stub 14",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "multisig"
+    },
+    {
+      "id": "PARTIAL-15",
+      "category": "PARTIAL",
+      "description": "Partial protection scenario stub 15",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "payroll"
+    },
+    {
+      "id": "PARTIAL-16",
+      "category": "PARTIAL",
+      "description": "Partial protection scenario stub 16",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "split_payment"
+    },
+    {
+      "id": "PARTIAL-17",
+      "category": "PARTIAL",
+      "description": "Partial protection scenario stub 17",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "multisig"
+    },
+    {
+      "id": "PARTIAL-18",
+      "category": "PARTIAL",
+      "description": "Partial protection scenario stub 18",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "payroll"
+    },
+    {
+      "id": "PARTIAL-19",
+      "category": "PARTIAL",
+      "description": "Partial protection scenario stub 19",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "split_payment"
+    },
+    {
+      "id": "PARTIAL-20",
+      "category": "PARTIAL",
+      "description": "Partial protection scenario stub 20",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "multisig"
+    },
+    {
+      "id": "PARTIAL-21",
+      "category": "PARTIAL",
+      "description": "Partial protection scenario stub 21",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "payroll"
+    },
+    {
+      "id": "PARTIAL-22",
+      "category": "PARTIAL",
+      "description": "Partial protection scenario stub 22",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "split_payment"
+    },
+    {
+      "id": "PARTIAL-23",
+      "category": "PARTIAL",
+      "description": "Partial protection scenario stub 23",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "multisig"
+    },
+    {
+      "id": "PARTIAL-24",
+      "category": "PARTIAL",
+      "description": "Partial protection scenario stub 24",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "payroll"
+    },
+    {
+      "id": "PARTIAL-25",
+      "category": "PARTIAL",
+      "description": "Partial protection scenario stub 25",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "split_payment"
+    },
+    {
+      "id": "HIDDEN_AUTH-04",
+      "category": "HIDDEN_AUTH",
+      "description": "Hidden authorization failure scenario stub 4",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "escrow"
+    },
+    {
+      "id": "HIDDEN_AUTH-05",
+      "category": "HIDDEN_AUTH",
+      "description": "Hidden authorization failure scenario stub 5",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "conditional_spend"
+    },
+    {
+      "id": "HIDDEN_AUTH-06",
+      "category": "HIDDEN_AUTH",
+      "description": "Hidden authorization failure scenario stub 6",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "multisig"
+    },
+    {
+      "id": "HIDDEN_AUTH-07",
+      "category": "HIDDEN_AUTH",
+      "description": "Hidden authorization failure scenario stub 7",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "escrow"
+    },
+    {
+      "id": "HIDDEN_AUTH-08",
+      "category": "HIDDEN_AUTH",
+      "description": "Hidden authorization failure scenario stub 8",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "conditional_spend"
+    },
+    {
+      "id": "HIDDEN_AUTH-09",
+      "category": "HIDDEN_AUTH",
+      "description": "Hidden authorization failure scenario stub 9",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "multisig"
+    },
+    {
+      "id": "HIDDEN_AUTH-10",
+      "category": "HIDDEN_AUTH",
+      "description": "Hidden authorization failure scenario stub 10",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "escrow"
+    },
+    {
+      "id": "HIDDEN_AUTH-11",
+      "category": "HIDDEN_AUTH",
+      "description": "Hidden authorization failure scenario stub 11",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "conditional_spend"
+    },
+    {
+      "id": "HIDDEN_AUTH-12",
+      "category": "HIDDEN_AUTH",
+      "description": "Hidden authorization failure scenario stub 12",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "multisig"
+    },
+    {
+      "id": "HIDDEN_AUTH-13",
+      "category": "HIDDEN_AUTH",
+      "description": "Hidden authorization failure scenario stub 13",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "escrow"
+    },
+    {
+      "id": "HIDDEN_AUTH-14",
+      "category": "HIDDEN_AUTH",
+      "description": "Hidden authorization failure scenario stub 14",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "conditional_spend"
+    },
+    {
+      "id": "HIDDEN_AUTH-15",
+      "category": "HIDDEN_AUTH",
+      "description": "Hidden authorization failure scenario stub 15",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "multisig"
+    },
+    {
+      "id": "HIDDEN_AUTH-16",
+      "category": "HIDDEN_AUTH",
+      "description": "Hidden authorization failure scenario stub 16",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "escrow"
+    },
+    {
+      "id": "HIDDEN_AUTH-17",
+      "category": "HIDDEN_AUTH",
+      "description": "Hidden authorization failure scenario stub 17",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "conditional_spend"
+    },
+    {
+      "id": "HIDDEN_AUTH-18",
+      "category": "HIDDEN_AUTH",
+      "description": "Hidden authorization failure scenario stub 18",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "multisig"
+    },
+    {
+      "id": "HIDDEN_AUTH-19",
+      "category": "HIDDEN_AUTH",
+      "description": "Hidden authorization failure scenario stub 19",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "escrow"
+    },
+    {
+      "id": "HIDDEN_AUTH-20",
+      "category": "HIDDEN_AUTH",
+      "description": "Hidden authorization failure scenario stub 20",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "conditional_spend"
+    },
+    {
+      "id": "HIDDEN_AUTH-21",
+      "category": "HIDDEN_AUTH",
+      "description": "Hidden authorization failure scenario stub 21",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "multisig"
+    },
+    {
+      "id": "HIDDEN_AUTH-22",
+      "category": "HIDDEN_AUTH",
+      "description": "Hidden authorization failure scenario stub 22",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "escrow"
+    },
+    {
+      "id": "HIDDEN_AUTH-23",
+      "category": "HIDDEN_AUTH",
+      "description": "Hidden authorization failure scenario stub 23",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "conditional_spend"
+    },
+    {
+      "id": "HIDDEN_AUTH-24",
+      "category": "HIDDEN_AUTH",
+      "description": "Hidden authorization failure scenario stub 24",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "multisig"
+    },
+    {
+      "id": "HIDDEN_AUTH-25",
+      "category": "HIDDEN_AUTH",
+      "description": "Hidden authorization failure scenario stub 25",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "escrow"
+    },
+    {
+      "id": "TRUST-08",
+      "category": "TRUST",
+      "description": "Trust-boundary traps scenario stub 8",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "dao_treasury"
+    },
+    {
+      "id": "TRUST-09",
+      "category": "TRUST",
+      "description": "Trust-boundary traps scenario stub 9",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "oracle"
+    },
+    {
+      "id": "TRUST-10",
+      "category": "TRUST",
+      "description": "Trust-boundary traps scenario stub 10",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "payroll"
+    },
+    {
+      "id": "TRUST-11",
+      "category": "TRUST",
+      "description": "Trust-boundary traps scenario stub 11",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "dao_treasury"
+    },
+    {
+      "id": "TRUST-12",
+      "category": "TRUST",
+      "description": "Trust-boundary traps scenario stub 12",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "oracle"
+    },
+    {
+      "id": "TRUST-13",
+      "category": "TRUST",
+      "description": "Trust-boundary traps scenario stub 13",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "payroll"
+    },
+    {
+      "id": "TRUST-14",
+      "category": "TRUST",
+      "description": "Trust-boundary traps scenario stub 14",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "dao_treasury"
+    },
+    {
+      "id": "TRUST-15",
+      "category": "TRUST",
+      "description": "Trust-boundary traps scenario stub 15",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "oracle"
+    },
+    {
+      "id": "TRUST-16",
+      "category": "TRUST",
+      "description": "Trust-boundary traps scenario stub 16",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "payroll"
+    },
+    {
+      "id": "TRUST-17",
+      "category": "TRUST",
+      "description": "Trust-boundary traps scenario stub 17",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "dao_treasury"
+    },
+    {
+      "id": "TRUST-18",
+      "category": "TRUST",
+      "description": "Trust-boundary traps scenario stub 18",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "oracle"
+    },
+    {
+      "id": "TRUST-19",
+      "category": "TRUST",
+      "description": "Trust-boundary traps scenario stub 19",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "payroll"
+    },
+    {
+      "id": "TRUST-20",
+      "category": "TRUST",
+      "description": "Trust-boundary traps scenario stub 20",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "dao_treasury"
+    },
+    {
+      "id": "TRUST-21",
+      "category": "TRUST",
+      "description": "Trust-boundary traps scenario stub 21",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "oracle"
+    },
+    {
+      "id": "TRUST-22",
+      "category": "TRUST",
+      "description": "Trust-boundary traps scenario stub 22",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "payroll"
+    },
+    {
+      "id": "TRUST-23",
+      "category": "TRUST",
+      "description": "Trust-boundary traps scenario stub 23",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "dao_treasury"
+    },
+    {
+      "id": "TRUST-24",
+      "category": "TRUST",
+      "description": "Trust-boundary traps scenario stub 24",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "oracle"
+    },
+    {
+      "id": "TRUST-25",
+      "category": "TRUST",
+      "description": "Trust-boundary traps scenario stub 25",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "payroll"
+    },
+    {
+      "id": "TOKEN-02",
+      "category": "TOKEN",
+      "description": "Token edge cases scenario stub 2",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "hybrid"
+    },
+    {
+      "id": "TOKEN-03",
+      "category": "TOKEN",
+      "description": "Token edge cases scenario stub 3",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "cashtokens_ft"
+    },
+    {
+      "id": "TOKEN-04",
+      "category": "TOKEN",
+      "description": "Token edge cases scenario stub 4",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "cashtokens_nft"
+    },
+    {
+      "id": "TOKEN-05",
+      "category": "TOKEN",
+      "description": "Token edge cases scenario stub 5",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "hybrid"
+    },
+    {
+      "id": "TOKEN-06",
+      "category": "TOKEN",
+      "description": "Token edge cases scenario stub 6",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "cashtokens_ft"
+    },
+    {
+      "id": "TOKEN-07",
+      "category": "TOKEN",
+      "description": "Token edge cases scenario stub 7",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "cashtokens_nft"
+    },
+    {
+      "id": "TOKEN-08",
+      "category": "TOKEN",
+      "description": "Token edge cases scenario stub 8",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "hybrid"
+    },
+    {
+      "id": "TOKEN-09",
+      "category": "TOKEN",
+      "description": "Token edge cases scenario stub 9",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "cashtokens_ft"
+    },
+    {
+      "id": "TOKEN-10",
+      "category": "TOKEN",
+      "description": "Token edge cases scenario stub 10",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "cashtokens_nft"
+    },
+    {
+      "id": "TOKEN-11",
+      "category": "TOKEN",
+      "description": "Token edge cases scenario stub 11",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "hybrid"
+    },
+    {
+      "id": "TOKEN-12",
+      "category": "TOKEN",
+      "description": "Token edge cases scenario stub 12",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "cashtokens_ft"
+    },
+    {
+      "id": "TOKEN-13",
+      "category": "TOKEN",
+      "description": "Token edge cases scenario stub 13",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "cashtokens_nft"
+    },
+    {
+      "id": "TOKEN-14",
+      "category": "TOKEN",
+      "description": "Token edge cases scenario stub 14",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "hybrid"
+    },
+    {
+      "id": "TOKEN-15",
+      "category": "TOKEN",
+      "description": "Token edge cases scenario stub 15",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "cashtokens_ft"
+    },
+    {
+      "id": "TOKEN-16",
+      "category": "TOKEN",
+      "description": "Token edge cases scenario stub 16",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "cashtokens_nft"
+    },
+    {
+      "id": "TOKEN-17",
+      "category": "TOKEN",
+      "description": "Token edge cases scenario stub 17",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "hybrid"
+    },
+    {
+      "id": "TOKEN-18",
+      "category": "TOKEN",
+      "description": "Token edge cases scenario stub 18",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "cashtokens_ft"
+    },
+    {
+      "id": "TOKEN-19",
+      "category": "TOKEN",
+      "description": "Token edge cases scenario stub 19",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "cashtokens_nft"
+    },
+    {
+      "id": "TOKEN-20",
+      "category": "TOKEN",
+      "description": "Token edge cases scenario stub 20",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "hybrid"
+    },
+    {
+      "id": "TOKEN-21",
+      "category": "TOKEN",
+      "description": "Token edge cases scenario stub 21",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "cashtokens_ft"
+    },
+    {
+      "id": "TOKEN-22",
+      "category": "TOKEN",
+      "description": "Token edge cases scenario stub 22",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "cashtokens_nft"
+    },
+    {
+      "id": "TOKEN-23",
+      "category": "TOKEN",
+      "description": "Token edge cases scenario stub 23",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "hybrid"
+    },
+    {
+      "id": "TOKEN-24",
+      "category": "TOKEN",
+      "description": "Token edge cases scenario stub 24",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "cashtokens_ft"
+    },
+    {
+      "id": "TOKEN-25",
+      "category": "TOKEN",
+      "description": "Token edge cases scenario stub 25",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "cashtokens_nft"
+    },
+    {
+      "id": "UTXO-01",
+      "category": "UTXO",
+      "description": "UTXO edge cases scenario stub 1",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "covenant"
+    },
+    {
+      "id": "UTXO-02",
+      "category": "UTXO",
+      "description": "UTXO edge cases scenario stub 2",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "split_payment"
+    },
+    {
+      "id": "UTXO-03",
+      "category": "UTXO",
+      "description": "UTXO edge cases scenario stub 3",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "vault"
+    },
+    {
+      "id": "UTXO-04",
+      "category": "UTXO",
+      "description": "UTXO edge cases scenario stub 4",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "covenant"
+    },
+    {
+      "id": "UTXO-05",
+      "category": "UTXO",
+      "description": "UTXO edge cases scenario stub 5",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "split_payment"
+    },
+    {
+      "id": "UTXO-06",
+      "category": "UTXO",
+      "description": "UTXO edge cases scenario stub 6",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "vault"
+    },
+    {
+      "id": "UTXO-07",
+      "category": "UTXO",
+      "description": "UTXO edge cases scenario stub 7",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "covenant"
+    },
+    {
+      "id": "UTXO-08",
+      "category": "UTXO",
+      "description": "UTXO edge cases scenario stub 8",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "split_payment"
+    },
+    {
+      "id": "UTXO-09",
+      "category": "UTXO",
+      "description": "UTXO edge cases scenario stub 9",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "vault"
+    },
+    {
+      "id": "UTXO-10",
+      "category": "UTXO",
+      "description": "UTXO edge cases scenario stub 10",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "covenant"
+    },
+    {
+      "id": "UTXO-11",
+      "category": "UTXO",
+      "description": "UTXO edge cases scenario stub 11",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "split_payment"
+    },
+    {
+      "id": "UTXO-12",
+      "category": "UTXO",
+      "description": "UTXO edge cases scenario stub 12",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "vault"
+    },
+    {
+      "id": "UTXO-13",
+      "category": "UTXO",
+      "description": "UTXO edge cases scenario stub 13",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "covenant"
+    },
+    {
+      "id": "UTXO-14",
+      "category": "UTXO",
+      "description": "UTXO edge cases scenario stub 14",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "split_payment"
+    },
+    {
+      "id": "UTXO-15",
+      "category": "UTXO",
+      "description": "UTXO edge cases scenario stub 15",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "vault"
+    },
+    {
+      "id": "UTXO-16",
+      "category": "UTXO",
+      "description": "UTXO edge cases scenario stub 16",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "covenant"
+    },
+    {
+      "id": "UTXO-17",
+      "category": "UTXO",
+      "description": "UTXO edge cases scenario stub 17",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "split_payment"
+    },
+    {
+      "id": "UTXO-18",
+      "category": "UTXO",
+      "description": "UTXO edge cases scenario stub 18",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "vault"
+    },
+    {
+      "id": "UTXO-19",
+      "category": "UTXO",
+      "description": "UTXO edge cases scenario stub 19",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "covenant"
+    },
+    {
+      "id": "UTXO-20",
+      "category": "UTXO",
+      "description": "UTXO edge cases scenario stub 20",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "split_payment"
+    },
+    {
+      "id": "UTXO-21",
+      "category": "UTXO",
+      "description": "UTXO edge cases scenario stub 21",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "vault"
+    },
+    {
+      "id": "UTXO-22",
+      "category": "UTXO",
+      "description": "UTXO edge cases scenario stub 22",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "covenant"
+    },
+    {
+      "id": "UTXO-23",
+      "category": "UTXO",
+      "description": "UTXO edge cases scenario stub 23",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "split_payment"
+    },
+    {
+      "id": "UTXO-24",
+      "category": "UTXO",
+      "description": "UTXO edge cases scenario stub 24",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "vault"
+    },
+    {
+      "id": "UTXO-25",
+      "category": "UTXO",
+      "description": "UTXO edge cases scenario stub 25",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "full_audit",
+      "family_hint": "covenant"
+    },
+    {
+      "id": "CONTRA-08",
+      "category": "CONTRA",
+      "description": "Contradictory signals scenario stub 8",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "oracle"
+    },
+    {
+      "id": "CONTRA-09",
+      "category": "CONTRA",
+      "description": "Contradictory signals scenario stub 9",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "payroll"
+    },
+    {
+      "id": "CONTRA-10",
+      "category": "CONTRA",
+      "description": "Contradictory signals scenario stub 10",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "escrow"
+    },
+    {
+      "id": "CONTRA-11",
+      "category": "CONTRA",
+      "description": "Contradictory signals scenario stub 11",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "oracle"
+    },
+    {
+      "id": "CONTRA-12",
+      "category": "CONTRA",
+      "description": "Contradictory signals scenario stub 12",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "payroll"
+    },
+    {
+      "id": "CONTRA-13",
+      "category": "CONTRA",
+      "description": "Contradictory signals scenario stub 13",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "escrow"
+    },
+    {
+      "id": "CONTRA-14",
+      "category": "CONTRA",
+      "description": "Contradictory signals scenario stub 14",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "oracle"
+    },
+    {
+      "id": "CONTRA-15",
+      "category": "CONTRA",
+      "description": "Contradictory signals scenario stub 15",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "payroll"
+    },
+    {
+      "id": "CONTRA-16",
+      "category": "CONTRA",
+      "description": "Contradictory signals scenario stub 16",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "escrow"
+    },
+    {
+      "id": "CONTRA-17",
+      "category": "CONTRA",
+      "description": "Contradictory signals scenario stub 17",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "oracle"
+    },
+    {
+      "id": "CONTRA-18",
+      "category": "CONTRA",
+      "description": "Contradictory signals scenario stub 18",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "payroll"
+    },
+    {
+      "id": "CONTRA-19",
+      "category": "CONTRA",
+      "description": "Contradictory signals scenario stub 19",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "escrow"
+    },
+    {
+      "id": "CONTRA-20",
+      "category": "CONTRA",
+      "description": "Contradictory signals scenario stub 20",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "oracle"
+    },
+    {
+      "id": "CONTRA-21",
+      "category": "CONTRA",
+      "description": "Contradictory signals scenario stub 21",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "payroll"
+    },
+    {
+      "id": "CONTRA-22",
+      "category": "CONTRA",
+      "description": "Contradictory signals scenario stub 22",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "escrow"
+    },
+    {
+      "id": "CONTRA-23",
+      "category": "CONTRA",
+      "description": "Contradictory signals scenario stub 23",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "oracle"
+    },
+    {
+      "id": "CONTRA-24",
+      "category": "CONTRA",
+      "description": "Contradictory signals scenario stub 24",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "payroll"
+    },
+    {
+      "id": "CONTRA-25",
+      "category": "CONTRA",
+      "description": "Contradictory signals scenario stub 25",
+      "contract_ref": "TBD",
+      "status": "planned",
+      "evaluation_mode": "policy_only",
+      "family_hint": "escrow"
+    }
+  ]
+}
