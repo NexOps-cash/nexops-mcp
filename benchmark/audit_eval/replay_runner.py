@@ -88,7 +88,7 @@ def run_replay(entry: Dict[str, Any]) -> ReplayResult:
             actual = {
                 "passed": scenario_result.passed,
                 "primary_rule_id": scenario_result.primary_rule_id,
-                "kind": scenario_result.kind,
+                "kind": scenario_result.actual_kind,
             }
             return ReplayResult(
                 replay_id=rid,
