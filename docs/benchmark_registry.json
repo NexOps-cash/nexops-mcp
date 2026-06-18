@@ -1,0 +1,3324 @@
+{
+  "schema_version": "1.0",
+  "description": "NexOps audit benchmark registry \u2014 research sprint Workstream A",
+  "total_count": 180,
+  "benchmarks": [
+    {
+      "id": "bench_payroll_001",
+      "family": "payroll",
+      "intent": "Payroll distributing fixed salary amounts to predetermined employee lockingBytecode destinations. Owner must authorize each payout.",
+      "contract_ref": "tests/audit_classification_matrix/scenarios.py:PAYROLL_FIXED_SALARY",
+      "mutation": "remove_per_output_salary_require",
+      "expected_findings": [
+        "intent_fixed_amount_per_recipient"
+      ],
+      "expected_severity": [
+        "MEDIUM"
+      ],
+      "expected_invariants": [
+        "fixed_amount_per_recipient:MISSING",
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [
+        "invariant_gap"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "handcrafted",
+      "tier": 1
+    },
+    {
+      "id": "bench_payroll_002",
+      "family": "payroll",
+      "intent": "Payroll with recipient binding only; amounts may vary.",
+      "contract_ref": "tests/audit_classification_matrix/scenarios.py:PAYROLL_RECIPIENTS_ONLY",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "recipient_binding:ENFORCED",
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "handcrafted",
+      "tier": 1
+    },
+    {
+      "id": "bench_payroll_003",
+      "family": "payroll",
+      "intent": "Payroll with treasury pre-funding requirement.",
+      "contract_ref": "tests/audit_classification_matrix/scenarios.py:PAYROLL_FIXED_SALARY",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "treasury_prefunding:NOT_ENFORCEABLE_ONCHAIN"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "policy_only",
+      "source": "handcrafted",
+      "tier": 2,
+      "notes": "Treasury prefunding must NOT become VULNERABILITY; see FP playbook"
+    },
+    {
+      "id": "bench_payroll_004",
+      "family": "payroll",
+      "intent": "Payroll without owner signature on distribute path.",
+      "contract_ref": "tests/audit_classification_matrix/scenarios.py:PAYROLL_NO_AUTH",
+      "mutation": "remove_checksig",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [
+        "auth_gate:MISSING"
+      ],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "handcrafted",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_001",
+      "family": "esc",
+      "intent": "Migrated from benchmark/suites/escrow.yaml case esc_001.",
+      "contract_ref": "benchmark/suites/escrow.yaml:esc_001",
+      "migration_source_id": "esc_001",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_002",
+      "family": "esc",
+      "intent": "Migrated from benchmark/suites/escrow.yaml case esc_001.",
+      "contract_ref": "benchmark/suites/escrow.yaml:esc_001",
+      "migration_source_id": "esc_001",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_003",
+      "family": "esc",
+      "intent": "Migrated from benchmark/suites/escrow.yaml case esc_002.",
+      "contract_ref": "benchmark/suites/escrow.yaml:esc_002",
+      "migration_source_id": "esc_002",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_004",
+      "family": "esc",
+      "intent": "Migrated from benchmark/suites/escrow.yaml case esc_002.",
+      "contract_ref": "benchmark/suites/escrow.yaml:esc_002",
+      "migration_source_id": "esc_002",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_005",
+      "family": "esc",
+      "intent": "Migrated from benchmark/suites/escrow.yaml case esc_003.",
+      "contract_ref": "benchmark/suites/escrow.yaml:esc_003",
+      "migration_source_id": "esc_003",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_006",
+      "family": "esc",
+      "intent": "Migrated from benchmark/suites/escrow.yaml case esc_003.",
+      "contract_ref": "benchmark/suites/escrow.yaml:esc_003",
+      "migration_source_id": "esc_003",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_007",
+      "family": "esc",
+      "intent": "Migrated from benchmark/suites/escrow.yaml case esc_004.",
+      "contract_ref": "benchmark/suites/escrow.yaml:esc_004",
+      "migration_source_id": "esc_004",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_008",
+      "family": "esc",
+      "intent": "Migrated from benchmark/suites/escrow.yaml case esc_004.",
+      "contract_ref": "benchmark/suites/escrow.yaml:esc_004",
+      "migration_source_id": "esc_004",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_009",
+      "family": "esc",
+      "intent": "Migrated from benchmark/suites/escrow.yaml case esc_005.",
+      "contract_ref": "benchmark/suites/escrow.yaml:esc_005",
+      "migration_source_id": "esc_005",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_010",
+      "family": "esc",
+      "intent": "Migrated from benchmark/suites/escrow.yaml case esc_005.",
+      "contract_ref": "benchmark/suites/escrow.yaml:esc_005",
+      "migration_source_id": "esc_005",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_011",
+      "family": "esc",
+      "intent": "Migrated from benchmark/suites/escrow.yaml case esc_006.",
+      "contract_ref": "benchmark/suites/escrow.yaml:esc_006",
+      "migration_source_id": "esc_006",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_012",
+      "family": "esc",
+      "intent": "Migrated from benchmark/suites/escrow.yaml case esc_006.",
+      "contract_ref": "benchmark/suites/escrow.yaml:esc_006",
+      "migration_source_id": "esc_006",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_013",
+      "family": "escrow",
+      "intent": "Migrated from benchmark/suites/escrow_suite.yaml case escrow_basic_multisig.",
+      "contract_ref": "benchmark/suites/escrow_suite.yaml:escrow_basic_multisig",
+      "migration_source_id": "escrow_basic_multisig",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_014",
+      "family": "escrow",
+      "intent": "Migrated from benchmark/suites/escrow_suite.yaml case escrow_basic_multisig.",
+      "contract_ref": "benchmark/suites/escrow_suite.yaml:escrow_basic_multisig",
+      "migration_source_id": "escrow_basic_multisig",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_015",
+      "family": "escrow",
+      "intent": "Migrated from benchmark/suites/escrow_suite.yaml case escrow_timeout_refund.",
+      "contract_ref": "benchmark/suites/escrow_suite.yaml:escrow_timeout_refund",
+      "migration_source_id": "escrow_timeout_refund",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_016",
+      "family": "escrow",
+      "intent": "Migrated from benchmark/suites/escrow_suite.yaml case escrow_timeout_refund.",
+      "contract_ref": "benchmark/suites/escrow_suite.yaml:escrow_timeout_refund",
+      "migration_source_id": "escrow_timeout_refund",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_017",
+      "family": "escrow",
+      "intent": "Migrated from benchmark/suites/escrow_suite.yaml case escrow_2of3_release.",
+      "contract_ref": "benchmark/suites/escrow_suite.yaml:escrow_2of3_release",
+      "migration_source_id": "escrow_2of3_release",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_018",
+      "family": "escrow",
+      "intent": "Migrated from benchmark/suites/escrow_suite.yaml case escrow_2of3_release.",
+      "contract_ref": "benchmark/suites/escrow_suite.yaml:escrow_2of3_release",
+      "migration_source_id": "escrow_2of3_release",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_019",
+      "family": "sp",
+      "intent": "Migrated from benchmark/suites/split_payment.yaml case sp_001.",
+      "contract_ref": "benchmark/suites/split_payment.yaml:sp_001",
+      "migration_source_id": "sp_001",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_020",
+      "family": "sp",
+      "intent": "Migrated from benchmark/suites/split_payment.yaml case sp_001.",
+      "contract_ref": "benchmark/suites/split_payment.yaml:sp_001",
+      "migration_source_id": "sp_001",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_021",
+      "family": "sp",
+      "intent": "Migrated from benchmark/suites/split_payment.yaml case sp_002.",
+      "contract_ref": "benchmark/suites/split_payment.yaml:sp_002",
+      "migration_source_id": "sp_002",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_022",
+      "family": "sp",
+      "intent": "Migrated from benchmark/suites/split_payment.yaml case sp_002.",
+      "contract_ref": "benchmark/suites/split_payment.yaml:sp_002",
+      "migration_source_id": "sp_002",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_023",
+      "family": "sp",
+      "intent": "Migrated from benchmark/suites/split_payment.yaml case split_002_payroll.",
+      "contract_ref": "benchmark/suites/split_payment.yaml:split_002_payroll",
+      "migration_source_id": "split_002_payroll",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_024",
+      "family": "sp",
+      "intent": "Migrated from benchmark/suites/split_payment.yaml case split_002_payroll.",
+      "contract_ref": "benchmark/suites/split_payment.yaml:split_002_payroll",
+      "migration_source_id": "split_002_payroll",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_025",
+      "family": "sp",
+      "intent": "Migrated from benchmark/suites/split_payment.yaml case split_003_multisig_distribution.",
+      "contract_ref": "benchmark/suites/split_payment.yaml:split_003_multisig_distribution",
+      "migration_source_id": "split_003_multisig_distribution",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_026",
+      "family": "sp",
+      "intent": "Migrated from benchmark/suites/split_payment.yaml case split_003_multisig_distribution.",
+      "contract_ref": "benchmark/suites/split_payment.yaml:split_003_multisig_distribution",
+      "migration_source_id": "split_003_multisig_distribution",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_027",
+      "family": "v",
+      "intent": "Migrated from benchmark/suites/vaults.yaml case v_001.",
+      "contract_ref": "benchmark/suites/vaults.yaml:v_001",
+      "migration_source_id": "v_001",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_028",
+      "family": "v",
+      "intent": "Migrated from benchmark/suites/vaults.yaml case v_001.",
+      "contract_ref": "benchmark/suites/vaults.yaml:v_001",
+      "migration_source_id": "v_001",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_029",
+      "family": "v",
+      "intent": "Migrated from benchmark/suites/vaults.yaml case v_002.",
+      "contract_ref": "benchmark/suites/vaults.yaml:v_002",
+      "migration_source_id": "v_002",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_030",
+      "family": "v",
+      "intent": "Migrated from benchmark/suites/vaults.yaml case v_002.",
+      "contract_ref": "benchmark/suites/vaults.yaml:v_002",
+      "migration_source_id": "v_002",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_031",
+      "family": "v",
+      "intent": "Migrated from benchmark/suites/vaults.yaml case v_003.",
+      "contract_ref": "benchmark/suites/vaults.yaml:v_003",
+      "migration_source_id": "v_003",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_032",
+      "family": "v",
+      "intent": "Migrated from benchmark/suites/vaults.yaml case v_003.",
+      "contract_ref": "benchmark/suites/vaults.yaml:v_003",
+      "migration_source_id": "v_003",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_033",
+      "family": "v",
+      "intent": "Migrated from benchmark/suites/vaults.yaml case v_004.",
+      "contract_ref": "benchmark/suites/vaults.yaml:v_004",
+      "migration_source_id": "v_004",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_034",
+      "family": "v",
+      "intent": "Migrated from benchmark/suites/vaults.yaml case v_004.",
+      "contract_ref": "benchmark/suites/vaults.yaml:v_004",
+      "migration_source_id": "v_004",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_035",
+      "family": "v",
+      "intent": "Migrated from benchmark/suites/vaults.yaml case v_005.",
+      "contract_ref": "benchmark/suites/vaults.yaml:v_005",
+      "migration_source_id": "v_005",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_036",
+      "family": "v",
+      "intent": "Migrated from benchmark/suites/vaults.yaml case v_005.",
+      "contract_ref": "benchmark/suites/vaults.yaml:v_005",
+      "migration_source_id": "v_005",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_037",
+      "family": "v",
+      "intent": "Migrated from benchmark/suites/vaults.yaml case v_006.",
+      "contract_ref": "benchmark/suites/vaults.yaml:v_006",
+      "migration_source_id": "v_006",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_038",
+      "family": "v",
+      "intent": "Migrated from benchmark/suites/vaults.yaml case v_006.",
+      "contract_ref": "benchmark/suites/vaults.yaml:v_006",
+      "migration_source_id": "v_006",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_039",
+      "family": "tl",
+      "intent": "Migrated from benchmark/suites/timelock.yaml case tl_001.",
+      "contract_ref": "benchmark/suites/timelock.yaml:tl_001",
+      "migration_source_id": "tl_001",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_040",
+      "family": "tl",
+      "intent": "Migrated from benchmark/suites/timelock.yaml case tl_001.",
+      "contract_ref": "benchmark/suites/timelock.yaml:tl_001",
+      "migration_source_id": "tl_001",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_041",
+      "family": "tl",
+      "intent": "Migrated from benchmark/suites/timelock.yaml case tl_002.",
+      "contract_ref": "benchmark/suites/timelock.yaml:tl_002",
+      "migration_source_id": "tl_002",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_042",
+      "family": "tl",
+      "intent": "Migrated from benchmark/suites/timelock.yaml case tl_002.",
+      "contract_ref": "benchmark/suites/timelock.yaml:tl_002",
+      "migration_source_id": "tl_002",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_043",
+      "family": "tl",
+      "intent": "Migrated from benchmark/suites/timelock.yaml case tl_003.",
+      "contract_ref": "benchmark/suites/timelock.yaml:tl_003",
+      "migration_source_id": "tl_003",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_044",
+      "family": "tl",
+      "intent": "Migrated from benchmark/suites/timelock.yaml case tl_003.",
+      "contract_ref": "benchmark/suites/timelock.yaml:tl_003",
+      "migration_source_id": "tl_003",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_045",
+      "family": "tl",
+      "intent": "Migrated from benchmark/suites/timelock.yaml case tl_004.",
+      "contract_ref": "benchmark/suites/timelock.yaml:tl_004",
+      "migration_source_id": "tl_004",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_046",
+      "family": "tl",
+      "intent": "Migrated from benchmark/suites/timelock.yaml case tl_004.",
+      "contract_ref": "benchmark/suites/timelock.yaml:tl_004",
+      "migration_source_id": "tl_004",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_047",
+      "family": "tl",
+      "intent": "Migrated from benchmark/suites/timelock.yaml case tl_005.",
+      "contract_ref": "benchmark/suites/timelock.yaml:tl_005",
+      "migration_source_id": "tl_005",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_048",
+      "family": "tl",
+      "intent": "Migrated from benchmark/suites/timelock.yaml case tl_005.",
+      "contract_ref": "benchmark/suites/timelock.yaml:tl_005",
+      "migration_source_id": "tl_005",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_049",
+      "family": "hl",
+      "intent": "Migrated from benchmark/suites/hashlock.yaml case hl_001.",
+      "contract_ref": "benchmark/suites/hashlock.yaml:hl_001",
+      "migration_source_id": "hl_001",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_050",
+      "family": "hl",
+      "intent": "Migrated from benchmark/suites/hashlock.yaml case hl_001.",
+      "contract_ref": "benchmark/suites/hashlock.yaml:hl_001",
+      "migration_source_id": "hl_001",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_051",
+      "family": "hl",
+      "intent": "Migrated from benchmark/suites/hashlock.yaml case hl_002.",
+      "contract_ref": "benchmark/suites/hashlock.yaml:hl_002",
+      "migration_source_id": "hl_002",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_052",
+      "family": "hl",
+      "intent": "Migrated from benchmark/suites/hashlock.yaml case hl_002.",
+      "contract_ref": "benchmark/suites/hashlock.yaml:hl_002",
+      "migration_source_id": "hl_002",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_053",
+      "family": "hl",
+      "intent": "Migrated from benchmark/suites/hashlock.yaml case hl_003.",
+      "contract_ref": "benchmark/suites/hashlock.yaml:hl_003",
+      "migration_source_id": "hl_003",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_054",
+      "family": "hl",
+      "intent": "Migrated from benchmark/suites/hashlock.yaml case hl_003.",
+      "contract_ref": "benchmark/suites/hashlock.yaml:hl_003",
+      "migration_source_id": "hl_003",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_055",
+      "family": "hl",
+      "intent": "Migrated from benchmark/suites/hashlock.yaml case hl_004.",
+      "contract_ref": "benchmark/suites/hashlock.yaml:hl_004",
+      "migration_source_id": "hl_004",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_056",
+      "family": "hl",
+      "intent": "Migrated from benchmark/suites/hashlock.yaml case hl_004.",
+      "contract_ref": "benchmark/suites/hashlock.yaml:hl_004",
+      "migration_source_id": "hl_004",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_057",
+      "family": "hl",
+      "intent": "Migrated from benchmark/suites/hashlock.yaml case hl_005.",
+      "contract_ref": "benchmark/suites/hashlock.yaml:hl_005",
+      "migration_source_id": "hl_005",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_058",
+      "family": "hl",
+      "intent": "Migrated from benchmark/suites/hashlock.yaml case hl_005.",
+      "contract_ref": "benchmark/suites/hashlock.yaml:hl_005",
+      "migration_source_id": "hl_005",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_059",
+      "family": "ms",
+      "intent": "Migrated from benchmark/suites/multisig.yaml case ms_001.",
+      "contract_ref": "benchmark/suites/multisig.yaml:ms_001",
+      "migration_source_id": "ms_001",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_060",
+      "family": "ms",
+      "intent": "Migrated from benchmark/suites/multisig.yaml case ms_001.",
+      "contract_ref": "benchmark/suites/multisig.yaml:ms_001",
+      "migration_source_id": "ms_001",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_061",
+      "family": "ms",
+      "intent": "Migrated from benchmark/suites/multisig.yaml case ms_002.",
+      "contract_ref": "benchmark/suites/multisig.yaml:ms_002",
+      "migration_source_id": "ms_002",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_062",
+      "family": "ms",
+      "intent": "Migrated from benchmark/suites/multisig.yaml case ms_002.",
+      "contract_ref": "benchmark/suites/multisig.yaml:ms_002",
+      "migration_source_id": "ms_002",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_063",
+      "family": "ms",
+      "intent": "Migrated from benchmark/suites/multisig.yaml case ms_003.",
+      "contract_ref": "benchmark/suites/multisig.yaml:ms_003",
+      "migration_source_id": "ms_003",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_064",
+      "family": "ms",
+      "intent": "Migrated from benchmark/suites/multisig.yaml case ms_003.",
+      "contract_ref": "benchmark/suites/multisig.yaml:ms_003",
+      "migration_source_id": "ms_003",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_065",
+      "family": "ms",
+      "intent": "Migrated from benchmark/suites/multisig.yaml case ms_004.",
+      "contract_ref": "benchmark/suites/multisig.yaml:ms_004",
+      "migration_source_id": "ms_004",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_066",
+      "family": "ms",
+      "intent": "Migrated from benchmark/suites/multisig.yaml case ms_004.",
+      "contract_ref": "benchmark/suites/multisig.yaml:ms_004",
+      "migration_source_id": "ms_004",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_067",
+      "family": "ms",
+      "intent": "Migrated from benchmark/suites/multisig.yaml case ms_005.",
+      "contract_ref": "benchmark/suites/multisig.yaml:ms_005",
+      "migration_source_id": "ms_005",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_068",
+      "family": "ms",
+      "intent": "Migrated from benchmark/suites/multisig.yaml case ms_005.",
+      "contract_ref": "benchmark/suites/multisig.yaml:ms_005",
+      "migration_source_id": "ms_005",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_069",
+      "family": "ms",
+      "intent": "Migrated from benchmark/suites/multisig.yaml case ms_006.",
+      "contract_ref": "benchmark/suites/multisig.yaml:ms_006",
+      "migration_source_id": "ms_006",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_070",
+      "family": "ms",
+      "intent": "Migrated from benchmark/suites/multisig.yaml case ms_006.",
+      "contract_ref": "benchmark/suites/multisig.yaml:ms_006",
+      "migration_source_id": "ms_006",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_071",
+      "family": "rp",
+      "intent": "Migrated from benchmark/suites/refundable_payment.yaml case rp_001.",
+      "contract_ref": "benchmark/suites/refundable_payment.yaml:rp_001",
+      "migration_source_id": "rp_001",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_072",
+      "family": "rp",
+      "intent": "Migrated from benchmark/suites/refundable_payment.yaml case rp_001.",
+      "contract_ref": "benchmark/suites/refundable_payment.yaml:rp_001",
+      "migration_source_id": "rp_001",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_073",
+      "family": "rp",
+      "intent": "Migrated from benchmark/suites/refundable_payment.yaml case rp_002.",
+      "contract_ref": "benchmark/suites/refundable_payment.yaml:rp_002",
+      "migration_source_id": "rp_002",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_074",
+      "family": "rp",
+      "intent": "Migrated from benchmark/suites/refundable_payment.yaml case rp_002.",
+      "contract_ref": "benchmark/suites/refundable_payment.yaml:rp_002",
+      "migration_source_id": "rp_002",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_075",
+      "family": "rp",
+      "intent": "Migrated from benchmark/suites/refundable_payment.yaml case rp_003.",
+      "contract_ref": "benchmark/suites/refundable_payment.yaml:rp_003",
+      "migration_source_id": "rp_003",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_076",
+      "family": "rp",
+      "intent": "Migrated from benchmark/suites/refundable_payment.yaml case rp_003.",
+      "contract_ref": "benchmark/suites/refundable_payment.yaml:rp_003",
+      "migration_source_id": "rp_003",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_077",
+      "family": "rp",
+      "intent": "Migrated from benchmark/suites/refundable_payment.yaml case rp_004.",
+      "contract_ref": "benchmark/suites/refundable_payment.yaml:rp_004",
+      "migration_source_id": "rp_004",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_078",
+      "family": "rp",
+      "intent": "Migrated from benchmark/suites/refundable_payment.yaml case rp_004.",
+      "contract_ref": "benchmark/suites/refundable_payment.yaml:rp_004",
+      "migration_source_id": "rp_004",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_079",
+      "family": "rp",
+      "intent": "Migrated from benchmark/suites/refundable_payment.yaml case rp_005.",
+      "contract_ref": "benchmark/suites/refundable_payment.yaml:rp_005",
+      "migration_source_id": "rp_005",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_080",
+      "family": "rp",
+      "intent": "Migrated from benchmark/suites/refundable_payment.yaml case rp_005.",
+      "contract_ref": "benchmark/suites/refundable_payment.yaml:rp_005",
+      "migration_source_id": "rp_005",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_081",
+      "family": "rp",
+      "intent": "Migrated from benchmark/suites/refundable_payment.yaml case rp_006.",
+      "contract_ref": "benchmark/suites/refundable_payment.yaml:rp_006",
+      "migration_source_id": "rp_006",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_082",
+      "family": "rp",
+      "intent": "Migrated from benchmark/suites/refundable_payment.yaml case rp_006.",
+      "contract_ref": "benchmark/suites/refundable_payment.yaml:rp_006",
+      "migration_source_id": "rp_006",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_083",
+      "family": "cs",
+      "intent": "Migrated from benchmark/suites/conditional_spend.yaml case cs_001.",
+      "contract_ref": "benchmark/suites/conditional_spend.yaml:cs_001",
+      "migration_source_id": "cs_001",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_084",
+      "family": "cs",
+      "intent": "Migrated from benchmark/suites/conditional_spend.yaml case cs_001.",
+      "contract_ref": "benchmark/suites/conditional_spend.yaml:cs_001",
+      "migration_source_id": "cs_001",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_085",
+      "family": "cs",
+      "intent": "Migrated from benchmark/suites/conditional_spend.yaml case cs_002.",
+      "contract_ref": "benchmark/suites/conditional_spend.yaml:cs_002",
+      "migration_source_id": "cs_002",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_086",
+      "family": "cs",
+      "intent": "Migrated from benchmark/suites/conditional_spend.yaml case cs_002.",
+      "contract_ref": "benchmark/suites/conditional_spend.yaml:cs_002",
+      "migration_source_id": "cs_002",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_087",
+      "family": "cs",
+      "intent": "Migrated from benchmark/suites/conditional_spend.yaml case cs_003.",
+      "contract_ref": "benchmark/suites/conditional_spend.yaml:cs_003",
+      "migration_source_id": "cs_003",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_088",
+      "family": "cs",
+      "intent": "Migrated from benchmark/suites/conditional_spend.yaml case cs_003.",
+      "contract_ref": "benchmark/suites/conditional_spend.yaml:cs_003",
+      "migration_source_id": "cs_003",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_089",
+      "family": "cs",
+      "intent": "Migrated from benchmark/suites/conditional_spend.yaml case cs_004.",
+      "contract_ref": "benchmark/suites/conditional_spend.yaml:cs_004",
+      "migration_source_id": "cs_004",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_090",
+      "family": "cs",
+      "intent": "Migrated from benchmark/suites/conditional_spend.yaml case cs_004.",
+      "contract_ref": "benchmark/suites/conditional_spend.yaml:cs_004",
+      "migration_source_id": "cs_004",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_091",
+      "family": "cs",
+      "intent": "Migrated from benchmark/suites/conditional_spend.yaml case cs_005.",
+      "contract_ref": "benchmark/suites/conditional_spend.yaml:cs_005",
+      "migration_source_id": "cs_005",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_092",
+      "family": "cs",
+      "intent": "Migrated from benchmark/suites/conditional_spend.yaml case cs_005.",
+      "contract_ref": "benchmark/suites/conditional_spend.yaml:cs_005",
+      "migration_source_id": "cs_005",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_093",
+      "family": "cov",
+      "intent": "Migrated from benchmark/suites/covenant.yaml case cov_001.",
+      "contract_ref": "benchmark/suites/covenant.yaml:cov_001",
+      "migration_source_id": "cov_001",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_094",
+      "family": "cov",
+      "intent": "Migrated from benchmark/suites/covenant.yaml case cov_001.",
+      "contract_ref": "benchmark/suites/covenant.yaml:cov_001",
+      "migration_source_id": "cov_001",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_095",
+      "family": "cov",
+      "intent": "Migrated from benchmark/suites/covenant.yaml case cov_002.",
+      "contract_ref": "benchmark/suites/covenant.yaml:cov_002",
+      "migration_source_id": "cov_002",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_096",
+      "family": "cov",
+      "intent": "Migrated from benchmark/suites/covenant.yaml case cov_002.",
+      "contract_ref": "benchmark/suites/covenant.yaml:cov_002",
+      "migration_source_id": "cov_002",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_097",
+      "family": "cov",
+      "intent": "Migrated from benchmark/suites/covenant.yaml case cov_003.",
+      "contract_ref": "benchmark/suites/covenant.yaml:cov_003",
+      "migration_source_id": "cov_003",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_098",
+      "family": "cov",
+      "intent": "Migrated from benchmark/suites/covenant.yaml case cov_003.",
+      "contract_ref": "benchmark/suites/covenant.yaml:cov_003",
+      "migration_source_id": "cov_003",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_099",
+      "family": "dec",
+      "intent": "Migrated from benchmark/suites/decay.yaml case dec_001.",
+      "contract_ref": "benchmark/suites/decay.yaml:dec_001",
+      "migration_source_id": "dec_001",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_100",
+      "family": "dec",
+      "intent": "Migrated from benchmark/suites/decay.yaml case dec_001.",
+      "contract_ref": "benchmark/suites/decay.yaml:dec_001",
+      "migration_source_id": "dec_001",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_101",
+      "family": "dec",
+      "intent": "Migrated from benchmark/suites/decay.yaml case dec_002.",
+      "contract_ref": "benchmark/suites/decay.yaml:dec_002",
+      "migration_source_id": "dec_002",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_102",
+      "family": "dec",
+      "intent": "Migrated from benchmark/suites/decay.yaml case dec_002.",
+      "contract_ref": "benchmark/suites/decay.yaml:dec_002",
+      "migration_source_id": "dec_002",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_103",
+      "family": "dec",
+      "intent": "Migrated from benchmark/suites/decay.yaml case dec_003.",
+      "contract_ref": "benchmark/suites/decay.yaml:dec_003",
+      "migration_source_id": "dec_003",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_104",
+      "family": "dec",
+      "intent": "Migrated from benchmark/suites/decay.yaml case dec_003.",
+      "contract_ref": "benchmark/suites/decay.yaml:dec_003",
+      "migration_source_id": "dec_003",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_105",
+      "family": "vesting",
+      "intent": "Migrated from benchmark/suites/vesting.yaml case vesting_cliff_basic.",
+      "contract_ref": "benchmark/suites/vesting.yaml:vesting_cliff_basic",
+      "migration_source_id": "vesting_cliff_basic",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_106",
+      "family": "vesting",
+      "intent": "Migrated from benchmark/suites/vesting.yaml case vesting_cliff_basic.",
+      "contract_ref": "benchmark/suites/vesting.yaml:vesting_cliff_basic",
+      "migration_source_id": "vesting_cliff_basic",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_107",
+      "family": "vesting",
+      "intent": "Migrated from benchmark/suites/vesting.yaml case vesting_linear.",
+      "contract_ref": "benchmark/suites/vesting.yaml:vesting_linear",
+      "migration_source_id": "vesting_linear",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_108",
+      "family": "vesting",
+      "intent": "Migrated from benchmark/suites/vesting.yaml case vesting_linear.",
+      "contract_ref": "benchmark/suites/vesting.yaml:vesting_linear",
+      "migration_source_id": "vesting_linear",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_109",
+      "family": "vesting",
+      "intent": "Migrated from benchmark/suites/vesting.yaml case vesting_with_owner_cancel.",
+      "contract_ref": "benchmark/suites/vesting.yaml:vesting_with_owner_cancel",
+      "migration_source_id": "vesting_with_owner_cancel",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_110",
+      "family": "vesting",
+      "intent": "Migrated from benchmark/suites/vesting.yaml case vesting_with_owner_cancel.",
+      "contract_ref": "benchmark/suites/vesting.yaml:vesting_with_owner_cancel",
+      "migration_source_id": "vesting_with_owner_cancel",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_111",
+      "family": "cashtokens",
+      "intent": "Migrated from benchmark/suites/cashtokens_ft.yaml case ct_ft_family_001.",
+      "contract_ref": "benchmark/suites/cashtokens_ft.yaml:ct_ft_family_001",
+      "migration_source_id": "ct_ft_family_001",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_112",
+      "family": "cashtokens",
+      "intent": "Migrated from benchmark/suites/cashtokens_ft.yaml case ct_ft_family_001.",
+      "contract_ref": "benchmark/suites/cashtokens_ft.yaml:ct_ft_family_001",
+      "migration_source_id": "ct_ft_family_001",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_113",
+      "family": "cashtokens",
+      "intent": "Migrated from benchmark/suites/cashtokens_ft.yaml case ct_ft_family_002.",
+      "contract_ref": "benchmark/suites/cashtokens_ft.yaml:ct_ft_family_002",
+      "migration_source_id": "ct_ft_family_002",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_114",
+      "family": "cashtokens",
+      "intent": "Migrated from benchmark/suites/cashtokens_ft.yaml case ct_ft_family_002.",
+      "contract_ref": "benchmark/suites/cashtokens_ft.yaml:ct_ft_family_002",
+      "migration_source_id": "ct_ft_family_002",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_115",
+      "family": "cashtokens",
+      "intent": "Migrated from benchmark/suites/cashtokens_ft.yaml case ct_ft_family_003.",
+      "contract_ref": "benchmark/suites/cashtokens_ft.yaml:ct_ft_family_003",
+      "migration_source_id": "ct_ft_family_003",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_116",
+      "family": "cashtokens",
+      "intent": "Migrated from benchmark/suites/cashtokens_ft.yaml case ct_ft_family_003.",
+      "contract_ref": "benchmark/suites/cashtokens_ft.yaml:ct_ft_family_003",
+      "migration_source_id": "ct_ft_family_003",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_117",
+      "family": "cashtokens",
+      "intent": "Migrated from benchmark/suites/cashtokens_nft_immutable.yaml case ct_imm_family_001.",
+      "contract_ref": "benchmark/suites/cashtokens_nft_immutable.yaml:ct_imm_family_001",
+      "migration_source_id": "ct_imm_family_001",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_118",
+      "family": "cashtokens",
+      "intent": "Migrated from benchmark/suites/cashtokens_nft_immutable.yaml case ct_imm_family_001.",
+      "contract_ref": "benchmark/suites/cashtokens_nft_immutable.yaml:ct_imm_family_001",
+      "migration_source_id": "ct_imm_family_001",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_119",
+      "family": "cashtokens",
+      "intent": "Migrated from benchmark/suites/cashtokens_nft_immutable.yaml case ct_imm_family_002.",
+      "contract_ref": "benchmark/suites/cashtokens_nft_immutable.yaml:ct_imm_family_002",
+      "migration_source_id": "ct_imm_family_002",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_120",
+      "family": "cashtokens",
+      "intent": "Migrated from benchmark/suites/cashtokens_nft_immutable.yaml case ct_imm_family_002.",
+      "contract_ref": "benchmark/suites/cashtokens_nft_immutable.yaml:ct_imm_family_002",
+      "migration_source_id": "ct_imm_family_002",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_121",
+      "family": "cashtokens",
+      "intent": "Migrated from benchmark/suites/cashtokens_nft_mutable.yaml case ct_mut_family_001.",
+      "contract_ref": "benchmark/suites/cashtokens_nft_mutable.yaml:ct_mut_family_001",
+      "migration_source_id": "ct_mut_family_001",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_122",
+      "family": "cashtokens",
+      "intent": "Migrated from benchmark/suites/cashtokens_nft_mutable.yaml case ct_mut_family_001.",
+      "contract_ref": "benchmark/suites/cashtokens_nft_mutable.yaml:ct_mut_family_001",
+      "migration_source_id": "ct_mut_family_001",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_123",
+      "family": "cashtokens",
+      "intent": "Migrated from benchmark/suites/cashtokens_nft_mutable.yaml case ct_mut_family_002.",
+      "contract_ref": "benchmark/suites/cashtokens_nft_mutable.yaml:ct_mut_family_002",
+      "migration_source_id": "ct_mut_family_002",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_124",
+      "family": "cashtokens",
+      "intent": "Migrated from benchmark/suites/cashtokens_nft_mutable.yaml case ct_mut_family_002.",
+      "contract_ref": "benchmark/suites/cashtokens_nft_mutable.yaml:ct_mut_family_002",
+      "migration_source_id": "ct_mut_family_002",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_125",
+      "family": "cashtokens",
+      "intent": "Migrated from benchmark/suites/cashtokens_nft_minting.yaml case ct_mint_family_001.",
+      "contract_ref": "benchmark/suites/cashtokens_nft_minting.yaml:ct_mint_family_001",
+      "migration_source_id": "ct_mint_family_001",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_126",
+      "family": "cashtokens",
+      "intent": "Migrated from benchmark/suites/cashtokens_nft_minting.yaml case ct_mint_family_001.",
+      "contract_ref": "benchmark/suites/cashtokens_nft_minting.yaml:ct_mint_family_001",
+      "migration_source_id": "ct_mint_family_001",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_127",
+      "family": "cashtokens",
+      "intent": "Migrated from benchmark/suites/cashtokens_nft_minting.yaml case ct_mint_family_002.",
+      "contract_ref": "benchmark/suites/cashtokens_nft_minting.yaml:ct_mint_family_002",
+      "migration_source_id": "ct_mint_family_002",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_128",
+      "family": "cashtokens",
+      "intent": "Migrated from benchmark/suites/cashtokens_nft_minting.yaml case ct_mint_family_002.",
+      "contract_ref": "benchmark/suites/cashtokens_nft_minting.yaml:ct_mint_family_002",
+      "migration_source_id": "ct_mint_family_002",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_129",
+      "family": "cashtokens",
+      "intent": "Migrated from benchmark/suites/cashtokens_hybrid.yaml case ct_hybrid_family_001.",
+      "contract_ref": "benchmark/suites/cashtokens_hybrid.yaml:ct_hybrid_family_001",
+      "migration_source_id": "ct_hybrid_family_001",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_130",
+      "family": "cashtokens",
+      "intent": "Migrated from benchmark/suites/cashtokens_hybrid.yaml case ct_hybrid_family_001.",
+      "contract_ref": "benchmark/suites/cashtokens_hybrid.yaml:ct_hybrid_family_001",
+      "migration_source_id": "ct_hybrid_family_001",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_131",
+      "family": "cashtokens",
+      "intent": "Migrated from benchmark/suites/cashtokens_hybrid.yaml case ct_hybrid_family_002.",
+      "contract_ref": "benchmark/suites/cashtokens_hybrid.yaml:ct_hybrid_family_002",
+      "migration_source_id": "ct_hybrid_family_002",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_132",
+      "family": "cashtokens",
+      "intent": "Migrated from benchmark/suites/cashtokens_hybrid.yaml case ct_hybrid_family_002.",
+      "contract_ref": "benchmark/suites/cashtokens_hybrid.yaml:ct_hybrid_family_002",
+      "migration_source_id": "ct_hybrid_family_002",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_133",
+      "family": "cashtokens",
+      "intent": "Migrated from benchmark/suites/cashtokens_invalid_negative.yaml case ct_invalid_auth_leak_001.",
+      "contract_ref": "benchmark/suites/cashtokens_invalid_negative.yaml:ct_invalid_auth_leak_001",
+      "migration_source_id": "ct_invalid_auth_leak_001",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_134",
+      "family": "cashtokens",
+      "intent": "Migrated from benchmark/suites/cashtokens_invalid_negative.yaml case ct_invalid_auth_leak_001.",
+      "contract_ref": "benchmark/suites/cashtokens_invalid_negative.yaml:ct_invalid_auth_leak_001",
+      "migration_source_id": "ct_invalid_auth_leak_001",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_135",
+      "family": "cashtokens",
+      "intent": "Migrated from benchmark/suites/cashtokens_invalid_negative.yaml case ct_invalid_cat_drift_001.",
+      "contract_ref": "benchmark/suites/cashtokens_invalid_negative.yaml:ct_invalid_cat_drift_001",
+      "migration_source_id": "ct_invalid_cat_drift_001",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_136",
+      "family": "cashtokens",
+      "intent": "Migrated from benchmark/suites/cashtokens_invalid_negative.yaml case ct_invalid_cat_drift_001.",
+      "contract_ref": "benchmark/suites/cashtokens_invalid_negative.yaml:ct_invalid_cat_drift_001",
+      "migration_source_id": "ct_invalid_cat_drift_001",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_137",
+      "family": "cashtokens",
+      "intent": "Migrated from benchmark/suites/cashtokens_invalid_negative.yaml case ct_invalid_inflation_001.",
+      "contract_ref": "benchmark/suites/cashtokens_invalid_negative.yaml:ct_invalid_inflation_001",
+      "migration_source_id": "ct_invalid_inflation_001",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_mig_138",
+      "family": "cashtokens",
+      "intent": "Migrated from benchmark/suites/cashtokens_invalid_negative.yaml case ct_invalid_inflation_001.",
+      "contract_ref": "benchmark/suites/cashtokens_invalid_negative.yaml:ct_invalid_inflation_001",
+      "migration_source_id": "ct_invalid_inflation_001",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "migrated_from_generation",
+      "tier": 1
+    },
+    {
+      "id": "bench_oracle_001",
+      "family": "oracle",
+      "intent": "Oracle-gated swap; owner signs; oracle UTXO must match oracleLock.",
+      "contract_ref": "tests/adversarial_semantic_judge/scenarios.py:ORACLE_PRICE",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "policy_only",
+      "source": "handcrafted",
+      "tier": 2
+    },
+    {
+      "id": "bench_oracle_002",
+      "family": "oracle",
+      "intent": "Price feed from off-chain oracle operator; trust deployment.",
+      "contract_ref": "tests/adversarial_semantic_judge/scenarios.py:ORACLE_PRICE",
+      "mutation": "off_chain_trust",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "treasury_prefunding:NOT_ENFORCEABLE_ONCHAIN"
+      ],
+      "expected_kind": [
+        "deployment_requirement"
+      ],
+      "evaluation_mode": "policy_only",
+      "source": "handcrafted",
+      "tier": 2
+    },
+    {
+      "id": "bench_oracle_003",
+      "family": "oracle",
+      "intent": "Swap with unconstrained oracle input index.",
+      "contract_ref": "tests/adversarial_semantic_judge/scenarios.py:ORACLE_PRICE",
+      "mutation": "oracle_input_unvalidated",
+      "expected_findings": [
+        "input_output_coupling"
+      ],
+      "expected_severity": [
+        "MEDIUM"
+      ],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [
+        "invariant_gap"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "handcrafted",
+      "tier": 1
+    },
+    {
+      "id": "bench_oracle_004",
+      "family": "oracle",
+      "intent": "Owner-signed swap; minPrice enforced but oracle bytecode not bound.",
+      "contract_ref": "tests/adversarial_semantic_judge/scenarios.py:ORACLE_PRICE",
+      "mutation": "missing_oracle_binding",
+      "expected_findings": [
+        "output_binding_missing"
+      ],
+      "expected_severity": [
+        "MEDIUM"
+      ],
+      "expected_invariants": [
+        "recipient_binding:MISSING"
+      ],
+      "expected_kind": [
+        "invariant_gap"
+      ],
+      "evaluation_mode": "full_audit",
+      "source": "handcrafted",
+      "tier": 3
+    },
+    {
+      "id": "bench_oracle_005",
+      "family": "oracle",
+      "intent": "Stale oracle price accepted without timelock.",
+      "contract_ref": "tests/adversarial_semantic_judge/scenarios.py:ORACLE_PRICE",
+      "mutation": "stale_oracle",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [
+        "operational_risk"
+      ],
+      "evaluation_mode": "policy_only",
+      "source": "handcrafted",
+      "tier": 2
+    },
+    {
+      "id": "bench_oracle_006",
+      "family": "oracle",
+      "intent": "Multi-oracle median; partial oracle set accepted.",
+      "contract_ref": "tests/adversarial_semantic_judge/scenarios.py:ORACLE_PRICE",
+      "mutation": "partial_oracle_aggregation",
+      "expected_findings": [
+        "partial_aggregation_risk"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "handcrafted",
+      "tier": 1
+    },
+    {
+      "id": "bench_dao_treasury_001",
+      "family": "dao_treasury",
+      "intent": "DAO treasury 2-of-3 multisig with timelock on large withdrawals.",
+      "contract_ref": "composite:multisig+timelock",
+      "mutation": "composite",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "full_audit",
+      "source": "handcrafted",
+      "tier": 2
+    },
+    {
+      "id": "bench_dao_treasury_002",
+      "family": "dao_treasury",
+      "intent": "Treasury spend requires council signatures; emergency path timelocked.",
+      "contract_ref": "composite:vault+multisig",
+      "mutation": "composite",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "full_audit",
+      "source": "handcrafted",
+      "tier": 2
+    },
+    {
+      "id": "bench_dao_treasury_003",
+      "family": "dao_treasury",
+      "intent": "DAO payroll from treasury UTXO; external prefunding assumed.",
+      "contract_ref": "composite:payroll+treasury",
+      "mutation": "composite",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "treasury_prefunding:NOT_ENFORCEABLE_ONCHAIN"
+      ],
+      "expected_kind": [
+        "deployment_requirement"
+      ],
+      "evaluation_mode": "full_audit",
+      "source": "handcrafted",
+      "tier": 2
+    },
+    {
+      "id": "bench_dao_treasury_004",
+      "family": "dao_treasury",
+      "intent": "Treasury migration to new covenant without category preservation.",
+      "contract_ref": "composite:hybrid_migration",
+      "mutation": "composite",
+      "expected_findings": [
+        "hybrid_continuity_break"
+      ],
+      "expected_severity": [
+        "CRITICAL"
+      ],
+      "expected_invariants": [
+        "token_category_preservation:MISSING"
+      ],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "full_audit",
+      "source": "handcrafted",
+      "tier": 2
+    },
+    {
+      "id": "bench_cross_001",
+      "family": "cross_family",
+      "intent": "Escrow with embedded timelock refund and hashlock release.",
+      "contract_ref": "synthetic",
+      "mutation": "escrow+hashlock",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "full_audit",
+      "source": "handcrafted",
+      "tier": 2
+    },
+    {
+      "id": "bench_cross_002",
+      "family": "cross_family",
+      "intent": "Vault holding NFT mint authority with covenant continuation.",
+      "contract_ref": "synthetic",
+      "mutation": "vault+nft_minting",
+      "expected_findings": [
+        "authority_leak"
+      ],
+      "expected_severity": [
+        "CRITICAL"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "full_audit",
+      "source": "handcrafted",
+      "tier": 2
+    },
+    {
+      "id": "bench_cross_003",
+      "family": "cross_family",
+      "intent": "Payroll split with FT token category preservation.",
+      "contract_ref": "synthetic",
+      "mutation": "payroll+ft",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "token_category_preservation:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "full_audit",
+      "source": "handcrafted",
+      "tier": 2
+    },
+    {
+      "id": "bench_cross_004",
+      "family": "cross_family",
+      "intent": "Refundable crowdfund with decay schedule.",
+      "contract_ref": "synthetic",
+      "mutation": "refundable+decay",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "full_audit",
+      "source": "handcrafted",
+      "tier": 2
+    },
+    {
+      "id": "bench_cross_005",
+      "family": "cross_family",
+      "intent": "Multisig escrow with oracle arbiter.",
+      "contract_ref": "synthetic",
+      "mutation": "multisig+escrow+oracle",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "full_audit",
+      "source": "handcrafted",
+      "tier": 2
+    },
+    {
+      "id": "bench_cross_006",
+      "family": "cross_family",
+      "intent": "Conditional spend atomic swap with hashlock preimage.",
+      "contract_ref": "synthetic",
+      "mutation": "swap+hashlock",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "full_audit",
+      "source": "handcrafted",
+      "tier": 2
+    },
+    {
+      "id": "bench_cross_007",
+      "family": "cross_family",
+      "intent": "Subscription streaming with vault custody.",
+      "contract_ref": "synthetic",
+      "mutation": "decay+vault",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "full_audit",
+      "source": "handcrafted",
+      "tier": 2
+    },
+    {
+      "id": "bench_cross_008",
+      "family": "cross_family",
+      "intent": "Hybrid FT+NFT sidecar treasury.",
+      "contract_ref": "synthetic",
+      "mutation": "hybrid+treasury",
+      "expected_findings": [
+        "capability_hybrid_migration_mismatch"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "full_audit",
+      "source": "handcrafted",
+      "tier": 2
+    },
+    {
+      "id": "bench_realworld_001",
+      "family": "escrow",
+      "intent": "Real-world escrow contract from audit_benchmark_realworld index entry rw_001.",
+      "contract_ref": "audit_benchmark_realworld/contracts/rw_001.cash",
+      "mutation": "as_collected",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "full_audit",
+      "source": "realworld",
+      "tier": 3,
+      "notes": "Populate from A.5 index; expected findings set after classification"
+    },
+    {
+      "id": "bench_realworld_002",
+      "family": "vault",
+      "intent": "Real-world vault contract from audit_benchmark_realworld index entry rw_002.",
+      "contract_ref": "audit_benchmark_realworld/contracts/rw_002.cash",
+      "mutation": "as_collected",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "full_audit",
+      "source": "realworld",
+      "tier": 3,
+      "notes": "Populate from A.5 index; expected findings set after classification"
+    },
+    {
+      "id": "bench_realworld_003",
+      "family": "multisig",
+      "intent": "Real-world multisig contract from audit_benchmark_realworld index entry rw_003.",
+      "contract_ref": "audit_benchmark_realworld/contracts/rw_003.cash",
+      "mutation": "as_collected",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "full_audit",
+      "source": "realworld",
+      "tier": 3,
+      "notes": "Populate from A.5 index; expected findings set after classification"
+    },
+    {
+      "id": "bench_realworld_004",
+      "family": "payroll",
+      "intent": "Real-world payroll contract from audit_benchmark_realworld index entry rw_004.",
+      "contract_ref": "audit_benchmark_realworld/contracts/rw_004.cash",
+      "mutation": "as_collected",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "full_audit",
+      "source": "realworld",
+      "tier": 3,
+      "notes": "Populate from A.5 index; expected findings set after classification"
+    },
+    {
+      "id": "bench_realworld_005",
+      "family": "timelock",
+      "intent": "Real-world timelock contract from audit_benchmark_realworld index entry rw_005.",
+      "contract_ref": "audit_benchmark_realworld/contracts/rw_005.cash",
+      "mutation": "as_collected",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "full_audit",
+      "source": "realworld",
+      "tier": 3,
+      "notes": "Populate from A.5 index; expected findings set after classification"
+    },
+    {
+      "id": "bench_realworld_006",
+      "family": "hashlock",
+      "intent": "Real-world hashlock contract from audit_benchmark_realworld index entry rw_006.",
+      "contract_ref": "audit_benchmark_realworld/contracts/rw_006.cash",
+      "mutation": "as_collected",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "full_audit",
+      "source": "realworld",
+      "tier": 3,
+      "notes": "Populate from A.5 index; expected findings set after classification"
+    },
+    {
+      "id": "bench_realworld_007",
+      "family": "refundable",
+      "intent": "Real-world refundable contract from audit_benchmark_realworld index entry rw_007.",
+      "contract_ref": "audit_benchmark_realworld/contracts/rw_007.cash",
+      "mutation": "as_collected",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "full_audit",
+      "source": "realworld",
+      "tier": 3,
+      "notes": "Populate from A.5 index; expected findings set after classification"
+    },
+    {
+      "id": "bench_realworld_008",
+      "family": "covenant",
+      "intent": "Real-world covenant contract from audit_benchmark_realworld index entry rw_008.",
+      "contract_ref": "audit_benchmark_realworld/contracts/rw_008.cash",
+      "mutation": "as_collected",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "full_audit",
+      "source": "realworld",
+      "tier": 3,
+      "notes": "Populate from A.5 index; expected findings set after classification"
+    },
+    {
+      "id": "bench_realworld_009",
+      "family": "cashtokens_ft",
+      "intent": "Real-world cashtokens_ft contract from audit_benchmark_realworld index entry rw_009.",
+      "contract_ref": "audit_benchmark_realworld/contracts/rw_009.cash",
+      "mutation": "as_collected",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "full_audit",
+      "source": "realworld",
+      "tier": 3,
+      "notes": "Populate from A.5 index; expected findings set after classification"
+    },
+    {
+      "id": "bench_realworld_010",
+      "family": "cashtokens_nft",
+      "intent": "Real-world cashtokens_nft contract from audit_benchmark_realworld index entry rw_010.",
+      "contract_ref": "audit_benchmark_realworld/contracts/rw_010.cash",
+      "mutation": "as_collected",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "full_audit",
+      "source": "realworld",
+      "tier": 3,
+      "notes": "Populate from A.5 index; expected findings set after classification"
+    },
+    {
+      "id": "bench_realworld_011",
+      "family": "hybrid",
+      "intent": "Real-world hybrid contract from audit_benchmark_realworld index entry rw_011.",
+      "contract_ref": "audit_benchmark_realworld/contracts/rw_011.cash",
+      "mutation": "as_collected",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "full_audit",
+      "source": "realworld",
+      "tier": 3,
+      "notes": "Populate from A.5 index; expected findings set after classification"
+    },
+    {
+      "id": "bench_realworld_012",
+      "family": "escrow",
+      "intent": "Real-world escrow contract from audit_benchmark_realworld index entry rw_012.",
+      "contract_ref": "audit_benchmark_realworld/contracts/rw_012.cash",
+      "mutation": "as_collected",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "full_audit",
+      "source": "realworld",
+      "tier": 3,
+      "notes": "Populate from A.5 index; expected findings set after classification"
+    },
+    {
+      "id": "bench_realworld_013",
+      "family": "vault",
+      "intent": "Real-world vault contract from audit_benchmark_realworld index entry rw_013.",
+      "contract_ref": "audit_benchmark_realworld/contracts/rw_013.cash",
+      "mutation": "as_collected",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "full_audit",
+      "source": "realworld",
+      "tier": 3,
+      "notes": "Populate from A.5 index; expected findings set after classification"
+    },
+    {
+      "id": "bench_realworld_014",
+      "family": "multisig",
+      "intent": "Real-world multisig contract from audit_benchmark_realworld index entry rw_014.",
+      "contract_ref": "audit_benchmark_realworld/contracts/rw_014.cash",
+      "mutation": "as_collected",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "full_audit",
+      "source": "realworld",
+      "tier": 3,
+      "notes": "Populate from A.5 index; expected findings set after classification"
+    },
+    {
+      "id": "bench_realworld_015",
+      "family": "payroll",
+      "intent": "Real-world payroll contract from audit_benchmark_realworld index entry rw_015.",
+      "contract_ref": "audit_benchmark_realworld/contracts/rw_015.cash",
+      "mutation": "as_collected",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "full_audit",
+      "source": "realworld",
+      "tier": 3,
+      "notes": "Populate from A.5 index; expected findings set after classification"
+    },
+    {
+      "id": "bench_realworld_016",
+      "family": "timelock",
+      "intent": "Real-world timelock contract from audit_benchmark_realworld index entry rw_016.",
+      "contract_ref": "audit_benchmark_realworld/contracts/rw_016.cash",
+      "mutation": "as_collected",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "full_audit",
+      "source": "realworld",
+      "tier": 3,
+      "notes": "Populate from A.5 index; expected findings set after classification"
+    },
+    {
+      "id": "bench_realworld_017",
+      "family": "covenant",
+      "intent": "Real-world covenant contract from audit_benchmark_realworld index entry rw_017.",
+      "contract_ref": "audit_benchmark_realworld/contracts/rw_017.cash",
+      "mutation": "as_collected",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "full_audit",
+      "source": "realworld",
+      "tier": 3,
+      "notes": "Populate from A.5 index; expected findings set after classification"
+    },
+    {
+      "id": "bench_realworld_018",
+      "family": "cashtokens_ft",
+      "intent": "Real-world cashtokens_ft contract from audit_benchmark_realworld index entry rw_018.",
+      "contract_ref": "audit_benchmark_realworld/contracts/rw_018.cash",
+      "mutation": "as_collected",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "full_audit",
+      "source": "realworld",
+      "tier": 3,
+      "notes": "Populate from A.5 index; expected findings set after classification"
+    },
+    {
+      "id": "bench_realworld_019",
+      "family": "cashtokens_nft",
+      "intent": "Real-world cashtokens_nft contract from audit_benchmark_realworld index entry rw_019.",
+      "contract_ref": "audit_benchmark_realworld/contracts/rw_019.cash",
+      "mutation": "as_collected",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "full_audit",
+      "source": "realworld",
+      "tier": 3,
+      "notes": "Populate from A.5 index; expected findings set after classification"
+    },
+    {
+      "id": "bench_realworld_020",
+      "family": "hybrid",
+      "intent": "Real-world hybrid contract from audit_benchmark_realworld index entry rw_020.",
+      "contract_ref": "audit_benchmark_realworld/contracts/rw_020.cash",
+      "mutation": "as_collected",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "full_audit",
+      "source": "realworld",
+      "tier": 3,
+      "notes": "Populate from A.5 index; expected findings set after classification"
+    }
+  ]
+}
