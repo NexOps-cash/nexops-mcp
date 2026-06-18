@@ -24,7 +24,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "handcrafted",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 2
     },
     {
       "id": "bench_payroll_002",
@@ -41,7 +42,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "handcrafted",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_payroll_003",
@@ -58,7 +60,8 @@
       "evaluation_mode": "policy_only",
       "source": "handcrafted",
       "tier": 2,
-      "notes": "Treasury prefunding must NOT become VULNERABILITY; see FP playbook"
+      "notes": "Treasury prefunding must NOT become VULNERABILITY; see FP playbook",
+      "difficulty": 1
     },
     {
       "id": "bench_payroll_004",
@@ -80,7 +83,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "handcrafted",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_001",
@@ -97,7 +101,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_002",
@@ -118,7 +123,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_003",
@@ -135,7 +141,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_004",
@@ -156,7 +163,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_005",
@@ -173,7 +181,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_006",
@@ -194,7 +203,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_007",
@@ -211,7 +221,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_008",
@@ -232,7 +243,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_009",
@@ -249,7 +261,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_010",
@@ -270,7 +283,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_011",
@@ -287,7 +301,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_012",
@@ -308,7 +323,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_013",
@@ -325,7 +341,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_014",
@@ -346,7 +363,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_015",
@@ -363,7 +381,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_016",
@@ -384,7 +403,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_017",
@@ -401,7 +421,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_018",
@@ -422,7 +443,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_019",
@@ -439,7 +461,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_020",
@@ -460,7 +483,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_021",
@@ -477,7 +501,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_022",
@@ -498,7 +523,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_023",
@@ -515,7 +541,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_024",
@@ -536,7 +563,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_025",
@@ -553,7 +581,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_026",
@@ -574,7 +603,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_027",
@@ -591,7 +621,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_028",
@@ -612,7 +643,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_029",
@@ -629,7 +661,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_030",
@@ -650,7 +683,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_031",
@@ -667,7 +701,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_032",
@@ -688,7 +723,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_033",
@@ -705,7 +741,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_034",
@@ -726,7 +763,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_035",
@@ -743,7 +781,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_036",
@@ -764,7 +803,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_037",
@@ -781,7 +821,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_038",
@@ -802,7 +843,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_039",
@@ -819,7 +861,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_040",
@@ -840,7 +883,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_041",
@@ -857,7 +901,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_042",
@@ -878,7 +923,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_043",
@@ -895,7 +941,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_044",
@@ -916,7 +963,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_045",
@@ -933,7 +981,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_046",
@@ -954,7 +1003,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_047",
@@ -971,7 +1021,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_048",
@@ -992,7 +1043,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_049",
@@ -1009,7 +1061,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_050",
@@ -1030,7 +1083,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_051",
@@ -1047,7 +1101,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_052",
@@ -1068,7 +1123,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_053",
@@ -1085,7 +1141,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_054",
@@ -1106,7 +1163,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_055",
@@ -1123,7 +1181,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_056",
@@ -1144,7 +1203,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_057",
@@ -1161,7 +1221,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_058",
@@ -1182,7 +1243,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_059",
@@ -1199,7 +1261,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_060",
@@ -1220,7 +1283,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_061",
@@ -1237,7 +1301,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_062",
@@ -1258,7 +1323,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_063",
@@ -1275,7 +1341,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_064",
@@ -1296,7 +1363,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_065",
@@ -1313,7 +1381,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_066",
@@ -1334,7 +1403,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_067",
@@ -1351,7 +1421,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_068",
@@ -1372,7 +1443,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_069",
@@ -1389,7 +1461,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_070",
@@ -1410,7 +1483,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_071",
@@ -1427,7 +1501,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_072",
@@ -1448,7 +1523,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_073",
@@ -1465,7 +1541,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_074",
@@ -1486,7 +1563,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_075",
@@ -1503,7 +1581,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_076",
@@ -1524,7 +1603,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_077",
@@ -1541,7 +1621,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_078",
@@ -1562,7 +1643,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_079",
@@ -1579,7 +1661,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_080",
@@ -1600,7 +1683,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_081",
@@ -1617,7 +1701,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_082",
@@ -1638,7 +1723,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_083",
@@ -1655,7 +1741,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_084",
@@ -1676,7 +1763,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_085",
@@ -1693,7 +1781,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_086",
@@ -1714,7 +1803,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_087",
@@ -1731,7 +1821,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_088",
@@ -1752,7 +1843,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_089",
@@ -1769,7 +1861,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_090",
@@ -1790,7 +1883,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_091",
@@ -1807,7 +1901,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_092",
@@ -1828,7 +1923,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_093",
@@ -1845,7 +1941,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_094",
@@ -1866,7 +1963,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_095",
@@ -1883,7 +1981,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_096",
@@ -1904,7 +2003,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_097",
@@ -1921,7 +2021,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_098",
@@ -1942,7 +2043,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_099",
@@ -1959,7 +2061,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_100",
@@ -1980,7 +2083,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_101",
@@ -1997,7 +2101,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_102",
@@ -2018,7 +2123,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_103",
@@ -2035,7 +2141,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_104",
@@ -2056,7 +2163,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_105",
@@ -2073,7 +2181,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_106",
@@ -2094,7 +2203,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_107",
@@ -2111,7 +2221,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_108",
@@ -2132,7 +2243,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_109",
@@ -2149,7 +2261,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_110",
@@ -2170,7 +2283,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_111",
@@ -2187,7 +2301,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_112",
@@ -2208,7 +2323,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_113",
@@ -2225,7 +2341,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_114",
@@ -2246,7 +2363,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_115",
@@ -2263,7 +2381,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_116",
@@ -2284,7 +2403,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_117",
@@ -2301,7 +2421,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_118",
@@ -2322,7 +2443,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_119",
@@ -2339,7 +2461,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_120",
@@ -2360,7 +2483,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_121",
@@ -2377,7 +2501,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_122",
@@ -2398,7 +2523,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_123",
@@ -2415,7 +2541,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_124",
@@ -2436,7 +2563,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_125",
@@ -2453,7 +2581,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_126",
@@ -2474,7 +2603,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_127",
@@ -2491,7 +2621,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_128",
@@ -2512,7 +2643,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_129",
@@ -2529,7 +2661,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_130",
@@ -2550,7 +2683,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_131",
@@ -2567,7 +2701,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_132",
@@ -2588,7 +2723,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_133",
@@ -2605,7 +2741,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_134",
@@ -2626,7 +2763,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_135",
@@ -2643,7 +2781,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_136",
@@ -2664,7 +2803,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_137",
@@ -2681,7 +2821,8 @@
       "expected_kind": [],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_mig_138",
@@ -2702,7 +2843,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "migrated_from_generation",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 1
     },
     {
       "id": "bench_oracle_001",
@@ -2718,7 +2860,8 @@
       "expected_kind": [],
       "evaluation_mode": "policy_only",
       "source": "handcrafted",
-      "tier": 2
+      "tier": 2,
+      "difficulty": 1
     },
     {
       "id": "bench_oracle_002",
@@ -2736,7 +2879,8 @@
       ],
       "evaluation_mode": "policy_only",
       "source": "handcrafted",
-      "tier": 2
+      "tier": 2,
+      "difficulty": 2
     },
     {
       "id": "bench_oracle_003",
@@ -2758,7 +2902,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "handcrafted",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 2
     },
     {
       "id": "bench_oracle_004",
@@ -2780,7 +2925,8 @@
       ],
       "evaluation_mode": "full_audit",
       "source": "handcrafted",
-      "tier": 3
+      "tier": 3,
+      "difficulty": 2
     },
     {
       "id": "bench_oracle_005",
@@ -2796,7 +2942,8 @@
       ],
       "evaluation_mode": "policy_only",
       "source": "handcrafted",
-      "tier": 2
+      "tier": 2,
+      "difficulty": 2
     },
     {
       "id": "bench_oracle_006",
@@ -2816,7 +2963,8 @@
       ],
       "evaluation_mode": "detector_only",
       "source": "handcrafted",
-      "tier": 1
+      "tier": 1,
+      "difficulty": 2
     },
     {
       "id": "bench_dao_treasury_001",
@@ -2832,7 +2980,8 @@
       "expected_kind": [],
       "evaluation_mode": "full_audit",
       "source": "handcrafted",
-      "tier": 2
+      "tier": 2,
+      "difficulty": 3
     },
     {
       "id": "bench_dao_treasury_002",
@@ -2848,7 +2997,8 @@
       "expected_kind": [],
       "evaluation_mode": "full_audit",
       "source": "handcrafted",
-      "tier": 2
+      "tier": 2,
+      "difficulty": 3
     },
     {
       "id": "bench_dao_treasury_003",
@@ -2866,7 +3016,8 @@
       ],
       "evaluation_mode": "full_audit",
       "source": "handcrafted",
-      "tier": 2
+      "tier": 2,
+      "difficulty": 3
     },
     {
       "id": "bench_dao_treasury_004",
@@ -2888,7 +3039,8 @@
       ],
       "evaluation_mode": "full_audit",
       "source": "handcrafted",
-      "tier": 2
+      "tier": 2,
+      "difficulty": 3
     },
     {
       "id": "bench_cross_001",
@@ -2904,7 +3056,8 @@
       "expected_kind": [],
       "evaluation_mode": "full_audit",
       "source": "handcrafted",
-      "tier": 2
+      "tier": 2,
+      "difficulty": 3
     },
     {
       "id": "bench_cross_002",
@@ -2924,7 +3077,8 @@
       ],
       "evaluation_mode": "full_audit",
       "source": "handcrafted",
-      "tier": 2
+      "tier": 2,
+      "difficulty": 3
     },
     {
       "id": "bench_cross_003",
@@ -2940,7 +3094,8 @@
       "expected_kind": [],
       "evaluation_mode": "full_audit",
       "source": "handcrafted",
-      "tier": 2
+      "tier": 2,
+      "difficulty": 3
     },
     {
       "id": "bench_cross_004",
@@ -2954,7 +3109,8 @@
       "expected_kind": [],
       "evaluation_mode": "full_audit",
       "source": "handcrafted",
-      "tier": 2
+      "tier": 2,
+      "difficulty": 3
     },
     {
       "id": "bench_cross_005",
@@ -2970,7 +3126,8 @@
       "expected_kind": [],
       "evaluation_mode": "full_audit",
       "source": "handcrafted",
-      "tier": 2
+      "tier": 2,
+      "difficulty": 3
     },
     {
       "id": "bench_cross_006",
@@ -2984,7 +3141,8 @@
       "expected_kind": [],
       "evaluation_mode": "full_audit",
       "source": "handcrafted",
-      "tier": 2
+      "tier": 2,
+      "difficulty": 3
     },
     {
       "id": "bench_cross_007",
@@ -2998,7 +3156,8 @@
       "expected_kind": [],
       "evaluation_mode": "full_audit",
       "source": "handcrafted",
-      "tier": 2
+      "tier": 2,
+      "difficulty": 3
     },
     {
       "id": "bench_cross_008",
@@ -3018,7 +3177,8 @@
       ],
       "evaluation_mode": "full_audit",
       "source": "handcrafted",
-      "tier": 2
+      "tier": 2,
+      "difficulty": 3
     },
     {
       "id": "bench_realworld_001",
@@ -3033,7 +3193,8 @@
       "evaluation_mode": "full_audit",
       "source": "realworld",
       "tier": 3,
-      "notes": "Populate from A.5 index; expected findings set after classification"
+      "notes": "Populate from A.5 index; expected findings set after classification",
+      "difficulty": 4
     },
     {
       "id": "bench_realworld_002",
@@ -3048,7 +3209,8 @@
       "evaluation_mode": "full_audit",
       "source": "realworld",
       "tier": 3,
-      "notes": "Populate from A.5 index; expected findings set after classification"
+      "notes": "Populate from A.5 index; expected findings set after classification",
+      "difficulty": 4
     },
     {
       "id": "bench_realworld_003",
@@ -3063,7 +3225,8 @@
       "evaluation_mode": "full_audit",
       "source": "realworld",
       "tier": 3,
-      "notes": "Populate from A.5 index; expected findings set after classification"
+      "notes": "Populate from A.5 index; expected findings set after classification",
+      "difficulty": 4
     },
     {
       "id": "bench_realworld_004",
@@ -3078,7 +3241,8 @@
       "evaluation_mode": "full_audit",
       "source": "realworld",
       "tier": 3,
-      "notes": "Populate from A.5 index; expected findings set after classification"
+      "notes": "Populate from A.5 index; expected findings set after classification",
+      "difficulty": 4
     },
     {
       "id": "bench_realworld_005",
@@ -3093,7 +3257,8 @@
       "evaluation_mode": "full_audit",
       "source": "realworld",
       "tier": 3,
-      "notes": "Populate from A.5 index; expected findings set after classification"
+      "notes": "Populate from A.5 index; expected findings set after classification",
+      "difficulty": 4
     },
     {
       "id": "bench_realworld_006",
@@ -3108,7 +3273,8 @@
       "evaluation_mode": "full_audit",
       "source": "realworld",
       "tier": 3,
-      "notes": "Populate from A.5 index; expected findings set after classification"
+      "notes": "Populate from A.5 index; expected findings set after classification",
+      "difficulty": 4
     },
     {
       "id": "bench_realworld_007",
@@ -3123,7 +3289,8 @@
       "evaluation_mode": "full_audit",
       "source": "realworld",
       "tier": 3,
-      "notes": "Populate from A.5 index; expected findings set after classification"
+      "notes": "Populate from A.5 index; expected findings set after classification",
+      "difficulty": 4
     },
     {
       "id": "bench_realworld_008",
@@ -3138,7 +3305,8 @@
       "evaluation_mode": "full_audit",
       "source": "realworld",
       "tier": 3,
-      "notes": "Populate from A.5 index; expected findings set after classification"
+      "notes": "Populate from A.5 index; expected findings set after classification",
+      "difficulty": 4
     },
     {
       "id": "bench_realworld_009",
@@ -3153,7 +3321,8 @@
       "evaluation_mode": "full_audit",
       "source": "realworld",
       "tier": 3,
-      "notes": "Populate from A.5 index; expected findings set after classification"
+      "notes": "Populate from A.5 index; expected findings set after classification",
+      "difficulty": 4
     },
     {
       "id": "bench_realworld_010",
@@ -3168,7 +3337,8 @@
       "evaluation_mode": "full_audit",
       "source": "realworld",
       "tier": 3,
-      "notes": "Populate from A.5 index; expected findings set after classification"
+      "notes": "Populate from A.5 index; expected findings set after classification",
+      "difficulty": 4
     },
     {
       "id": "bench_realworld_011",
@@ -3183,7 +3353,8 @@
       "evaluation_mode": "full_audit",
       "source": "realworld",
       "tier": 3,
-      "notes": "Populate from A.5 index; expected findings set after classification"
+      "notes": "Populate from A.5 index; expected findings set after classification",
+      "difficulty": 4
     },
     {
       "id": "bench_realworld_012",
@@ -3198,7 +3369,8 @@
       "evaluation_mode": "full_audit",
       "source": "realworld",
       "tier": 3,
-      "notes": "Populate from A.5 index; expected findings set after classification"
+      "notes": "Populate from A.5 index; expected findings set after classification",
+      "difficulty": 4
     },
     {
       "id": "bench_realworld_013",
@@ -3213,7 +3385,8 @@
       "evaluation_mode": "full_audit",
       "source": "realworld",
       "tier": 3,
-      "notes": "Populate from A.5 index; expected findings set after classification"
+      "notes": "Populate from A.5 index; expected findings set after classification",
+      "difficulty": 4
     },
     {
       "id": "bench_realworld_014",
@@ -3228,7 +3401,8 @@
       "evaluation_mode": "full_audit",
       "source": "realworld",
       "tier": 3,
-      "notes": "Populate from A.5 index; expected findings set after classification"
+      "notes": "Populate from A.5 index; expected findings set after classification",
+      "difficulty": 4
     },
     {
       "id": "bench_realworld_015",
@@ -3243,7 +3417,8 @@
       "evaluation_mode": "full_audit",
       "source": "realworld",
       "tier": 3,
-      "notes": "Populate from A.5 index; expected findings set after classification"
+      "notes": "Populate from A.5 index; expected findings set after classification",
+      "difficulty": 4
     },
     {
       "id": "bench_realworld_016",
@@ -3258,7 +3433,8 @@
       "evaluation_mode": "full_audit",
       "source": "realworld",
       "tier": 3,
-      "notes": "Populate from A.5 index; expected findings set after classification"
+      "notes": "Populate from A.5 index; expected findings set after classification",
+      "difficulty": 4
     },
     {
       "id": "bench_realworld_017",
@@ -3273,7 +3449,8 @@
       "evaluation_mode": "full_audit",
       "source": "realworld",
       "tier": 3,
-      "notes": "Populate from A.5 index; expected findings set after classification"
+      "notes": "Populate from A.5 index; expected findings set after classification",
+      "difficulty": 4
     },
     {
       "id": "bench_realworld_018",
@@ -3288,7 +3465,8 @@
       "evaluation_mode": "full_audit",
       "source": "realworld",
       "tier": 3,
-      "notes": "Populate from A.5 index; expected findings set after classification"
+      "notes": "Populate from A.5 index; expected findings set after classification",
+      "difficulty": 4
     },
     {
       "id": "bench_realworld_019",
@@ -3303,7 +3481,8 @@
       "evaluation_mode": "full_audit",
       "source": "realworld",
       "tier": 3,
-      "notes": "Populate from A.5 index; expected findings set after classification"
+      "notes": "Populate from A.5 index; expected findings set after classification",
+      "difficulty": 4
     },
     {
       "id": "bench_realworld_020",
@@ -3318,7 +3497,8 @@
       "evaluation_mode": "full_audit",
       "source": "realworld",
       "tier": 3,
-      "notes": "Populate from A.5 index; expected findings set after classification"
+      "notes": "Populate from A.5 index; expected findings set after classification",
+      "difficulty": 4
     }
   ]
 }
