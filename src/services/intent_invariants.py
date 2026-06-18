@@ -94,12 +94,19 @@ class InvariantStatus:
     detail: str = ""
     tier: InvariantTier = InvariantTier.BUSINESS
 
+    @property
+    def fact_id(self) -> str:
+        return f"inv.{self.invariant_id}"
+
 
 @dataclass
 class InvariantMatrix:
     enforced: List[InvariantStatus] = field(default_factory=list)
     missing: List[InvariantStatus] = field(default_factory=list)
     not_enforceable: List[InvariantStatus] = field(default_factory=list)
+
+    def all_entries(self) -> List[InvariantStatus]:
+        return list(self.enforced) + list(self.missing) + list(self.not_enforceable)
 
     def format_for_prompt(self) -> str:
         lines: List[str] = []

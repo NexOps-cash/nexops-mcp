@@ -7,18 +7,27 @@ The LLM must not directly control final severity or security-branded titles.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Optional
 
 from src.models import (
+    AuditFactBundle,
     ConfidenceLevel,
     ExploitSeverity,
     FindingKind,
     IssueClass,
     Provenance,
+    SemanticJudgment,
+    SemanticVerdict,
     Severity,
+    StructuredSemanticFinding,
     Triggerability,
+    TrustAssumption,
+    ValueImpact,
 )
+
+logger = logging.getLogger("nexops.finding_policy")
 
 # Security-critical intent rule_ids (explicit kind passed at emission; fallback for infer_kind).
 INTENT_SECURITY_RULE_IDS = frozenset(
@@ -526,3 +535,143 @@ def is_exploitable(
     if trig == Triggerability.NON_ATTACKER:
         return False
     return True
+
+
+# ── Semantic Security Judge V2 policy mapping ───────────────────────────────
+
+_DEPLOY_TRUST_ASSUMPTIONS = frozenset(
+    {
+        TrustAssumption.EXTERNAL_FUNDING,
+        TrustAssumption.DEPLOYMENT_CONFIG,
+        TrustAssumption.OFF_CHAIN_STATE,
+        TrustAssumption.ISSUER_POLICY,
+        TrustAssumption.ORACLE,
+    }
+)
+
+
+def map_judgment_triggerability(finding: StructuredSemanticFinding) -> Triggerability:
+    if finding.attacker_gain:
+        return Triggerability.ATTACKER
+    if finding.trust_assumption != TrustAssumption.NONE:
+        return Triggerability.NON_ATTACKER
+    if not finding.authorization_impact:
+        return Triggerability.NON_ATTACKER
+    return Triggerability.UNKNOWN
+
+
+def resolve_kind_from_judgment(finding: StructuredSemanticFinding) -> FindingKind:
+    """Policy-only FindingKind from attacker_gain, authorization_impact, value_impact."""
+    gap = (finding.gap_id or "").lower()
+    affected = (finding.affected_invariant or "").lower()
+
+    if "unspendable" in gap or affected == "funds_unspendable":
+        return FindingKind.VULNERABILITY
+    if finding.deferred_validation:
+        return FindingKind.DEPLOYMENT_REQUIREMENT
+    if finding.attacker_gain:
+        if finding.authorization_impact or finding.value_impact in (
+            ValueImpact.MEDIUM,
+            ValueImpact.HIGH,
+        ):
+            return FindingKind.VULNERABILITY
+        if finding.value_impact == ValueImpact.LOW:
+            return FindingKind.INVARIANT_GAP
+        if finding.value_impact == ValueImpact.NONE and not finding.authorization_impact:
+            return FindingKind.OBSERVATION
+        return FindingKind.INVARIANT_GAP
+    if finding.trust_assumption in _DEPLOY_TRUST_ASSUMPTIONS:
+        return FindingKind.DEPLOYMENT_REQUIREMENT
+    if finding.authorization_impact:
+        return FindingKind.INVARIANT_GAP
+    if finding.value_impact == ValueImpact.LOW:
+        return FindingKind.DESIGN_TRADE_OFF
+    if finding.value_impact == ValueImpact.NONE:
+        return FindingKind.OPERATIONAL_RISK
+    return FindingKind.OBSERVATION
+
+
+def resolve_exploit_severity_from_value_impact(
+    kind: FindingKind,
+    value_impact: ValueImpact,
+) -> ExploitSeverity:
+    """Policy-only ExploitSeverity; ignores LLM exploit_class."""
+    if kind == FindingKind.VULNERABILITY:
+        if value_impact == ValueImpact.HIGH:
+            return ExploitSeverity.DIRECT_FUND_LOSS
+        if value_impact == ValueImpact.MEDIUM:
+            return ExploitSeverity.PARTIAL_VIOLATION
+        if value_impact == ValueImpact.LOW:
+            return ExploitSeverity.GRIEFING
+        return ExploitSeverity.PARTIAL_VIOLATION
+    if kind == FindingKind.INVARIANT_GAP:
+        return ExploitSeverity.PARTIAL_VIOLATION
+    if kind == FindingKind.DESIGN_TRADE_OFF:
+        return ExploitSeverity.GRIEFING
+    return ExploitSeverity.NOT_APPLICABLE
+
+
+def adjust_confidence_from_uncertainty(finding: StructuredSemanticFinding) -> float:
+    score = finding.confidence
+    if finding.contradicts_fact_ids:
+        score = min(score, 0.5)
+    if finding.evidence_gaps or finding.uncertainty_reason.strip():
+        score = min(score, 0.6)
+    return score
+
+
+def log_judgment_contradictions(
+    judgment: SemanticJudgment,
+    bundle: AuditFactBundle,
+) -> None:
+    """Log contradicts_fact_ids for ops/debug."""
+    if judgment.verdict != SemanticVerdict.FINDING or not judgment.finding:
+        return
+    finding = judgment.finding
+    if finding.contradicts_fact_ids:
+        logger.warning(
+            "[Semantic Judge] contradicts_fact_ids=%s gap_id=%s bundle_mode=%s",
+            finding.contradicts_fact_ids,
+            finding.gap_id,
+            bundle.contract.get("contract_mode"),
+        )
+
+
+def finalize_from_judgment(
+    judgment: SemanticJudgment,
+) -> Optional[FinalizedFinding]:
+    """Map structured judgment to FinalizedFinding; None when verdict=no_issue."""
+    if judgment.verdict != SemanticVerdict.FINDING or not judgment.finding:
+        return None
+
+    finding = judgment.finding
+    kind = resolve_kind_from_judgment(finding)
+    triggerability = map_judgment_triggerability(finding)
+    exploit_severity = resolve_exploit_severity_from_value_impact(kind, finding.value_impact)
+    confidence_score = adjust_confidence_from_uncertainty(finding)
+
+    summary = finding.summary or finding.reasoning or finding.gap_id
+    text = f"{finding.summary} {finding.reasoning}".strip()
+    rule_id = f"semantic_{kind_to_semantic_category(kind)}"
+
+    gap_lower = (finding.gap_id or "").lower()
+    affected = (finding.affected_invariant or "").lower()
+    proposed_severity: Optional[Severity] = None
+    if "unspendable" in gap_lower or affected == "funds_unspendable":
+        rule_id = "semantic_funds_unspendable"
+        proposed_severity = Severity.CRITICAL
+        kind = FindingKind.VULNERABILITY
+
+    return finalize(
+        kind=kind,
+        proposed_severity=proposed_severity,
+        summary=summary,
+        rule_id=rule_id,
+        semantic_label="",
+        text=text,
+        exploit_severity=exploit_severity,
+        provenance=Provenance.LLM,
+        confidence_score=confidence_score,
+        deferred_validation=finding.deferred_validation,
+        triggerability=triggerability,
+    )
