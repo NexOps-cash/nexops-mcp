@@ -1,0 +1,9 @@
+pragma cashscript ^0.13.0;
+contract FakeAuthDeadCode(pubkey owner, bytes lock) {
+    function pay(sig ownerSig) {
+        require(false);
+        require(checkSig(ownerSig, owner));
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].lockingBytecode == lock);
+    }
+}

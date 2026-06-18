@@ -1,0 +1,10 @@
+pragma cashscript ^0.13.0;
+contract OracleSwapSecure(pubkey owner, bytes oracleLock, int minPrice) {
+    function swap(sig ownerSig) {
+        require(checkSig(ownerSig, owner));
+        require(tx.inputs.length >= 2);
+        require(tx.inputs[1].lockingBytecode == oracleLock);
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].value >= minPrice);
+    }
+}
