@@ -246,6 +246,112 @@ class Triggerability(str, Enum):
     UNKNOWN = "unknown"
 
 
+# ─── Semantic Security Judge V2 ───────────────────────────────────────────
+
+class ValueImpact(str, Enum):
+    NONE = "none"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+class TrustAssumption(str, Enum):
+    NONE = "none"
+    EXTERNAL_FUNDING = "external_funding"
+    ISSUER_POLICY = "issuer_policy"
+    ORACLE = "oracle"
+    OFF_CHAIN_STATE = "off_chain_state"
+    DEPLOYMENT_CONFIG = "deployment_config"
+
+
+class SemanticVerdict(str, Enum):
+    FINDING = "finding"
+    NO_ISSUE = "no_issue"
+
+
+class SpendPathRef(BaseModel):
+    function: str = ""
+    line_hint: int = 0
+
+
+class StructuredSemanticFinding(BaseModel):
+    gap_id: str = ""
+    attacker_gain: bool = False
+    authorization_impact: bool = False
+    value_impact: ValueImpact = ValueImpact.NONE
+    exploit_class: Optional[str] = None
+    trust_assumption: TrustAssumption = TrustAssumption.NONE
+    affected_invariant: str = ""
+    deferred_validation: bool = False
+    attacker_controlled_inputs: List[str] = Field(default_factory=list)
+    spend_path: SpendPathRef = Field(default_factory=SpendPathRef)
+    fact_refs: List[str] = Field(default_factory=list)
+    contradicts_fact_ids: List[str] = Field(default_factory=list)
+    evidence_gaps: List[str] = Field(default_factory=list)
+    uncertainty_reason: str = ""
+    reasoning_steps: List[str] = Field(default_factory=list)
+    summary: str = ""
+    reasoning: str = ""
+    recommendation: str = ""
+    confidence: float = 0.0
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def clamp_confidence(cls, v: Any) -> float:
+        try:
+            return max(0.0, min(1.0, float(v)))
+        except (TypeError, ValueError):
+            return 0.0
+
+
+class SemanticJudgment(BaseModel):
+    judge_version: str = "2.0"
+    verdict: SemanticVerdict
+    intent_fidelity_score: int = 5
+    intent_fidelity_notes: str = ""
+    finding: Optional[StructuredSemanticFinding] = None
+
+    @field_validator("intent_fidelity_score", mode="before")
+    @classmethod
+    def clamp_fidelity_score(cls, v: Any) -> int:
+        try:
+            return max(0, min(10, int(v)))
+        except (TypeError, ValueError):
+            return 5
+
+
+class InvariantMatrixEntry(BaseModel):
+    invariant_id: str
+    label: str
+    status: str
+    tier: str
+    detail: str = ""
+    fact_id: str
+
+
+class ExistingFindingEntry(BaseModel):
+    finding_id: str
+    rule_id: str
+    provenance: str
+    kind: str
+    severity: str
+    summary: str
+    line: int = 0
+
+
+class AuditFactBundle(BaseModel):
+    bundle_version: str = "1.0"
+    contract: Dict[str, Any] = Field(default_factory=dict)
+    intent: Dict[str, Any] = Field(default_factory=dict)
+    invariant_matrix: Dict[str, Any] = Field(default_factory=dict)
+    capabilities: Dict[str, Any] = Field(default_factory=dict)
+    value_flow: Dict[str, Any] = Field(default_factory=dict)
+    authorization: Dict[str, Any] = Field(default_factory=dict)
+    existing_findings: List[ExistingFindingEntry] = Field(default_factory=list)
+    coverage: Dict[str, Any] = Field(default_factory=dict)
+    judge_instructions: Dict[str, Any] = Field(default_factory=dict)
+
+
 class AuditIssue(BaseModel):
     title: str
     severity: Severity
