@@ -10,23 +10,34 @@ from src.models import (
     IntentModel,
     IssueClass,
     Provenance,
+    SemanticVerdict,
     Severity,
     Triggerability,
 )
 from src.services.audit_engine.audit_lint import get_audit_linter as get_dsl_linter
 from src.services.audit_engine.audit_phase import validate_audit
+from src.services.audit_engine.invariant_engine import InvariantEngine
+from src.services.audit_fact_bundle import build_audit_fact_bundle
 from src.services.compiler import get_compiler_service
 from src.services.finding_policy import (
+    finalize_from_judgment,
+    kind_to_semantic_category,
     finalize,
     is_exploitable,
-    kind_to_semantic_category,
+    log_judgment_contradictions,
 )
 from src.services.intent_invariants import (
     build_invariant_matrix,
     verify_intent_invariants,
 )
-from src.services.scoring import calculate_audit_report, ALLOWED_CATEGORIES
+from src.services.scoring import calculate_audit_report
 from src.services.semantic_capabilities import extract_semantic_capabilities
+from src.services.semantic_judge import (
+    parse_legacy_semantic_response,
+    run_semantic_judge,
+    semantic_judge_v2_enabled,
+)
+from src.utils.cashscript_ast import CashScriptAST
 
 logger = logging.getLogger("nexops.audit_agent")
 
@@ -358,7 +369,27 @@ class AuditAgent:
             intent_issues = verify_intent_invariants(code, intent, intent_model)
             issues.extend(intent_issues)
 
-        # ── 4. Semantic Classification (LLM) ─────────────────────────────
+        # ── 3.6 Capabilities + fact bundle (before semantic judge) ─────────
+        sem_caps = extract_semantic_capabilities(code, contract_mode=effective_mode)
+        engine_invariants: dict = {}
+        if compile_success:
+            try:
+                engine_invariants = InvariantEngine(CashScriptAST(code)).analyze()
+            except Exception as exc:
+                logger.warning("[Audit] InvariantEngine analyze failed: %s", exc)
+
+        fact_bundle = build_audit_fact_bundle(
+            code=code,
+            intent=intent,
+            intent_model=intent_model,
+            invariant_matrix=invariant_matrix,
+            sem_caps=sem_caps,
+            engine_invariants=engine_invariants,
+            existing_issues=issues,
+            effective_mode=effective_mode,
+        )
+
+        # ── 4. Semantic Security Judge (LLM) ─────────────────────────────
         semantic_category = "none"
         business_logic_score = 5
 
@@ -373,113 +404,135 @@ class AuditAgent:
                     provider_type=provider,
                     openrouter_key=openrouter_key,
                 )
-                user_prompt = _build_semantic_user_prompt(
-                    code, intent, invariant_matrix_text
-                )
 
-                raw_response = await audit_provider.complete(
-                    user_prompt, system=SEMANTIC_SYSTEM_PROMPT
-                )
-
-                decoder = json.JSONDecoder()
-                start = raw_response.find("{")
-                if start == -1:
-                    raise ValueError("No JSON object found in LLM audit response.")
-                semantic_data, _ = decoder.raw_decode(raw_response, start)
-
-                semantic_label = str(semantic_data.get("category", "SAFE")).strip().lower()
-                mapped_category = SEMANTIC_CLASS_TO_INTERNAL.get(semantic_label, "none")
-                if mapped_category not in ALLOWED_CATEGORIES:
-                    logger.warning(
-                        f"[Semantic Audit] Unknown category '{semantic_label}' — defaulting to 'none'."
+                if semantic_judge_v2_enabled():
+                    judgment = await run_semantic_judge(
+                        code=code,
+                        intent=intent,
+                        bundle=fact_bundle,
+                        audit_provider=audit_provider,
                     )
-                    mapped_category = "none"
+                    log_judgment_contradictions(judgment, fact_bundle)
 
-                semantic_category = mapped_category
-                if semantic_category == "major_protocol_flaw":
-                    semantic_exploit_check = str(
-                        semantic_data.get("exploit_severity", "n/a")
-                    ).strip().lower()
-                    if semantic_exploit_check != "direct_fund_loss":
-                        semantic_category = "moderate_logic_risk"
-
-                confidence = semantic_data.get("confidence", 0.0)
-                try:
-                    semantic_confidence = max(0.0, min(1.0, float(confidence)))
-                except (TypeError, ValueError):
-                    semantic_confidence = 0.0
-
-                _MULTI_CONTRACT_SIGNALS = [
-                    "startupContract",
-                    "fundContract",
-                    "assetContract",
-                    "managerContract",
-                ]
-                if any(signal in code for signal in _MULTI_CONTRACT_SIGNALS):
-                    if semantic_confidence is not None:
-                        semantic_confidence = min(semantic_confidence, 0.72)
-
-                explanation = semantic_data.get("explanation", "")
-                semantic_exploit = str(
-                    semantic_data.get("exploit_severity", "n/a")
-                ).strip().lower()
-                exploit_map = {
-                    "direct_fund_loss": ExploitSeverity.DIRECT_FUND_LOSS,
-                    "partial_violation": ExploitSeverity.PARTIAL_VIOLATION,
-                    "griefing": ExploitSeverity.GRIEFING,
-                    "n/a": ExploitSeverity.NOT_APPLICABLE,
-                }
-                semantic_exploit_severity = exploit_map.get(
-                    semantic_exploit, ExploitSeverity.NOT_APPLICABLE
-                )
-
-                raw_biz = semantic_data.get("business_logic_score", 5)
-                try:
-                    business_logic_score = max(0, min(10, int(raw_biz)))
-                except (TypeError, ValueError):
-                    business_logic_score = 5
-                biz_notes = semantic_data.get("business_logic_notes", "")
-
-                logger.info(
-                    f"[Semantic Audit] category={semantic_category!r} "
-                    f"confidence={semantic_confidence:.2f} biz_score={business_logic_score}/10 | "
-                    f"{explanation[:80]} | {biz_notes[:80]}"
-                )
-
-                if semantic_category != "none":
-                    deferred_validation = semantic_label == "assumption"
-                    if semantic_label == "exploit" and semantic_exploit_severity == ExploitSeverity.NOT_APPLICABLE:
-                        semantic_exploit_severity = ExploitSeverity.DIRECT_FUND_LOSS
-
-                    semantic_issue = _emit_issue(
-                        summary=explanation[:80] if explanation else semantic_category,
-                        description=explanation
-                        or f"Semantic risk category '{semantic_category}' detected.",
-                        recommendation=biz_notes
-                        or "Review the contract logic and ensure all spending paths are reachable.",
-                        rule_id=f"semantic_{semantic_category}",
-                        can_fix=False,
-                        source="semantic",
-                        semantic_label=semantic_label,
-                        exploit_severity=semantic_exploit_severity,
-                        provenance=Provenance.LLM,
-                        confidence_score=semantic_confidence,
-                        deferred_validation=deferred_validation,
-                        proposed_severity=Severity.CRITICAL
-                        if semantic_label == "funds_unspendable"
-                        else None,
-                        kind=FindingKind.VULNERABILITY
-                        if semantic_label == "funds_unspendable"
-                        else None,
+                    business_logic_score = judgment.intent_fidelity_score
+                    business_logic_notes = judgment.intent_fidelity_notes
+                    semantic_confidence = (
+                        judgment.finding.confidence
+                        if judgment.finding
+                        else None
                     )
 
-                    # Re-map semantic_category from policy for non-attacker findings only.
-                    if semantic_issue.triggerability == Triggerability.NON_ATTACKER:
-                        policy_category = kind_to_semantic_category(semantic_issue.kind)
-                        if policy_category != "none":
-                            semantic_category = policy_category
+                    logger.info(
+                        "[Semantic Judge V2] verdict=%s fidelity=%s/10 confidence=%s",
+                        judgment.verdict.value,
+                        business_logic_score,
+                        semantic_confidence,
+                    )
 
-                    issues.append(semantic_issue)
+                    if judgment.verdict == SemanticVerdict.FINDING and judgment.finding:
+                        finalized = finalize_from_judgment(judgment)
+                        if finalized:
+                            finding = judgment.finding
+                            description = finding.reasoning or finding.summary
+                            semantic_issue = _emit_issue(
+                                summary=finding.summary[:80]
+                                if finding.summary
+                                else finalized.title,
+                                description=description
+                                or "Semantic security judgment.",
+                                recommendation=finding.recommendation
+                                or business_logic_notes
+                                or "Review the contract logic.",
+                                rule_id=f"semantic_{kind_to_semantic_category(finalized.kind)}",
+                                can_fix=False,
+                                source="semantic",
+                                semantic_label="",
+                                exploit_severity=finalized.exploit_severity,
+                                provenance=Provenance.LLM,
+                                confidence_score=judgment.finding.confidence
+                                if judgment.finding
+                                else None,
+                                deferred_validation=finding.deferred_validation,
+                                kind=finalized.kind,
+                                triggerability=finalized.triggerability,
+                                proposed_severity=finalized.severity,
+                            )
+                            if finalized.kind == FindingKind.VULNERABILITY and (
+                                "unspendable" in (finding.gap_id or "").lower()
+                                or finding.affected_invariant == "funds_unspendable"
+                            ):
+                                semantic_issue = semantic_issue.model_copy(
+                                    update={
+                                        "rule_id": "semantic_funds_unspendable",
+                                        "severity": Severity.CRITICAL,
+                                    }
+                                )
+
+                            issues.append(semantic_issue)
+                            gap_lower = (finding.gap_id or "").lower()
+                            is_unspendable = (
+                                "unspendable" in gap_lower
+                                or finding.affected_invariant == "funds_unspendable"
+                            )
+                            if is_unspendable:
+                                semantic_category = "funds_unspendable"
+                            else:
+                                semantic_category = kind_to_semantic_category(finalized.kind)
+                else:
+                    user_prompt = _build_semantic_user_prompt(
+                        code, intent, invariant_matrix_text
+                    )
+
+                    raw_response = await audit_provider.complete(
+                        user_prompt, system=SEMANTIC_SYSTEM_PROMPT
+                    )
+
+                    decoder = json.JSONDecoder()
+                    start = raw_response.find("{")
+                    if start == -1:
+                        raise ValueError("No JSON object found in LLM audit response.")
+                    semantic_data, _ = decoder.raw_decode(raw_response, start)
+
+                    judgment = parse_legacy_semantic_response(semantic_data)
+                    business_logic_score = judgment.intent_fidelity_score
+                    business_logic_notes = judgment.intent_fidelity_notes
+                    semantic_confidence = (
+                        judgment.finding.confidence if judgment.finding else None
+                    )
+
+                    if judgment.verdict == SemanticVerdict.FINDING and judgment.finding:
+                        finalized = finalize_from_judgment(judgment)
+                        if finalized:
+                            finding = judgment.finding
+                            semantic_category = kind_to_semantic_category(finalized.kind)
+                            semantic_issue = _emit_issue(
+                                summary=finding.summary[:80]
+                                if finding.summary
+                                else finalized.title,
+                                description=finding.reasoning or finding.summary,
+                                recommendation=finding.recommendation
+                                or business_logic_notes
+                                or "Review the contract logic.",
+                                rule_id=f"semantic_{semantic_category}",
+                                can_fix=False,
+                                source="semantic",
+                                semantic_label="",
+                                exploit_severity=finalized.exploit_severity,
+                                provenance=Provenance.LLM,
+                                confidence_score=semantic_confidence,
+                                deferred_validation=finding.deferred_validation,
+                                kind=finalized.kind,
+                                triggerability=finalized.triggerability,
+                                proposed_severity=finalized.severity,
+                            )
+                            if semantic_category == "funds_unspendable":
+                                semantic_issue = semantic_issue.model_copy(
+                                    update={
+                                        "rule_id": "semantic_funds_unspendable",
+                                        "severity": Severity.CRITICAL,
+                                    }
+                                )
+                            issues.append(semantic_issue)
 
             except Exception as e:
                 logger.error(
@@ -492,7 +545,6 @@ class AuditAgent:
             logger.info("[Semantic Audit] Skipped — compile failed.")
 
         # ── 5. Aggregate, Score, Return ───────────────────────────────────
-        sem_caps = extract_semantic_capabilities(code, contract_mode=effective_mode)
         auth_caps = sem_caps.authorization
         if auth_caps.get("has_multisig_auth"):
             authorization_confidence = 1.0
