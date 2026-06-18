@@ -271,13 +271,23 @@ class ClassificationScenario:
     effective_mode: str = ""
     intent_model: Optional[IntentModel] = None
     llm_payload: Optional[dict] = None
+    legacy_llm_payload: Optional[dict] = None
     expectation: ClassificationExpectation = field(default_factory=ClassificationExpectation)
     skip_full_audit: bool = False
     policy_only_fn: Optional[str] = None
     policy_only_kwargs: Optional[dict] = None
 
 
-def _safe_llm() -> dict:
+def _reasoning_steps() -> List[str]:
+    return [
+        "Examined declared intent invariants for this contract pattern.",
+        "Identified attacker-controlled transaction inputs relevant to the spend path.",
+        "Assessed value impact on BCH and token flows.",
+        "Determined whether an attacker gains unauthorized value or authorization.",
+    ]
+
+
+def _safe_llm_legacy() -> dict:
     return {
         "category": "SAFE",
         "exploit_severity": "n/a",
@@ -286,6 +296,68 @@ def _safe_llm() -> dict:
         "business_logic_score": 8,
         "business_logic_notes": "",
     }
+
+
+def _safe_llm_v2() -> dict:
+    return {
+        "judge_version": "2.0",
+        "verdict": "no_issue",
+        "intent_fidelity_score": 8,
+        "intent_fidelity_notes": "",
+    }
+
+
+def _v2_finding(
+    *,
+    gap_id: str,
+    attacker_gain: bool,
+    authorization_impact: bool = False,
+    value_impact: str = "none",
+    trust_assumption: str = "none",
+    summary: str = "",
+    reasoning: str = "",
+    recommendation: str = "",
+    confidence: float = 0.9,
+    intent_fidelity_score: int = 8,
+    intent_fidelity_notes: str = "",
+    deferred_validation: bool = False,
+    affected_invariant: str = "",
+    evidence_gaps: Optional[List[str]] = None,
+    uncertainty_reason: str = "",
+    exploit_class: Optional[str] = None,
+) -> dict:
+    return {
+        "judge_version": "2.0",
+        "verdict": "finding",
+        "intent_fidelity_score": intent_fidelity_score,
+        "intent_fidelity_notes": intent_fidelity_notes,
+        "finding": {
+            "gap_id": gap_id,
+            "attacker_gain": attacker_gain,
+            "authorization_impact": authorization_impact,
+            "value_impact": value_impact,
+            "exploit_class": exploit_class,
+            "trust_assumption": trust_assumption,
+            "affected_invariant": affected_invariant,
+            "deferred_validation": deferred_validation,
+            "attacker_controlled_inputs": ["tx.inputs"] if attacker_gain else [],
+            "spend_path": {"function": "", "line_hint": 0},
+            "fact_refs": [],
+            "contradicts_fact_ids": [],
+            "evidence_gaps": evidence_gaps or [],
+            "uncertainty_reason": uncertainty_reason,
+            "reasoning_steps": _reasoning_steps(),
+            "summary": summary,
+            "reasoning": reasoning,
+            "recommendation": recommendation,
+            "confidence": confidence,
+        },
+    }
+
+
+def _safe_llm() -> dict:
+    """Default V2 mock payload for matrix scenarios."""
+    return _safe_llm_v2()
 
 
 SCENARIOS: List[ClassificationScenario] = [
@@ -328,7 +400,21 @@ SCENARIOS: List[ClassificationScenario] = [
         code=PAYROLL_FIXED_SALARY,
         intent=PAYROLL_INTENT_FIXED,
         effective_mode="split_payment",
-        llm_payload={
+        llm_payload=_v2_finding(
+            gap_id="semantic.treasury_prefunding",
+            attacker_gain=False,
+            value_impact="none",
+            trust_assumption="external_funding",
+            summary="Treasury may be underfunded relative to payroll obligations.",
+            reasoning="Liquidity failure, not an on-chain authorization bypass.",
+            recommendation="Ensure treasury is pre-funded off-chain.",
+            confidence=0.91,
+            intent_fidelity_score=4,
+            intent_fidelity_notes="Ensure treasury is pre-funded off-chain.",
+            evidence_gaps=["treasury balance not visible on-chain"],
+            uncertainty_reason="requires off-chain funding assumptions",
+        ),
+        legacy_llm_payload={
             "category": "EXPLOIT",
             "exploit_severity": "direct_fund_loss",
             "explanation": "Treasury may be underfunded relative to payroll obligations.",
@@ -375,7 +461,19 @@ SCENARIOS: List[ClassificationScenario] = [
         code=ESCROW_RELEASE_ONLY,
         intent="Two-party escrow with release to recipient and refund path for sender after timeout.",
         effective_mode="escrow",
-        llm_payload={
+        llm_payload=_v2_finding(
+            gap_id="semantic.escrow_refund_missing",
+            attacker_gain=True,
+            authorization_impact=True,
+            value_impact="medium",
+            summary="Refund path missing; sender cannot recover funds after timeout.",
+            reasoning="Missing refund path allows value lock for sender.",
+            recommendation="Add refund function with timelock.",
+            confidence=0.88,
+            intent_fidelity_score=3,
+            intent_fidelity_notes="Add refund function with timelock.",
+        ),
+        legacy_llm_payload={
             "category": "EXPLOIT",
             "exploit_severity": "partial_violation",
             "explanation": "Refund path missing; sender cannot recover funds after timeout.",
@@ -398,7 +496,20 @@ SCENARIOS: List[ClassificationScenario] = [
         code=ESCROW_WITH_REFUND,
         intent="Escrow with release and refund; external liquidity provider funds the escrow UTXO.",
         effective_mode="escrow",
-        llm_payload={
+        llm_payload=_v2_finding(
+            gap_id="semantic.escrow_external_funding",
+            attacker_gain=False,
+            value_impact="none",
+            trust_assumption="external_funding",
+            summary="Safety relies on external treasury pre-funding the escrow UTXO off-chain.",
+            reasoning="Deployment assumption, not an on-chain exploit.",
+            recommendation="Document deployment funding requirement.",
+            confidence=0.87,
+            intent_fidelity_score=6,
+            intent_fidelity_notes="Document deployment funding requirement.",
+            uncertainty_reason="requires off-chain funding assumptions",
+        ),
+        legacy_llm_payload={
             "category": "ASSUMPTION",
             "exploit_severity": "n/a",
             "explanation": "Safety relies on external treasury pre-funding the escrow UTXO off-chain.",
@@ -561,7 +672,19 @@ SCENARIOS: List[ClassificationScenario] = [
         code=TOKEN_NO_SUPPLY_CAP,
         intent="Capped token mint with maximum supply of 1 million tokens. Owner must sign.",
         effective_mode="ft_mint",
-        llm_payload={
+        llm_payload=_v2_finding(
+            gap_id="semantic.supply_cap_missing",
+            attacker_gain=True,
+            authorization_impact=False,
+            value_impact="medium",
+            summary="Mint path does not enforce maxSupply cap on-chain.",
+            reasoning="Uncapped mint allows supply inflation beyond intent.",
+            recommendation="Add require(amount <= maxSupply).",
+            confidence=0.86,
+            intent_fidelity_score=3,
+            intent_fidelity_notes="Add require(amount <= maxSupply).",
+        ),
+        legacy_llm_payload={
             "category": "EXPLOIT",
             "exploit_severity": "partial_violation",
             "explanation": "Mint path does not enforce maxSupply cap on-chain.",
@@ -585,7 +708,19 @@ SCENARIOS: List[ClassificationScenario] = [
         code=PAYROLL_FIXED_SALARY,
         intent="Payroll with fixed salaries.",
         effective_mode="split_payment",
-        llm_payload={
+        llm_payload=_v2_finding(
+            gap_id="semantic.exact_equality_rigidity",
+            attacker_gain=False,
+            value_impact="low",
+            summary="Exact equality constraints on output amounts may cause operational failure if fees vary.",
+            reasoning="Design rigidity without attacker gain.",
+            recommendation="Accepted rigidity.",
+            confidence=0.9,
+            intent_fidelity_score=5,
+            intent_fidelity_notes="Accepted rigidity.",
+            exploit_class="griefing",
+        ),
+        legacy_llm_payload={
             "category": "DESIGN_TRADEOFF",
             "exploit_severity": "direct_fund_loss",
             "explanation": "Exact equality constraints on output amounts may cause operational failure if fees vary.",
@@ -612,7 +747,18 @@ SCENARIOS: List[ClassificationScenario] = [
         code=PAYROLL_FIXED_SALARY,
         intent="Payroll with fixed salaries.",
         effective_mode="split_payment",
-        llm_payload={
+        llm_payload=_v2_finding(
+            gap_id="semantic.no_change_output",
+            attacker_gain=False,
+            value_impact="low",
+            summary="Contract does not handle change outputs or dust change.",
+            reasoning="Operational design choice without attacker benefit.",
+            recommendation="Intentional exact-output design.",
+            confidence=0.88,
+            intent_fidelity_score=6,
+            intent_fidelity_notes="Intentional exact-output design.",
+        ),
+        legacy_llm_payload={
             "category": "DESIGN_TRADEOFF",
             "exploit_severity": "n/a",
             "explanation": "Contract does not handle change outputs or dust change.",
@@ -651,7 +797,18 @@ SCENARIOS: List[ClassificationScenario] = [
         code=PAYROLL_FIXED_SALARY,
         intent=PAYROLL_INTENT_FIXED,
         effective_mode="split_payment",
-        llm_payload={
+        llm_payload=_v2_finding(
+            gap_id="semantic.payout_ordering",
+            attacker_gain=True,
+            value_impact="low",
+            summary="Edge case in payout ordering may confuse operators.",
+            reasoning="Partial violation in rare ordering layouts.",
+            recommendation="Review ordering.",
+            confidence=0.75,
+            intent_fidelity_score=4,
+            intent_fidelity_notes="Review ordering.",
+        ),
+        legacy_llm_payload={
             "category": "EXPLOIT",
             "exploit_severity": "partial_violation",
             "explanation": "Edge case in payout ordering may confuse operators.",
@@ -689,7 +846,20 @@ SCENARIOS: List[ClassificationScenario] = [
         code=PAYROLL_FIXED_SALARY,
         intent=PAYROLL_INTENT_FIXED,
         effective_mode="split_payment",
-        llm_payload={
+        llm_payload=_v2_finding(
+            gap_id="semantic.treasury_underfunding",
+            attacker_gain=False,
+            value_impact="none",
+            trust_assumption="external_funding",
+            summary="Treasury may be underfunded; insufficient funds could block payroll.",
+            reasoning="Operational liquidity concern, not unauthorized extraction.",
+            recommendation="Pre-fund treasury.",
+            confidence=0.9,
+            intent_fidelity_score=3,
+            intent_fidelity_notes="Pre-fund treasury.",
+            uncertainty_reason="requires off-chain funding assumptions",
+        ),
+        legacy_llm_payload={
             "category": "EXPLOIT",
             "exploit_severity": "direct_fund_loss",
             "explanation": "Treasury may be underfunded; insufficient funds could block payroll.",
@@ -711,7 +881,18 @@ SCENARIOS: List[ClassificationScenario] = [
         code=PAYROLL_FIXED_SALARY,
         intent=PAYROLL_INTENT_FIXED,
         effective_mode="split_payment",
-        llm_payload={
+        llm_payload=_v2_finding(
+            gap_id="semantic.dust_fee_assumptions",
+            attacker_gain=False,
+            value_impact="low",
+            summary="Fee assumptions and dust outputs are not handled; honest spends may fail.",
+            reasoning="Design/operational friction without attacker gain.",
+            recommendation="Operational consideration.",
+            confidence=0.85,
+            intent_fidelity_score=5,
+            intent_fidelity_notes="Operational consideration.",
+        ),
+        legacy_llm_payload={
             "category": "DESIGN_TRADEOFF",
             "exploit_severity": "n/a",
             "explanation": "Fee assumptions and dust outputs are not handled; honest spends may fail.",
@@ -733,7 +914,21 @@ SCENARIOS: List[ClassificationScenario] = [
         code=PAYROLL_FIXED_SALARY,
         intent=PAYROLL_INTENT_FIXED,
         effective_mode="split_payment",
-        llm_payload={
+        llm_payload=_v2_finding(
+            gap_id="semantic.output_ordering_edge",
+            attacker_gain=True,
+            authorization_impact=False,
+            value_impact="medium",
+            summary="Output ordering edge case under rare transaction layouts.",
+            reasoning="Ambiguous partial violation under rare layouts.",
+            recommendation="Needs review.",
+            confidence=0.55,
+            intent_fidelity_score=4,
+            intent_fidelity_notes="Needs review.",
+            evidence_gaps=["full transaction layout not proven"],
+            uncertainty_reason="ambiguous edge case",
+        ),
+        legacy_llm_payload={
             "category": "EXPLOIT",
             "exploit_severity": "partial_violation",
             "explanation": "Output ordering edge case under rare transaction layouts.",
