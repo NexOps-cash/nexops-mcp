@@ -55,12 +55,23 @@ async def test_semantic_exploit_downgrades_without_direct_fund_loss():
     from src.services.audit_agent import AuditAgent
 
     mock_response = {
-        "category": "EXPLOIT",
-        "exploit_severity": "griefing",
-        "explanation": "Design concern without proven direct loss.",
-        "confidence": 0.9,
-        "business_logic_score": 5,
-        "business_logic_notes": "Review.",
+        "judge_version": "2.0",
+        "verdict": "finding",
+        "intent_fidelity_score": 5,
+        "intent_fidelity_notes": "Review.",
+        "finding": {
+            "gap_id": "semantic.griefing_concern",
+            "attacker_gain": True,
+            "authorization_impact": False,
+            "value_impact": "low",
+            "attacker_controlled_inputs": ["tx.inputs"],
+            "reasoning_steps": ["a", "b", "c", "d"],
+            "summary": "Design concern without proven direct loss.",
+            "reasoning": "Design concern without proven direct loss.",
+            "recommendation": "Review.",
+            "confidence": 0.9,
+            "exploit_class": "griefing",
+        },
     }
     mock_provider = MagicMock()
     mock_provider.complete = AsyncMock(return_value=json.dumps(mock_response))
