@@ -1,0 +1,13 @@
+pragma cashscript ^0.13.0;
+contract RefundableNoAuth(int timeout) {
+    function claim() {
+        require(tx.time >= timeout);
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+    }
+
+    function refund() {
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+    }
+}

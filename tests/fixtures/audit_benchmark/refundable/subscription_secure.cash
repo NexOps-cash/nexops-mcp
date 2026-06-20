@@ -1,0 +1,21 @@
+pragma cashscript ^0.13.0;
+contract SubscriptionRefundable(
+    pubkey service,
+    pubkey subscriber,
+    int monthlyPeriod
+) {
+    function claim(sig serviceSig) {
+        require(service != subscriber);
+        require(checkSig(serviceSig, service));
+        require(tx.time >= monthlyPeriod);
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+    }
+
+    function cancel(sig subscriberSig) {
+        require(service != subscriber);
+        require(checkSig(subscriberSig, subscriber));
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+    }
+}

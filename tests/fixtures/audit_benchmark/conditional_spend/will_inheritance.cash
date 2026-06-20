@@ -1,0 +1,23 @@
+pragma cashscript ^0.13.0;
+contract ConditionalWill(
+    pubkey owner,
+    pubkey beneficiary,
+    int inactivityTimeout,
+    bytes ownerLock,
+    bytes beneficiaryLock
+) {
+    function ownerSpend(sig ownerSig) {
+        require(checkSig(ownerSig, owner));
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].lockingBytecode == ownerLock);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+    }
+
+    function beneficiaryClaim(sig beneficiarySig) {
+        require(checkSig(beneficiarySig, beneficiary));
+        require(tx.time >= inactivityTimeout);
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].lockingBytecode == beneficiaryLock);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+    }
+}

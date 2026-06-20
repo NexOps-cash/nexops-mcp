@@ -1,0 +1,27 @@
+pragma cashscript ^0.13.0;
+contract ConditionalMultiPath(
+    pubkey alice,
+    pubkey bob,
+    int bobDelay,
+    bytes destLock
+) {
+    function aliceOnly(sig aliceSig) {
+        require(checkSig(aliceSig, alice));
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].lockingBytecode == destLock);
+    }
+
+    function bobOnly(sig bobSig) {
+        require(checkSig(bobSig, bob));
+        require(tx.time >= bobDelay);
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].lockingBytecode == destLock);
+    }
+
+    function aliceBob(sig aliceSig, sig bobSig) {
+        require(checkSig(aliceSig, alice));
+        require(checkSig(bobSig, bob));
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].lockingBytecode == destLock);
+    }
+}

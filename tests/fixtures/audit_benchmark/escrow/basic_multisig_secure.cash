@@ -1,0 +1,15 @@
+pragma cashscript ^0.13.0;
+contract Escrow2of2(
+    pubkey buyer,
+    pubkey seller,
+    bytes recipientLock
+) {
+    function release(sig buyerSig, sig sellerSig) {
+        require(buyer != seller);
+        require(checkSig(buyerSig, buyer));
+        require(checkSig(sellerSig, seller));
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].lockingBytecode == recipientLock);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+    }
+}
