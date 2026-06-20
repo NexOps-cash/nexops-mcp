@@ -1,0 +1,18 @@
+pragma cashscript ^0.13.0;
+contract LinearDecay(
+    pubkey seller,
+    int startPrice,
+    int endPrice,
+    int decayStart,
+    bytes sellerLock
+) {
+    function settle(sig sellerSig, int quotedPrice) {
+        require(checkSig(sellerSig, seller));
+        require(tx.time >= decayStart);
+        require(quotedPrice >= endPrice);
+        require(startPrice >= quotedPrice);
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].lockingBytecode == sellerLock);
+        require(tx.outputs[0].value == quotedPrice);
+    }
+}

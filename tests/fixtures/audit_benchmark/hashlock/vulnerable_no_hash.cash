@@ -1,0 +1,7 @@
+pragma cashscript ^0.13.0;
+contract HashlockNoVerify(bytes32 hash) {
+    function claim(bytes preimage) {
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+    }
+}

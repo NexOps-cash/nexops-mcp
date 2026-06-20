@@ -1,0 +1,254 @@
+{
+  "schema_version": "1.0",
+  "description": "Real-world BCH/CashScript contracts for NexOps audit benchmarks",
+  "total_count": 28,
+  "contracts": [
+    {
+      "id": "rw_golden_escrow_001",
+      "filename": "contracts/escrow_2of3_nft.cash",
+      "family": "escrow",
+      "classification": "safe",
+      "source": "nexops_golden",
+      "provenance": "knowledge/golden/patterns/escrow_2of3_nft.cash",
+      "known_issues": [],
+      "audit_status": "never_audited",
+      "benchmark_slot": "bench_realworld_001"
+    },
+    {
+      "id": "rw_golden_refundable_001",
+      "filename": "contracts/refundable_crowdfund.cash",
+      "family": "refundable_payment",
+      "classification": "safe",
+      "source": "nexops_golden",
+      "provenance": "knowledge/golden/patterns/refundable_crowdfund.cash",
+      "known_issues": [],
+      "audit_status": "never_audited",
+      "benchmark_slot": "bench_realworld_002"
+    },
+    {
+      "id": "rw_golden_vesting_001",
+      "filename": "contracts/linear_vesting.cash",
+      "family": "decay",
+      "classification": "safe",
+      "source": "nexops_golden",
+      "provenance": "knowledge/golden/patterns/linear_vesting.cash",
+      "known_issues": [],
+      "audit_status": "never_audited",
+      "benchmark_slot": "bench_realworld_003"
+    },
+    {
+      "id": "rw_golden_ft_001",
+      "filename": "contracts/ft_transfer.cash",
+      "family": "cashtokens_ft",
+      "classification": "safe",
+      "source": "nexops_golden",
+      "provenance": "knowledge/golden/patterns/ft_transfer.cash",
+      "known_issues": [],
+      "audit_status": "never_audited",
+      "benchmark_slot": "bench_realworld_009"
+    },
+    {
+      "id": "rw_golden_nft_imm_001",
+      "filename": "contracts/nft_transfer_immutable.cash",
+      "family": "cashtokens_nft",
+      "classification": "safe",
+      "source": "nexops_golden",
+      "provenance": "knowledge/golden/patterns/nft_transfer_immutable.cash",
+      "known_issues": [],
+      "audit_status": "never_audited",
+      "benchmark_slot": "bench_realworld_010"
+    },
+    {
+      "id": "rw_golden_hybrid_001",
+      "filename": "contracts/stablecoin_minter_sidecar.cash",
+      "family": "hybrid",
+      "classification": "safe",
+      "source": "nexops_golden",
+      "provenance": "knowledge/golden/patterns/stablecoin_minter_sidecar.cash",
+      "known_issues": [],
+      "audit_status": "never_audited",
+      "benchmark_slot": "bench_realworld_011"
+    },
+    {
+      "id": "rw_antipattern_covenant_001",
+      "filename": "contracts/vulnerable_covenant.cash",
+      "family": "covenant",
+      "classification": "unsafe",
+      "source": "nexops_antipattern",
+      "provenance": "knowledge/anti_pattern/vulnerable_covenant.cash",
+      "known_issues": ["missing lockingBytecode continuation"],
+      "audit_status": "never_audited",
+      "benchmark_slot": "bench_realworld_017"
+    },
+    {
+      "id": "rw_antipattern_mint_001",
+      "filename": "contracts/minting_authority_leak.cash",
+      "family": "cashtokens_nft",
+      "classification": "unsafe",
+      "source": "nexops_antipattern",
+      "provenance": "knowledge/anti_pattern/minting_authority_leak.cash",
+      "known_issues": ["authority_leak", "minting_authority_escape"],
+      "audit_status": "never_audited",
+      "benchmark_slot": "bench_realworld_019"
+    },
+    {
+      "id": "rw_fixture_auth_leak_secure",
+      "filename": "contracts/cashtokens_auth_leak_secure.cash",
+      "family": "cashtokens_nft",
+      "classification": "safe",
+      "source": "detector_fixture",
+      "provenance": "tests/fixtures/cashtokens_invalid/authority_leak/secure.cash",
+      "known_issues": [],
+      "audit_status": "never_audited",
+      "benchmark_slot": null
+    },
+    {
+      "id": "rw_fixture_auth_leak_vuln",
+      "filename": "contracts/cashtokens_auth_leak_vulnerable.cash",
+      "family": "cashtokens_nft",
+      "classification": "unsafe",
+      "source": "detector_fixture",
+      "provenance": "tests/fixtures/cashtokens_invalid/authority_leak/vulnerable.cash",
+      "known_issues": ["authority_leak"],
+      "audit_status": "never_audited",
+      "benchmark_slot": null
+    },
+    {
+      "id": "rw_fixture_cat_drift_vuln",
+      "filename": "contracts/cashtokens_cat_drift_vulnerable.cash",
+      "family": "cashtokens_ft",
+      "classification": "unsafe",
+      "source": "detector_fixture",
+      "provenance": "tests/fixtures/cashtokens_invalid/token_category_drift/vulnerable.cash",
+      "known_issues": ["token_category_drift"],
+      "audit_status": "never_audited",
+      "benchmark_slot": "bench_realworld_018"
+    },
+    {
+      "id": "rw_class_payroll_fixed",
+      "filename": "contracts/payroll_fixed_salary.cash",
+      "family": "payroll",
+      "classification": "safe",
+      "source": "classification_matrix",
+      "provenance": "tests/audit_classification_matrix/scenarios.py:PAYROLL_FIXED_SALARY",
+      "known_issues": [],
+      "audit_status": "audited_v2_1",
+      "benchmark_slot": "bench_payroll_001"
+    },
+    {
+      "id": "rw_class_payroll_no_auth",
+      "filename": "contracts/payroll_no_auth.cash",
+      "family": "payroll",
+      "classification": "unsafe",
+      "source": "classification_matrix",
+      "provenance": "tests/audit_classification_matrix/scenarios.py:PAYROLL_NO_AUTH",
+      "known_issues": ["intent_auth_gate"],
+      "audit_status": "audited_v2_1",
+      "benchmark_slot": "bench_payroll_004"
+    },
+    {
+      "id": "rw_class_vault_timelock",
+      "filename": "contracts/vault_with_timelock.cash",
+      "family": "vault",
+      "classification": "safe",
+      "source": "classification_matrix",
+      "provenance": "tests/audit_classification_matrix/scenarios.py:VAULT_WITH_TIMELOCK",
+      "known_issues": [],
+      "audit_status": "audited_v2_1",
+      "benchmark_slot": "bench_realworld_013"
+    },
+    {
+      "id": "rw_class_vault_no_timelock",
+      "filename": "contracts/vault_no_timelock.cash",
+      "family": "vault",
+      "classification": "unknown",
+      "source": "classification_matrix",
+      "provenance": "tests/audit_classification_matrix/scenarios.py:VAULT_NO_TIMELOCK",
+      "known_issues": ["intent may expect timelock — review"],
+      "audit_status": "audited_v2_1",
+      "benchmark_slot": "bench_realworld_014"
+    },
+    {
+      "id": "rw_adv_oracle_price",
+      "filename": "contracts/oracle_swap.cash",
+      "family": "oracle",
+      "classification": "safe",
+      "source": "adversarial_corpus",
+      "provenance": "tests/adversarial_semantic_judge/scenarios.py:ORACLE_PRICE",
+      "known_issues": [],
+      "audit_status": "audited_v2_1",
+      "benchmark_slot": "bench_oracle_001"
+    },
+    {
+      "id": "rw_adv_partial_auth",
+      "filename": "contracts/dual_path_admin_public.cash",
+      "family": "multisig",
+      "classification": "unsafe",
+      "source": "adversarial_corpus",
+      "provenance": "tests/adversarial_semantic_judge/scenarios.py:PARTIAL_AUTH_BYPASS",
+      "known_issues": ["publicSpend path without auth"],
+      "audit_status": "audited_v2_1",
+      "benchmark_slot": null
+    },
+    {
+      "id": "rw_adv_one_sat_redirect",
+      "filename": "contracts/leaky_payout.cash",
+      "family": "payroll",
+      "classification": "unsafe",
+      "source": "adversarial_corpus",
+      "provenance": "tests/adversarial_semantic_judge/scenarios.py:ONE_SATOSHI_REDIRECT",
+      "known_issues": ["unconstrained second output"],
+      "audit_status": "audited_v2_1",
+      "benchmark_slot": null
+    },
+    {
+      "id": "rw_bench_escrow_001",
+      "filename": null,
+      "family": "escrow",
+      "classification": "unknown",
+      "source": "benchmark_results",
+      "provenance": "benchmark/results/ — esc_001 converged code TBD",
+      "known_issues": [],
+      "audit_status": "never_audited",
+      "benchmark_slot": "bench_realworld_001"
+    },
+    {
+      "id": "rw_bench_hashlock_001",
+      "filename": null,
+      "family": "hashlock",
+      "classification": "unknown",
+      "source": "benchmark_results",
+      "provenance": "benchmark/results/ — hl_001 converged code TBD",
+      "known_issues": [],
+      "audit_status": "never_audited",
+      "benchmark_slot": "bench_realworld_006"
+    },
+    {
+      "id": "rw_external_hackathon_placeholder_001",
+      "filename": null,
+      "family": "covenant",
+      "classification": "unknown",
+      "source": "external_hackathon",
+      "provenance": "TBD — Chipnet hackathon harvest",
+      "known_issues": [],
+      "audit_status": "never_audited",
+      "benchmark_slot": "bench_realworld_017"
+    },
+    {
+      "id": "rw_external_community_ft_001",
+      "filename": null,
+      "family": "cashtokens_ft",
+      "classification": "unknown",
+      "source": "external_community",
+      "provenance": "TBD — GitHub cashtokens examples",
+      "known_issues": [],
+      "audit_status": "never_audited",
+      "benchmark_slot": "bench_realworld_018"
+    }
+  ],
+  "summary": {
+    "safe": 10,
+    "unsafe": 8,
+    "unknown": 10
+  }
+}

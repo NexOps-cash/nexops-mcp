@@ -1,0 +1,13 @@
+pragma cashscript ^0.13.0;
+contract DualPathBypass(pubkey admin, bytes publicLock) {
+    function adminSpend(sig adminSig) {
+        require(checkSig(adminSig, admin));
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+    }
+    function publicSpend() {
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].lockingBytecode == publicLock);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+    }
+}

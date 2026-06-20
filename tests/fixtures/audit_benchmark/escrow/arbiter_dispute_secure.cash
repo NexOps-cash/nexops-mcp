@@ -1,0 +1,23 @@
+pragma cashscript ^0.13.0;
+contract EscrowArbiter(
+    pubkey buyer,
+    pubkey seller,
+    pubkey arbiter,
+    bytes recipientLock
+) {
+    function release(sig buyerSig, sig sellerSig, sig arbiterSig) {
+        require(checkSig(buyerSig, buyer));
+        require(checkSig(sellerSig, seller));
+        require(checkSig(arbiterSig, arbiter));
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].lockingBytecode == recipientLock);
+        require(tx.outputs[0].value >= tx.inputs[this.activeInputIndex].value - 1000);
+    }
+
+    function refund(sig buyerSig, int timeout) {
+        require(checkSig(buyerSig, buyer));
+        require(tx.time >= timeout);
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].value >= tx.inputs[this.activeInputIndex].value - 1000);
+    }
+}

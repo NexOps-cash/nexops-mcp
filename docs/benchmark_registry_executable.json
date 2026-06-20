@@ -1,0 +1,678 @@
+{
+  "schema_version": "1.0",
+  "description": "Materialized audit benchmarks \u2014 zero LLM, CI-ready",
+  "total_count": 38,
+  "benchmarks": [
+    {
+      "id": "bench_payroll_001",
+      "family": "payroll",
+      "difficulty": 2,
+      "intent": "Payroll distributing fixed salary amounts to predetermined employee lockingBytecode destinations. Owner must authorize each payout.",
+      "contract_ref": "tests/audit_classification_matrix/scenarios.py:PAYROLL_RECIPIENTS_ONLY",
+      "mutation": "missing_fixed_salary",
+      "expected_findings": [
+        "intent_fixed_amount_per_recipient"
+      ],
+      "expected_severity": [
+        "MEDIUM"
+      ],
+      "expected_invariants": [
+        "fixed_amount_per_recipient:MISSING",
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [
+        "invariant_gap"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "handcrafted",
+      "tier": 1
+    },
+    {
+      "id": "bench_payroll_002",
+      "family": "payroll",
+      "difficulty": 1,
+      "intent": "Owner-signed payroll with recipient binding and token conservation.",
+      "contract_ref": "tests/audit_classification_matrix/scenarios.py:PAYROLL_RECIPIENTS_ONLY",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [
+        "recipient_binding:ENFORCED",
+        "auth_gate:ENFORCED"
+      ],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "handcrafted",
+      "tier": 1
+    },
+    {
+      "id": "bench_payroll_004",
+      "family": "payroll",
+      "difficulty": 1,
+      "intent": "Payroll without owner signature on distribute path.",
+      "contract_ref": "tests/audit_classification_matrix/scenarios.py:PAYROLL_NO_AUTH",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_severity": [
+        "HIGH"
+      ],
+      "expected_invariants": [
+        "auth_gate:MISSING"
+      ],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "handcrafted",
+      "tier": 1
+    },
+    {
+      "id": "bench_hashlock_001",
+      "family": "hashlock",
+      "difficulty": 1,
+      "intent": "Spend only by revealing SHA256 preimage matching hash.",
+      "contract_ref": "tests/fixtures/audit_benchmark/hashlock/secure.cash",
+      "expected_findings": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "handcrafted",
+      "tier": 1
+    },
+    {
+      "id": "bench_hashlock_002",
+      "family": "hashlock",
+      "difficulty": 1,
+      "intent": "Spend only by revealing SHA256 preimage matching hash.",
+      "contract_ref": "tests/fixtures/audit_benchmark/hashlock/vulnerable_no_hash.cash",
+      "expected_findings": [
+        "hash_preimage_binding"
+      ],
+      "expected_invariants": [],
+      "evaluation_mode": "detector_only",
+      "source": "handcrafted",
+      "tier": 1,
+      "coverage_probe": true,
+      "notes": "P0 gap \u2014 no detector today; probe documents missing coverage"
+    },
+    {
+      "id": "bench_hashlock_003",
+      "family": "hashlock",
+      "difficulty": 3,
+      "intent": "HTLC: claim with preimage or refund after timeout.",
+      "contract_ref": "tests/fixtures/audit_benchmark/hashlock/htlc_secure.cash",
+      "expected_findings": [],
+      "expected_invariants": [],
+      "evaluation_mode": "detector_only",
+      "source": "handcrafted",
+      "tier": 1
+    },
+    {
+      "id": "bench_p0_fake_auth_001",
+      "family": "cross_family",
+      "difficulty": 5,
+      "intent": "Owner must authorize pay; checkSig required on spend path.",
+      "contract_ref": "tests/fixtures/audit_benchmark/p0/fake_auth_dead_code.cash",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "adversarial_variant",
+      "tier": 1,
+      "coverage_probe": true,
+      "notes": "Dead-code checkSig \u2014 intent layer may miss; adversarial FAKE_AUTH family"
+    },
+    {
+      "id": "bench_p0_dual_path_001",
+      "family": "multisig",
+      "difficulty": 2,
+      "intent": "Only admin may spend; public path must not move value without admin sig.",
+      "contract_ref": "tests/fixtures/audit_benchmark/p0/dual_path_bypass.cash",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "adversarial_variant",
+      "tier": 1,
+      "coverage_probe": true,
+      "notes": "Dual path \u2014 AUTH-1 style; deterministic auth_gate may not fire on publicSpend"
+    },
+    {
+      "id": "bench_p0_oracle_001",
+      "family": "oracle",
+      "difficulty": 3,
+      "intent": "Owner-signed swap; oracle UTXO on input[1] must match oracleLock.",
+      "contract_ref": "tests/fixtures/audit_benchmark/p0/oracle_secure.cash",
+      "expected_findings": [],
+      "expected_invariants": [],
+      "evaluation_mode": "policy_only",
+      "source": "handcrafted",
+      "tier": 2,
+      "policy_judgment": {
+        "judge_version": "2.1",
+        "verdict": "finding",
+        "intent_fidelity_score": 8,
+        "finding": {
+          "gap_id": "semantic.oracle_reliance",
+          "attacker_gain": false,
+          "authorization_impact": false,
+          "value_impact": "none",
+          "trust_assumption": "oracle",
+          "summary": "Swap depends on honest oracle price feed.",
+          "reasoning": "Trust assumption only.",
+          "reasoning_steps": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6"
+          ]
+        }
+      },
+      "expected_kind": [
+        "deployment_requirement"
+      ]
+    },
+    {
+      "id": "bench_adv_auth2_replay",
+      "family": "payroll",
+      "difficulty": 5,
+      "intent": "Signed payroll with fixed salaries.",
+      "contract_ref": "tests/audit_classification_matrix/scenarios.py:PAYROLL_FIXED_SALARY",
+      "evaluation_mode": "policy_only",
+      "source": "adversarial_variant",
+      "tier": 2,
+      "policy_judgment": {
+        "judge_version": "2.1",
+        "verdict": "no_issue",
+        "intent_fidelity_score": 9,
+        "intent_fidelity_notes": "Auth enforced; hallucination retracted."
+      },
+      "expected_findings": [],
+      "expected_kind": [],
+      "notes": "AUTH-2 V2.1 \u2014 no vulnerability on auth hallucination"
+    },
+    {
+      "id": "bench_ct_authority_leak_vuln",
+      "family": "cashtokens",
+      "difficulty": 2,
+      "intent": "Mint authority NFT (0x02) must not transfer to buyer on mint path.",
+      "contract_ref": "tests/fixtures/cashtokens_invalid/authority_leak/vulnerable.cash",
+      "mutation": "authority_leak",
+      "expected_findings": [
+        "authority_leak"
+      ],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "cashtokens_invalid_corpus",
+      "tier": 1,
+      "migration_source_id": "ct_invalid_auth_leak_001"
+    },
+    {
+      "id": "bench_ct_unbounded_mint_vuln",
+      "family": "cashtokens",
+      "difficulty": 2,
+      "intent": "Mint function must enforce supply cap; unbounded mint is forbidden.",
+      "contract_ref": "tests/fixtures/cashtokens_invalid/authority_leak/vulnerable.cash",
+      "mutation": "unbounded_mint",
+      "expected_findings": [
+        "unbounded_mint"
+      ],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "cashtokens_invalid_corpus",
+      "tier": 1,
+      "notes": "Same fixture as authority_leak; LNC-017 + unbounded_mint detector"
+    },
+    {
+      "id": "bench_ct_inflation_vuln",
+      "family": "cashtokens",
+      "difficulty": 2,
+      "intent": "Output token amount must not exceed input without mint authority.",
+      "contract_ref": "tests/fixtures/cashtokens_invalid/token_amount_inflation/vulnerable.cash",
+      "mutation": "token_amount_inflation",
+      "expected_findings": [
+        "token_amount_inflation"
+      ],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "cashtokens_invalid_corpus",
+      "tier": 1,
+      "migration_source_id": "ct_invalid_inflation_001"
+    },
+    {
+      "id": "bench_ct_category_drift_secure",
+      "family": "cashtokens",
+      "difficulty": 1,
+      "intent": "Token category preserved across transfer; no drift on spend path.",
+      "contract_ref": "tests/fixtures/cashtokens_invalid/token_category_drift/secure.cash",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "cashtokens_invalid_corpus",
+      "tier": 1
+    },
+    {
+      "id": "bench_ct_category_drift_vuln",
+      "family": "cashtokens",
+      "difficulty": 2,
+      "intent": "Output token category differs from input category without authority.",
+      "contract_ref": "tests/fixtures/cashtokens_invalid/token_category_drift/vulnerable.cash",
+      "mutation": "token_category_drift",
+      "expected_findings": [
+        "token_category_drift"
+      ],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "cashtokens_invalid_corpus",
+      "tier": 1,
+      "migration_source_id": "ct_invalid_cat_drift_001"
+    },
+    {
+      "id": "bench_ct_nft_commit_vuln",
+      "family": "cashtokens_nft",
+      "difficulty": 2,
+      "intent": "Immutable NFT transfer must preserve nftCommitment on output.",
+      "contract_ref": "tests/fixtures/cashtokens_invalid/nft_commitment_loss/vulnerable.cash",
+      "mutation": "nft_commitment_loss",
+      "expected_findings": [
+        "nft_commitment_loss"
+      ],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "cashtokens_invalid_corpus",
+      "tier": 1,
+      "migration_source_id": "ct_invalid_commit_001"
+    },
+    {
+      "id": "bench_ct_mutable_leak_vuln",
+      "family": "cashtokens_nft",
+      "difficulty": 3,
+      "intent": "Mutable NFT capability must not leak to unauthorized lockingBytecode.",
+      "contract_ref": "tests/fixtures/cashtokens_invalid/mutable_capability_leak/vulnerable.cash",
+      "mutation": "mutable_capability_leak",
+      "expected_findings": [
+        "mutable_capability_leak"
+      ],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "cashtokens_invalid_corpus",
+      "tier": 1
+    },
+    {
+      "id": "bench_ct_hybrid_secure",
+      "family": "hybrid",
+      "difficulty": 2,
+      "intent": "Hybrid token state transition preserves tokenAmount and nftCommitment.",
+      "contract_ref": "tests/fixtures/cashtokens_invalid/hybrid_continuity_break/secure.cash",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "cashtokens_invalid_corpus",
+      "tier": 1
+    },
+    {
+      "id": "bench_ct_hybrid_break_vuln",
+      "family": "hybrid",
+      "difficulty": 3,
+      "intent": "State transition must not change tokenAmount and nftCommitment unexpectedly.",
+      "contract_ref": "tests/fixtures/cashtokens_invalid/hybrid_continuity_break/vulnerable.cash",
+      "mutation": "hybrid_continuity_break",
+      "expected_findings": [
+        "hybrid_continuity_break"
+      ],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "cashtokens_invalid_corpus",
+      "tier": 1,
+      "migration_source_id": "ct_invalid_hybrid_001"
+    },
+    {
+      "id": "bench_ct_transfer_vuln",
+      "family": "cashtokens",
+      "difficulty": 2,
+      "intent": "Token transfer must not send to arbitrary lockingBytecode without binding.",
+      "contract_ref": "tests/fixtures/cashtokens_invalid/unrestricted_token_transfer/vulnerable.cash",
+      "mutation": "unrestricted_token_transfer",
+      "expected_findings": [
+        "unrestricted_token_transfer"
+      ],
+      "expected_severity": [],
+      "expected_invariants": [],
+      "expected_kind": [],
+      "evaluation_mode": "detector_only",
+      "source": "cashtokens_invalid_corpus",
+      "tier": 1,
+      "migration_source_id": "ct_invalid_transfer_001"
+    },
+    {
+      "id": "bench_escrow_001",
+      "family": "escrow",
+      "difficulty": 1,
+      "intent": "Buyer and seller must both sign to release escrow funds to recipient.",
+      "contract_ref": "tests/fixtures/audit_benchmark/escrow/basic_multisig_secure.cash",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "audit_benchmark_fixture",
+      "tier": 1,
+      "migration_source_id": "escrow_basic_multisig"
+    },
+    {
+      "id": "bench_escrow_002",
+      "family": "escrow",
+      "difficulty": 2,
+      "intent": "Any two of buyer, seller, arbiter may release escrow via 2-of-3 multisig.",
+      "contract_ref": "tests/fixtures/audit_benchmark/escrow/two_of_three_secure.cash",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "audit_benchmark_fixture",
+      "tier": 1,
+      "migration_source_id": "escrow_2of3_release"
+    },
+    {
+      "id": "bench_escrow_003",
+      "family": "escrow",
+      "difficulty": 2,
+      "intent": "Buyer and seller settle normally; buyer may reclaim after refund timeout.",
+      "contract_ref": "tests/fixtures/audit_benchmark/escrow/timeout_refund_secure.cash",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "audit_benchmark_fixture",
+      "tier": 1,
+      "migration_source_id": "escrow_timeout_refund"
+    },
+    {
+      "id": "bench_escrow_004",
+      "family": "escrow",
+      "difficulty": 3,
+      "intent": "Dispute release requires buyer, seller, and arbiter signatures; buyer refund after timeout.",
+      "contract_ref": "tests/fixtures/audit_benchmark/escrow/arbiter_dispute_secure.cash",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "audit_benchmark_fixture",
+      "tier": 1
+    },
+    {
+      "id": "bench_escrow_005",
+      "family": "escrow",
+      "difficulty": 1,
+      "intent": "Escrow with release to recipient and refund path for sender after timeout.",
+      "contract_ref": "tests/audit_classification_matrix/scenarios.py:ESCROW_WITH_REFUND",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "classification_matrix",
+      "tier": 1
+    },
+    {
+      "id": "bench_escrow_006",
+      "family": "escrow",
+      "difficulty": 1,
+      "intent": "Buyer and seller must authorize escrow release with signatures.",
+      "contract_ref": "tests/fixtures/audit_benchmark/escrow/no_auth_release.cash",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_invariants": [
+        "auth_gate:MISSING"
+      ],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "audit_benchmark_fixture",
+      "tier": 1
+    },
+    {
+      "id": "bench_vesting_001",
+      "family": "vesting",
+      "difficulty": 1,
+      "intent": "Beneficiary may claim vested funds only after cliff timestamp with signature.",
+      "contract_ref": "tests/fixtures/audit_benchmark/vesting/cliff_secure.cash",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "audit_benchmark_fixture",
+      "tier": 1,
+      "migration_source_id": "vesting_cliff_basic"
+    },
+    {
+      "id": "bench_vesting_002",
+      "family": "vesting",
+      "difficulty": 2,
+      "intent": "Beneficiary claims after cliff; owner may cancel before cliff with signature.",
+      "contract_ref": "tests/fixtures/audit_benchmark/vesting/owner_cancel_secure.cash",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "audit_benchmark_fixture",
+      "tier": 1,
+      "migration_source_id": "vesting_with_owner_cancel"
+    },
+    {
+      "id": "bench_decay_001",
+      "family": "dec",
+      "difficulty": 2,
+      "intent": "Linear price decay from startPrice to endPrice; payout within quoted bounds after decayStart.",
+      "contract_ref": "tests/fixtures/audit_benchmark/decay/linear_decay_secure.cash",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "audit_benchmark_fixture",
+      "tier": 1,
+      "migration_source_id": "dec_001"
+    },
+    {
+      "id": "bench_vesting_003",
+      "family": "vesting",
+      "difficulty": 1,
+      "intent": "Beneficiary must sign to claim funds after vesting cliff.",
+      "contract_ref": "tests/fixtures/audit_benchmark/vesting/no_auth_claim.cash",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_invariants": [
+        "auth_gate:MISSING"
+      ],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "audit_benchmark_fixture",
+      "tier": 1
+    },
+    {
+      "id": "bench_refundable_001",
+      "family": "refundable",
+      "difficulty": 2,
+      "intent": "Service claims subscription payment after period; subscriber may cancel with signature.",
+      "contract_ref": "tests/fixtures/audit_benchmark/refundable/subscription_secure.cash",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "audit_benchmark_fixture",
+      "tier": 1,
+      "migration_source_id": "rp_003"
+    },
+    {
+      "id": "bench_refundable_002",
+      "family": "refundable",
+      "difficulty": 2,
+      "intent": "Recipient claims partial release after period; sender refunds if inactive timeout passes.",
+      "contract_ref": "tests/fixtures/audit_benchmark/refundable/gradual_release_secure.cash",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "audit_benchmark_fixture",
+      "tier": 1,
+      "migration_source_id": "rp_004"
+    },
+    {
+      "id": "bench_refundable_003",
+      "family": "refundable",
+      "difficulty": 3,
+      "intent": "Seller claims with SHA256 preimage; buyer receives timed refund with signature.",
+      "contract_ref": "tests/fixtures/audit_benchmark/refundable/htlc_refund_secure.cash",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "audit_benchmark_fixture",
+      "tier": 1,
+      "migration_source_id": "rp_002"
+    },
+    {
+      "id": "bench_refundable_004",
+      "family": "refundable",
+      "difficulty": 1,
+      "intent": "Seller and buyer must authorize claim and refund paths with signatures.",
+      "contract_ref": "tests/fixtures/audit_benchmark/refundable/no_auth_paths.cash",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_invariants": [
+        "auth_gate:MISSING"
+      ],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "audit_benchmark_fixture",
+      "tier": 1
+    },
+    {
+      "id": "bench_conditional_001",
+      "family": "cs",
+      "difficulty": 1,
+      "intent": "Alice spends immediately with signature; Bob spends after delay with signature.",
+      "contract_ref": "tests/fixtures/audit_benchmark/conditional_spend/alice_or_bob_delayed.cash",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "audit_benchmark_fixture",
+      "tier": 1,
+      "migration_source_id": "cs_001"
+    },
+    {
+      "id": "bench_conditional_002",
+      "family": "cs",
+      "difficulty": 2,
+      "intent": "Owner spends anytime; beneficiary claims after inactivity timeout with signature.",
+      "contract_ref": "tests/fixtures/audit_benchmark/conditional_spend/will_inheritance.cash",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "audit_benchmark_fixture",
+      "tier": 1,
+      "migration_source_id": "cs_002"
+    },
+    {
+      "id": "bench_conditional_003",
+      "family": "cs",
+      "difficulty": 2,
+      "intent": "Three paths: Alice alone, Bob alone after timeout, or Alice and Bob together.",
+      "contract_ref": "tests/fixtures/audit_benchmark/conditional_spend/multi_path_secure.cash",
+      "mutation": "secure_baseline",
+      "expected_findings": [],
+      "expected_invariants": [
+        "auth_gate:ENFORCED"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "audit_benchmark_fixture",
+      "tier": 1,
+      "migration_source_id": "cs_003"
+    },
+    {
+      "id": "bench_conditional_004",
+      "family": "cs",
+      "difficulty": 1,
+      "intent": "Spending paths require authorized signatures from designated parties.",
+      "contract_ref": "tests/fixtures/audit_benchmark/conditional_spend/no_auth_paths.cash",
+      "mutation": "missing_auth",
+      "expected_findings": [
+        "intent_auth_gate"
+      ],
+      "expected_invariants": [
+        "auth_gate:MISSING"
+      ],
+      "expected_kind": [
+        "vulnerability"
+      ],
+      "evaluation_mode": "detector_only",
+      "source": "audit_benchmark_fixture",
+      "tier": 1
+    }
+  ]
+}

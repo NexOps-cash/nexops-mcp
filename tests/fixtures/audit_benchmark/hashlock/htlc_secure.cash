@@ -1,0 +1,13 @@
+pragma cashscript ^0.13.0;
+contract HashlockHtlc(bytes32 hash, int timeout) {
+    function claim(bytes preimage) {
+        require(sha256(preimage) == hash);
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+    }
+    function refund() {
+        require(tx.time >= timeout);
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+    }
+}
