@@ -1,0 +1,17 @@
+pragma cashscript ^0.13.0;
+contract RefundableHtlc(bytes32 hash, int timeout, bytes sellerLock) {
+    function claim(bytes preimage) {
+        require(sha256(preimage) == hash);
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].lockingBytecode == sellerLock);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+    }
+
+    function refund(sig buyerSig, pubkey buyer, bytes buyerLock) {
+        require(checkSig(buyerSig, buyer));
+        require(tx.time >= timeout);
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].lockingBytecode == buyerLock);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+    }
+}

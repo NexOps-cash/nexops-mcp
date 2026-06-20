@@ -1,0 +1,23 @@
+pragma cashscript ^0.13.0;
+contract ConditionalAliceBob(
+    pubkey alice,
+    pubkey bob,
+    int bobDelay,
+    bytes aliceLock,
+    bytes bobLock
+) {
+    function spendAlice(sig aliceSig) {
+        require(checkSig(aliceSig, alice));
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].lockingBytecode == aliceLock);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+    }
+
+    function spendBob(sig bobSig) {
+        require(checkSig(bobSig, bob));
+        require(tx.time >= bobDelay);
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].lockingBytecode == bobLock);
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value);
+    }
+}
