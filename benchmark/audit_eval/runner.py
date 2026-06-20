@@ -33,6 +33,14 @@ class BenchmarkResult:
         return asdict(self)
 
 
+def _normalize_severity(severity: str) -> str:
+    """Map linter severities outside AuditIssue enum (e.g. WARNING) to valid values."""
+    sev = (severity or "HIGH").upper()
+    if sev == "WARNING":
+        return "LOW"
+    return sev
+
+
 def _issue_snapshot(issues: List[AuditIssue]) -> List[Dict[str, Any]]:
     return [
         {
@@ -70,7 +78,7 @@ def _run_deterministic(
         issues.append(
             AuditIssue(
                 title=violation.get("message", "lint"),
-                severity=violation.get("severity", "HIGH").upper(),
+                severity=_normalize_severity(violation.get("severity", "HIGH")),
                 line=violation.get("line_hint", 0),
                 description=violation.get("message", ""),
                 recommendation="",
@@ -84,7 +92,7 @@ def _run_deterministic(
             issues.append(
                 AuditIssue(
                     title=v.rule,
-                    severity=(v.severity or "HIGH").upper(),
+                    severity=_normalize_severity(v.severity or "HIGH"),
                     line=v.location.get("line", 0) if v.location else 0,
                     description=v.reason or v.exploit or "",
                     recommendation=v.fix_hint or "",
