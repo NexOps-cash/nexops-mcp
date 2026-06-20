@@ -1,5 +1,5 @@
 pragma cashscript ^0.13.0;
-contract C(pubkey o, bytes32 stateCat, bytes sideLb) {
+contract C(pubkey o, bytes sideLb) {
     function migrate(sig s) {
         require(checkSig(s, o));
         require(tx.outputs[0].lockingBytecode == sideLb);
