@@ -81,29 +81,30 @@ async def execute_benchmark(yaml_path: str, tags: List[str], model: str):
 @app.get("/results")
 async def list_results():
     results = []
-    for f in RESULTS_DIR.glob("*.json"):
+    for f in RESULTS_DIR.glob("bench_*.json"):
         try:
             with open(f, "r", encoding="utf-8") as r:
                 data = json.load(r)
-                
-                score = data.get("avg_final_score")
-                if score is None:
-                    # Legacy fallback
-                    case_results = data.get("results", [])
-                    if case_results:
-                        score = sum(r.get("final_score", 0) for r in case_results) / len(case_results)
-                    else:
-                        score = 0
-                
-                results.append({
-                    "id": data.get("run_id"),
-                    "suite": f.name,
-                    "timestamp": data.get("start_time"),
-                    "score": score
-                })
-        except (json.JSONDecodeError, FileNotFoundError):
+
+            run_id = data.get("run_id")
+            if not run_id:
+                continue
+
+            score = data.get("avg_final_score")
+            if score is None:
+                case_results = data.get("results", [])
+                score = (sum(r.get("final_score", 0) for r in case_results) / len(case_results)) if case_results else 0.0
+
+            results.append({
+                "id": run_id,
+                "suite": f.name,
+                "timestamp": data.get("start_time") or "",
+                "score": float(score),
+                "total_cases": data.get("total_cases", 0),
+            })
+        except (json.JSONDecodeError, FileNotFoundError, ZeroDivisionError):
             continue
-    return sorted(results, key=lambda x: x.get("timestamp", ""), reverse=True)
+    return sorted(results, key=lambda x: x["timestamp"], reverse=True)
 
 @app.get("/results/{run_id}")
 async def get_result(run_id: str):

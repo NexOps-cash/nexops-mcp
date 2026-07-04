@@ -109,12 +109,22 @@ async function loadLatestHistory() {
 
 function renderHistory(historyData) {
     if (!elements.historyList) return;
-    elements.historyList.innerHTML = historyData.map((item, index) => `
+    const valid = historyData.filter(item => item.id);
+    if (!valid.length) {
+        elements.historyList.innerHTML = '<div style="font-size:0.875rem;color:var(--text-muted);">No runs yet.</div>';
+        return;
+    }
+    elements.historyList.innerHTML = valid.map((item, index) => {
+        const ts = item.timestamp ? new Date(item.timestamp) : null;
+        const dateStr = ts && !isNaN(ts) ? `${ts.toLocaleDateString()} ${ts.toLocaleTimeString()}` : '—';
+        const scoreStr = (typeof item.score === 'number') ? item.score.toFixed(3) : '—';
+        const cases = item.total_cases ? ` · ${item.total_cases} cases` : '';
+        return `
         <div class="history-item ${index === 0 ? 'active' : ''}" onclick="loadResult('${item.id}'); document.querySelectorAll('.history-item').forEach(el=>el.classList.remove('active')); this.classList.add('active');">
             <span class="run-id">${item.id}</span>
-            <span class="run-meta">${new Date(item.timestamp).toLocaleDateString()} ${new Date(item.timestamp).toLocaleTimeString()} | Score: ${item.score.toFixed(3)}</span>
-        </div>
-    `).join('');
+            <span class="run-meta">${dateStr}${cases} | Score: ${scoreStr}</span>
+        </div>`;
+    }).join('');
 }
 
 async function loadResult(runId) {
