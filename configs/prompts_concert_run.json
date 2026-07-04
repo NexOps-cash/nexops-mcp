@@ -1,0 +1,10 @@
+{
+  "schema_version": "1.0",
+  "prompts": [
+    {
+      "id": "concert_ticket_nft",
+      "prompt": "Concert ticket NFT collection. Organizer retains mint authority in the covenant while users can transfer purchased tickets. Minting capability 0x02 must stay on this.activeBytecode; buyers receive newly minted immutable NFTs.",
+      "tags": ["cashtokens", "nft", "minting"]
+    }
+  ]
+}

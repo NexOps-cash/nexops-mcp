@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "models": [
+    {
+      "slug": "anthropic/claude-sonnet-4",
+      "alias": "sonnet",
+      "label": "Sonnet"
+    },
+    {
+      "slug": "zhipu/glm-5.2",
+      "alias": "glm",
+      "label": "GLM"
+    },
+    {
+      "slug": "openai/gpt-5",
+      "alias": "gpt",
+      "label": "GPT"
+    }
+  ]
+}

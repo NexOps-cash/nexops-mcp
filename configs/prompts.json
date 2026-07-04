@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.0",
+  "prompts": [
+    {
+      "id": "concert_ticket_nft",
+      "prompt": "Concert ticket NFT collection. Organizer retains mint authority in the covenant while users can transfer purchased tickets. Minting capability 0x02 must stay on this.activeBytecode; buyers receive newly minted immutable NFTs.",
+      "tags": ["cashtokens", "nft", "minting"]
+    },
+    {
+      "id": "payroll",
+      "prompt": "DAO payroll treasury: distribute fungible payroll tokens to three employees. Sum of all output token amounts must equal the input token amount. Preserve token category across all outputs. Treasury owner must sign each distribution.",
+      "tags": ["dao", "payroll", "treasury", "cashtokens"]
+    },
+    {
+      "id": "multisig_vault",
+      "prompt": "Create a 2-of-3 multisig vault contract where any 2 signatures from Alice, Bob, or Carol are sufficient to spend locked BCH.",
+      "tags": ["multisig", "vault", "2of3"]
+    },
+    {
+      "id": "hybrid_cashtoken",
+      "prompt": "Hybrid state transition preserving tokenAmount and tokenCategory across covenant outputs.",
+      "tags": ["cashtokens", "hybrid", "covenant"]
+    }
+  ]
+}

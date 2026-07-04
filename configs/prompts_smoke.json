@@ -1,0 +1,10 @@
+{
+  "schema_version": "1.0",
+  "prompts": [
+    {
+      "id": "multisig_vault",
+      "prompt": "Create a 2-of-2 multisig contract requiring both Alice and Bob to sign for spending.",
+      "tags": ["multisig", "smoke"]
+    }
+  ]
+}

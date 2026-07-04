@@ -5,6 +5,7 @@ venv/
 .env
 .pytest_cache/
 benchmark/results/
+model_lab_runs/
 auditcase/
 node_modules/
 AGENTS.md

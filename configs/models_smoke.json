@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "models": [
+    {
+      "slug": "anthropic/claude-sonnet-4",
+      "alias": "sonnet",
+      "label": "Sonnet"
+    },
+    {
+      "slug": "openai/gpt-4o-mini",
+      "alias": "gpt_mini",
+      "label": "GPT Mini"
+    }
+  ]
+}

@@ -627,18 +627,32 @@ class Phase1:
         provider: Optional[str] = None,
         openrouter_key: Optional[str] = None,
         disable_golden: bool = False,
-        disable_fallbacks: bool = False
+        disable_fallbacks: bool = False,
+        phase1_model: Optional[str] = None,
     ) -> ContractIR:
         """Call LLM to parse raw text into an IntentModel."""
 
         prompt = _build_phase1_prompt(intent, security_level)
 
-        llm = LLMFactory.get_provider(
-            "phase1",
-            api_key=api_key,
-            provider_type=provider,
-            openrouter_key=openrouter_key
-        )
+        if phase1_model:
+            from .llm.base import LLMConfig, ResilientProvider
+            from .llm.openrouter import OpenRouterProvider
+
+            llm = ResilientProvider(
+                LLMConfig(
+                    OpenRouterProvider(model=phase1_model, api_key=openrouter_key or api_key),
+                    temperature=0.1,
+                    label=f"Phase1-{phase1_model}",
+                    max_tokens=512,
+                )
+            )
+        else:
+            llm = LLMFactory.get_provider(
+                "phase1",
+                api_key=api_key,
+                provider_type=provider,
+                openrouter_key=openrouter_key,
+            )
         raw_response = await llm.complete(prompt)
 
         # Parse LLM JSON response into IntentModel and wrap in ContractIR
@@ -1060,6 +1074,34 @@ async def _free_phase2(
         code = _re.sub(r"\btx\s*\.\s*age\b", "this.age", code)
     
     return code
+
+
+def build_phase2_prompt_bundle(
+    ir: ContractIR,
+    violations: Optional[List[ViolationDetail]] = None,
+    retry_count: int = 0,
+) -> tuple[str, str]:
+    """Build NexOps Phase 2 system + user prompts from a parsed ContractIR."""
+    structured_knowledge = build_structured_knowledge(ir)
+    violation_context = ""
+    if violations and retry_count > 0:
+        violation_context = _build_violation_context(violations)
+    rule_engine = get_rule_engine()
+    intent_model = ir.metadata.intent_model
+    tags = intent_model.features if intent_model else []
+    active_rules = rule_engine.get_rules_for_tags(tags)
+    rule_context = rule_engine.format_rules_for_prompt(active_rules)
+    needs_covenant = bool(set(tags) & _COVENANT_TAGS)
+    effective_mode = resolve_effective_mode(intent_model)
+    ir.metadata.effective_mode = effective_mode
+    return _build_phase2_prompt(
+        intent_model=intent_model,
+        structured_knowledge=structured_knowledge,
+        violation_context=violation_context,
+        rule_context=rule_context,
+        needs_covenant=needs_covenant,
+        effective_mode=effective_mode,
+    )
 
 
 # ─── Phase 3: Structural Toll Gate ───────────────────────────────────
