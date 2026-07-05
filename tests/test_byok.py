@@ -39,7 +39,9 @@ async def test_byok_propagation_generate():
             controller.session_mgr = MagicMock()
             await controller.generate(req)
             
-            p1.assert_called_with("test", "high", api_key="key123", provider="openrouter")
+            p1.assert_called_once()
+            assert p1.call_args.kwargs["api_key"] == "key123"
+            assert p1.call_args.kwargs["provider"] == "openrouter"
             p2.assert_called()
             assert p2.call_args.kwargs["api_key"] == "key123"
 

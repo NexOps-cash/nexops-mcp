@@ -11,10 +11,11 @@ import yaml
 import logging
 import re
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from src.models import (
     ContractIR,
+    ContractMetadata,
     TollGateResult,
     ViolationDetail,
     IntentModel,
@@ -616,6 +617,123 @@ def build_structured_knowledge(ir: ContractIR) -> str:
 
 # ─── Phase 1: Skeleton Generator ─────────────────────────────────────
 
+def _apply_legacy_intent_enrichment(ir: ContractIR, intent: str) -> None:
+    """Deterministic post-parse enrichment (preserved for backward compatibility)."""
+    if not ir.metadata.intent_model:
+        return
+
+    tags = list(ir.metadata.intent_model.features)
+
+    if "timelock" in tags and "multisig" in tags:
+        tags.append("escrow")
+
+    _ESCROW_KEYWORDS = {"refund", "reclaim", "timeout", "after", "expire", "expiry", "deadline"}
+    if any(word in intent.lower() for word in _ESCROW_KEYWORDS):
+        if "multisig" in tags:
+            tags.append("escrow")
+
+    intent_lower = intent.lower()
+    _SPLIT_DIST_KEYS = (
+        "split", "distribute", "distribution", "recipients",
+        "payroll", "treasury", "partners", "employees", "revenue",
+    )
+    if "multisig" in tags and any(k in intent_lower for k in _SPLIT_DIST_KEYS):
+        if "split" not in tags:
+            tags.append("split")
+
+    seen = set()
+    tags = [t for t in tags if not (t in seen or seen.add(t))]
+    ir.metadata.intent_model.features = tags
+
+    current_type = ir.metadata.intent_model.contract_type
+
+    apply_cashtoken_intent_routing(ir.metadata.intent_model, intent_lower)
+    current_type = ir.metadata.intent_model.contract_type
+    tc = (ir.metadata.intent_model.token_class or "").strip()
+    cashtoken_routed = bool(tc) or current_type in {
+        "ft_transfer", "nft_transfer_immutable", "nft_mutable_state_update",
+        "nft_minting_authority", "nft_minting_failure", "hybrid_token",
+    }
+
+    _NFT_SIGNALS = {"nft", "token", "custody", "tokencategory", "nft custody"}
+
+    if current_type == "escrow_2of3_nft":
+        if not any(s in intent_lower for s in _NFT_SIGNALS):
+            logger.info(f"[Phase1] Escrow downgrade: '{current_type}' → 'escrow' (no NFT context)")
+            ir.metadata.intent_model.contract_type = "escrow"
+            current_type = "escrow"
+
+    is_escrow_intent = (
+        current_type == "escrow"
+        or "escrow" in tags
+        or "escrow" in intent_lower
+        or "arbiter" in intent_lower
+    )
+
+    if (
+        not cashtoken_routed
+        and current_type in ("escrow", "multisig", "generic", "unknown")
+        and is_escrow_intent
+    ):
+        if any(s in intent_lower for s in _NFT_SIGNALS):
+            ir.metadata.intent_model.contract_type = "escrow_2of3_nft"
+        elif current_type in ("generic", "unknown"):
+            ir.metadata.intent_model.contract_type = "escrow"
+
+    elif (
+        not cashtoken_routed
+        and current_type in ("crowdfunding", "crowdfund", "generic")
+        and any(w in intent_lower for w in ("crowdfund", "fundrais", "goal", "backers", "pledge"))
+    ):
+        ir.metadata.intent_model.contract_type = "refundable_crowdfund"
+
+    elif (
+        not cashtoken_routed
+        and current_type in ("auction", "generic")
+        and any(w in intent_lower for w in ("auction", "bid", "dutch", "price decay", "declining price"))
+    ):
+        ir.metadata.intent_model.contract_type = "dutch_auction"
+
+    elif (
+        not cashtoken_routed
+        and current_type in ("vesting", "stateful", "covenant", "generic")
+        and any(w in intent_lower for w in ("vest", "vesting", "cliff", "unlock over time", "linear release", "salary"))
+    ):
+        ir.metadata.intent_model.contract_type = "linear_vesting"
+
+    elif (
+        not cashtoken_routed
+        and current_type in ("streaming", "vesting", "generic")
+        and any(w in intent_lower for w in ("stream", "streaming", "decay", "linear decay", "block-by-block"))
+    ):
+        ir.metadata.intent_model.contract_type = "streaming"
+
+    elif (
+        not cashtoken_routed
+        and current_type in ("vault", "covenant", "generic", "stateful")
+        and any(w in intent_lower for w in ("vault", "cold storage", "withdrawal limit", "controlled release", "treasury"))
+    ):
+        ir.metadata.intent_model.contract_type = "vault"
+
+    normalized_type = ir.metadata.intent_model.contract_type
+    if normalized_type != current_type:
+        logger.info(f"[Phase1] Golden normalization: '{current_type}' → '{normalized_type}'")
+
+    apply_semantic_normalization(ir.metadata.intent_model, intent_lower)
+    if check_pure_bch_escrow_mismatch(ir.metadata.intent_model, intent_lower):
+        ir.metadata.intent_model.contract_type = "semantic_unsupported"
+        logger.warning("[Phase1] Pure BCH escrow mismatch with token_class — semantic_unsupported")
+    else:
+        profile = resolve_semantic_profile(ir.metadata.intent_model)
+        if not ir.metadata.effective_mode:
+            ir.metadata.effective_mode = resolve_effective_mode(ir.metadata.intent_model)
+        logger.info(
+            f"[Phase1] Semantic: ownership={profile.ownership_mode} "
+            f"lifecycle={profile.lifecycle_mode} supply={profile.supply_mode} "
+            f"commitment={profile.commitment_schema}"
+        )
+
+
 class Phase1:
     """Analyze user intent into a structured IntentModel. Returns ContractIR."""
 
@@ -629,194 +747,65 @@ class Phase1:
         disable_golden: bool = False,
         disable_fallbacks: bool = False,
         phase1_model: Optional[str] = None,
+        resolution_mode: str = "non_interactive",
+        existing_spec: Optional[Any] = None,
     ) -> ContractIR:
-        """Call LLM to parse raw text into an IntentModel."""
+        """Specification-first Phase 1 orchestrator. Returns ContractIR."""
+        from src.models import IntentModel
+        from src.services.spec.orchestrator import run_spec_pipeline
 
-        prompt = _build_phase1_prompt(intent, security_level)
+        spec, clarification, execution_plan, utxo_arch, report, intent_model = await run_spec_pipeline(
+            intent,
+            security_level=security_level,
+            resolution_mode=resolution_mode,
+            api_key=api_key,
+            provider=provider,
+            openrouter_key=openrouter_key,
+            phase1_model=phase1_model,
+            existing_spec=existing_spec,
+        )
 
-        if phase1_model:
-            from .llm.base import LLMConfig, ResilientProvider
-            from .llm.openrouter import OpenRouterProvider
+        if not intent_model:
+            intent_model = IntentModel(contract_type="generic", purpose=intent[:80])
 
-            llm = ResilientProvider(
-                LLMConfig(
-                    OpenRouterProvider(model=phase1_model, api_key=openrouter_key or api_key),
-                    temperature=0.1,
-                    label=f"Phase1-{phase1_model}",
-                    max_tokens=512,
-                )
-            )
-        else:
-            llm = LLMFactory.get_provider(
-                "phase1",
-                api_key=api_key,
-                provider_type=provider,
-                openrouter_key=openrouter_key,
-            )
-        raw_response = await llm.complete(prompt)
-
-        # Parse LLM JSON response into IntentModel and wrap in ContractIR
-        ir = _parse_phase1_response(raw_response, intent, security_level)
-        ir.metadata.generation_phase = 1
+        ir = ContractIR(
+            contract_name="GeneratedContract",
+            constructor_params=[],
+            functions=[],
+            metadata=ContractMetadata(
+                intent=intent,
+                intent_model=intent_model,
+                security_level=security_level,
+                generation_phase=1,
+                effective_mode=report.effective_mode or "",
+                specification=spec,
+                execution_plan=execution_plan,
+                utxo_architecture=utxo_arch,
+                clarification_plan=clarification,
+                planning_report=report,
+            ),
+        )
         ir.metadata.disable_golden = disable_golden
         ir.metadata.disable_fallbacks = disable_fallbacks
 
-        # ─── Feature Enrichment Layer (Deterministic) ───────────────────
-        # LLM classifies. Engine enforces structure.
-        # Do NOT rely purely on LLM for escrow tagging.
-        tags = list(ir.metadata.intent_model.features) if ir.metadata.intent_model else []
+        if clarification and resolution_mode == "interactive":
+            logger.info("[Phase1] Interactive clarification required: %s", clarification.missing_fields)
+            return ir
 
-        # Structural inference: timelock + multisig = escrow pattern
-        if "timelock" in tags and "multisig" in tags:
-            tags.append("escrow")
+        _apply_legacy_intent_enrichment(ir, intent)
+        if report.effective_mode:
+            ir.metadata.effective_mode = report.effective_mode
 
-        # Keyword heuristic: reclaim/refund/timeout intent implies escrow
-        _ESCROW_KEYWORDS = {"refund", "reclaim", "timeout", "after", "expire", "expiry", "deadline"}
-        if any(word in intent.lower() for word in _ESCROW_KEYWORDS):
-            if "multisig" in tags:
-                tags.append("escrow")
-
-        # Multisig + distribution: ensure split feature for conservation rails
-        intent_lower = intent.lower()
-        _SPLIT_DIST_KEYS = (
-            "split", "distribute", "distribution", "recipients",
-            "payroll", "treasury", "partners", "employees", "revenue",
+        tags = ir.metadata.intent_model.features if ir.metadata.intent_model else []
+        logger.info(
+            f"Phase 1 complete: type={ir.metadata.intent_model.contract_type if ir.metadata.intent_model else 'unknown'}, "
+            f"tags={tags}, effective_mode={ir.metadata.effective_mode}"
         )
-        if "multisig" in tags and any(k in intent_lower for k in _SPLIT_DIST_KEYS):
-            if "split" not in tags:
-                tags.append("split")
-
-        # Deduplicate while preserving order
-        seen = set()
-        tags = [t for t in tags if not (t in seen or seen.add(t))]
-
-        # Write enriched tags back to the model
         if ir.metadata.intent_model:
-            ir.metadata.intent_model.features = tags
-
-        # ─── Golden Pattern Normalization Layer (Deterministic) ─────────
-        # LLM outputs vague types ("escrow", "generic", etc.)
-        # This layer upgrades to exact Golden pattern IDs via keyword signals.
-        # Must run AFTER feature enrichment so tags are fully populated.
-        if ir.metadata.intent_model:
-            current_type = ir.metadata.intent_model.contract_type
-            intent_lower = intent.lower()
-
-            apply_cashtoken_intent_routing(ir.metadata.intent_model, intent_lower)
-            current_type = ir.metadata.intent_model.contract_type
-            tc = (ir.metadata.intent_model.token_class or "").strip()
-            cashtoken_routed = bool(tc) or current_type in {
-                "ft_transfer", "nft_transfer_immutable", "nft_mutable_state_update",
-                "nft_minting_authority", "nft_minting_failure", "hybrid_token",
-            }
-
-            # Escrow: Upgrade to golden NFT pattern ONLY if NFT/token/custody context exists.
-            # Otherwise, general escrows stay as 'escrow' (triggers free generation).
-            _NFT_SIGNALS = {"nft", "token", "custody", "tokencategory", "nft custody"}
-            
-            # 1. Defend against pre-assigned golden type (downgrade if no NFT signals)
-            if current_type == "escrow_2of3_nft":
-                if not any(s in intent_lower for s in _NFT_SIGNALS):
-                    logger.info(f"[Phase1] Escrow downgrade: '{current_type}' → 'escrow' (no NFT context)")
-                    ir.metadata.intent_model.contract_type = "escrow"
-                    current_type = "escrow"
-
-            # 2. Upgrade from generic if NFT signals exist
-            is_escrow_intent = (
-                current_type == "escrow" 
-                or "escrow" in tags 
-                or "escrow" in intent_lower
-                or "arbiter" in intent_lower
+            logger.info(
+                f"[DEBUG] Phase1 output: type={ir.metadata.intent_model.contract_type}, "
+                f"features={ir.metadata.intent_model.features}"
             )
-            
-            if (
-                not cashtoken_routed
-                and current_type in ("escrow", "multisig", "generic", "unknown")
-                and is_escrow_intent
-            ):
-                # Gated: Only upgrade to golden if NFT/Tokens are mentioned
-                if any(s in intent_lower for s in _NFT_SIGNALS):
-                    ir.metadata.intent_model.contract_type = "escrow_2of3_nft"
-                else:
-                    # Fallback: leave as 'escrow' or 'multisig' (Phase 2 treats these as free gen)
-                    if current_type == "generic" or current_type == "unknown":
-                        ir.metadata.intent_model.contract_type = "escrow"
-
-            # Crowdfunding: keyword signals
-            elif (
-                not cashtoken_routed
-                and current_type in ("crowdfunding", "crowdfund", "generic")
-                and any(
-                w in intent_lower for w in ("crowdfund", "fundrais", "goal", "backers", "pledge")
-                )
-            ):
-                ir.metadata.intent_model.contract_type = "refundable_crowdfund"
-
-            # Auction: keyword signals
-            elif (
-                not cashtoken_routed
-                and current_type in ("auction", "generic")
-                and any(
-                w in intent_lower for w in ("auction", "bid", "dutch", "price decay", "declining price")
-                )
-            ):
-                ir.metadata.intent_model.contract_type = "dutch_auction"
-
-            # Vesting: keyword signals
-            elif (
-                not cashtoken_routed
-                and current_type in ("vesting", "stateful", "covenant", "generic")
-                and any(
-                w in intent_lower for w in ("vest", "vesting", "cliff", "unlock over time", "linear release", "salary")
-                )
-            ):
-                ir.metadata.intent_model.contract_type = "linear_vesting"
-
-            # Streaming: keyword signals (must be before generic vesting)
-            elif (
-                not cashtoken_routed
-                and current_type in ("streaming", "vesting", "generic")
-                and any(
-                w in intent_lower for w in ("stream", "streaming", "decay", "linear decay", "block-by-block")
-                )
-            ):
-                ir.metadata.intent_model.contract_type = "streaming"
-
-            # Vault: keyword signals (skip when CashTokens routing already set class/mode)
-            elif (
-                not cashtoken_routed
-                and current_type in ("vault", "covenant", "generic", "stateful")
-                and any(
-                    w in intent_lower
-                    for w in ("vault", "cold storage", "withdrawal limit", "controlled release")
-                )
-            ):
-                ir.metadata.intent_model.contract_type = "vault"
-
-            normalized_type = ir.metadata.intent_model.contract_type
-            if normalized_type != current_type:
-                logger.info(f"[Phase1] Golden normalization: '{current_type}' → '{normalized_type}'")
-
-            # Semantic constraint layers (deterministic, post golden/CashToken routing)
-            apply_semantic_normalization(ir.metadata.intent_model, intent_lower)
-            if check_pure_bch_escrow_mismatch(ir.metadata.intent_model, intent_lower):
-                ir.metadata.intent_model.contract_type = "semantic_unsupported"
-                logger.warning("[Phase1] Pure BCH escrow mismatch with token_class — semantic_unsupported")
-            else:
-                profile = resolve_semantic_profile(ir.metadata.intent_model)
-                ir.metadata.effective_mode = resolve_effective_mode(ir.metadata.intent_model)
-                logger.info(
-                    f"[Phase1] Semantic: ownership={profile.ownership_mode} "
-                    f"lifecycle={profile.lifecycle_mode} supply={profile.supply_mode} "
-                    f"commitment={profile.commitment_schema}"
-                )
-
-        logger.info(f"Phase 1 complete: type={ir.metadata.intent_model.contract_type if ir.metadata.intent_model else 'unknown'}, tags={tags}")
-
-        # Diagnostic log for Phase 1 output
-        if ir.metadata.intent_model:
-             logger.info(f"[DEBUG] Phase1 output: type={ir.metadata.intent_model.contract_type}, features={ir.metadata.intent_model.features}")
-
         return ir
 
 

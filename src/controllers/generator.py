@@ -70,8 +70,17 @@ class GenerationController:
         provider = req.context.get("provider") if req.context else None
         openrouter_key = req.context.get("openrouter_key") if req.context else None
         disable_golden, disable_fallbacks = _synthesis_flags(req.context)
+        resolution_mode = "non_interactive"
+        if req.context:
+            resolution_mode = req.context.get("resolution_mode", "non_interactive")
+            if req.context.get("interactive"):
+                resolution_mode = "interactive"
 
         session = self.session_mgr.get_or_create(session_id)
+        existing_spec = session.current_specification
+        if req.payload.get("specification"):
+            from src.models import ContractSpecification
+            existing_spec = ContractSpecification(**req.payload["specification"])
         
         # Instantiate the Guarded Engine
         from src.services.pipeline_engine import get_guarded_pipeline_engine
@@ -87,7 +96,19 @@ class GenerationController:
             openrouter_key=openrouter_key,
             disable_golden=disable_golden,
             disable_fallbacks=disable_fallbacks,
+            resolution_mode=resolution_mode,
+            existing_spec=existing_spec if existing_spec and str(getattr(existing_spec.status, "value", existing_spec.status)) == "confirmed" else None,
         )
+
+        if result["type"] in ("needs_input", "review"):
+            if session.current_specification is None and result.get("data", {}).get("specification"):
+                from src.models import ContractSpecification
+                session.current_specification = ContractSpecification(**result["data"]["specification"])
+            return {
+                "request_id": req.request_id,
+                "type": result["type"],
+                "data": result.get("data", {}),
+            }
 
         if result["type"] == "error":
             err = result.get("error") or {}

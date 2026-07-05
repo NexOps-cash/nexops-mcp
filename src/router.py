@@ -1,6 +1,7 @@
 from typing import Optional, Any
 from .models import MCPRequest
 from .controllers.generator import generate_skeleton
+from .controllers.spec_controller import spec_turn, spec_review, spec_confirm, spec_modify
 from .utils.errors import error_response
 import logging
 
@@ -17,6 +18,15 @@ async def route_request(raw_msg: dict, on_update: Optional[Any] = None) -> dict:
 
         if req.action == "generate":
             return await generate_skeleton(req, on_update=on_update)
+
+        if req.action == "spec_turn":
+            return await spec_turn(req)
+        if req.action == "spec_review":
+            return await spec_review(req)
+        if req.action == "spec_confirm":
+            return await spec_confirm(req)
+        if req.action == "spec_modify":
+            return await spec_modify(req)
         
         # Default fallback for unknown actions
         return error_response(

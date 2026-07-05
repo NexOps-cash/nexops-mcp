@@ -50,7 +50,9 @@ class GuardedPipelineEngine:
         provider: Optional[str] = None,
         openrouter_key: Optional[str] = None,
         disable_golden: bool = False,
-        disable_fallbacks: bool = False
+        disable_fallbacks: bool = False,
+        resolution_mode: str = "non_interactive",
+        existing_spec: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """
         Execute the full 4-stage guarded pipeline.
@@ -75,7 +77,9 @@ class GuardedPipelineEngine:
             provider=provider,
             openrouter_key=openrouter_key,
             disable_golden=disable_golden,
-            disable_fallbacks=disable_fallbacks
+            disable_fallbacks=disable_fallbacks,
+            resolution_mode=resolution_mode,
+            existing_spec=existing_spec,
         )
         ir.metadata.disable_golden = disable_golden
         ir.metadata.disable_fallbacks = disable_fallbacks
@@ -96,6 +100,43 @@ class GuardedPipelineEngine:
                     ),
                 },
             }
+
+        if ir.metadata.clarification_plan and resolution_mode == "interactive":
+            return {
+                "type": "needs_input",
+                "data": {
+                    "specification": ir.metadata.specification.model_dump() if ir.metadata.specification else {},
+                    "clarification_plan": ir.metadata.clarification_plan.model_dump(),
+                    "planning_report": ir.metadata.planning_report.model_dump() if ir.metadata.planning_report else {},
+                },
+            }
+
+        if resolution_mode == "interactive" and ir.metadata.specification:
+            from src.models import SpecStatus
+            from src.services.spec.review import render_specification
+
+            status = ir.metadata.specification.status
+            status_val = status.value if isinstance(status, SpecStatus) else str(status)
+            if status_val != SpecStatus.CONFIRMED.value:
+                if status_val == SpecStatus.IN_REVIEW.value:
+                    review = render_specification(
+                        ir.metadata.specification,
+                        ir.metadata.utxo_architecture,
+                    )
+                    return {
+                        "type": "review",
+                        "data": {
+                            "specification": ir.metadata.specification.model_dump(),
+                            "review": review.model_dump(),
+                        },
+                    }
+                return {
+                    "type": "needs_input",
+                    "data": {
+                        "specification": ir.metadata.specification.model_dump(),
+                        "message": "Specification must be confirmed before generation.",
+                    },
+                }
 
         await _notify("phase1_complete", f"Intent parsed: {intent_model.contract_type} with features {intent_model.features}")
 
