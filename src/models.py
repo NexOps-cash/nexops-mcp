@@ -146,6 +146,112 @@ class ContractMetadata(BaseModel):
     disable_golden: bool = False
     disable_fallbacks: bool = False
     timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+    # Specification-first pipeline artifacts (v2)
+    specification: Optional["ContractSpecification"] = None
+    execution_plan: Optional["ExecutionPlan"] = None
+    utxo_architecture: Optional["UTXOArchitecture"] = None
+    clarification_plan: Optional["ClarificationPlan"] = None
+    planning_report: Optional["PlanningReport"] = None
+
+
+# ─── Specification-First Pipeline Models (v2) ───────────────────────
+
+class SpecStatus(str, Enum):
+    DRAFT = "draft"
+    NEEDS_INPUT = "needs_input"
+    IN_REVIEW = "in_review"
+    CONFIRMED = "confirmed"
+
+
+class CapabilityInstance(BaseModel):
+    name: str
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ContractSpecification(BaseModel):
+    intent: str = ""
+    capabilities: List[CapabilityInstance] = Field(default_factory=list)
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+    status: SpecStatus = SpecStatus.DRAFT
+
+
+class GenerationModule(BaseModel):
+    name: str
+    capability: str
+    params: Dict[str, Any] = Field(default_factory=dict)
+    depends_on: List[str] = Field(default_factory=list)
+
+
+class ExecutionPlan(BaseModel):
+    modules: List[GenerationModule] = Field(default_factory=list)
+    order: List[str] = Field(default_factory=list)
+    dependencies: Dict[str, List[str]] = Field(default_factory=dict)
+    shared_parameters: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ContractNode(BaseModel):
+    id: str
+    type: str
+
+
+class TransactionSpec(BaseModel):
+    name: str
+    inputs: List[str] = Field(default_factory=list)
+    outputs: List[str] = Field(default_factory=list)
+
+
+class StateObject(BaseModel):
+    name: str
+    storage: str
+
+
+class UTXOArchitecture(BaseModel):
+    contracts: List[ContractNode] = Field(default_factory=list)
+    transactions: List[TransactionSpec] = Field(default_factory=list)
+    state_objects: List[StateObject] = Field(default_factory=list)
+
+
+class ValidationResult(BaseModel):
+    missing_fields: List[str] = Field(default_factory=list)
+    capability_context: Dict[str, Any] = Field(default_factory=dict)
+    recommendations_available: Dict[str, List[str]] = Field(default_factory=dict)
+    is_complete: bool = False
+
+
+class ClarificationPlan(BaseModel):
+    status: str = "needs_input"
+    missing_fields: List[str] = Field(default_factory=list)
+    questions: List[str] = Field(default_factory=list)
+
+
+class AssistantTurn(BaseModel):
+    updated_spec: ContractSpecification
+    message: str = ""
+    still_missing: List[str] = Field(default_factory=list)
+
+
+class SpecificationReview(BaseModel):
+    sections: Dict[str, List[str]] = Field(default_factory=dict)
+    utxo_architecture: Optional[UTXOArchitecture] = None
+    spec_snapshot: Optional[ContractSpecification] = None
+
+
+class PlanningReport(BaseModel):
+    detected_capabilities: List[str] = Field(default_factory=list)
+    missing_fields: List[str] = Field(default_factory=list)
+    inferred_fields: Dict[str, Any] = Field(default_factory=dict)
+    selected_modules: List[str] = Field(default_factory=list)
+    legacy_fallback: bool = False
+    effective_mode: str = ""
+
+
+class RawIntent(BaseModel):
+    intent: str = ""
+    capabilities: List[str] = Field(default_factory=list)
+    constraints: Dict[str, Any] = Field(default_factory=dict)
+
+
+ContractMetadata.model_rebuild()
 
 
 class ContractIR(BaseModel):
@@ -192,6 +298,7 @@ class SessionState(BaseModel):
     history: List[TurnRecord] = Field(default_factory=list)
     current_contract: Optional[ContractIR] = None
     current_code: str = ""
+    current_specification: Optional[ContractSpecification] = None
 
 # ─── Phase AR (Audit & Repair) Models ────────────────────────────────
 
