@@ -33,7 +33,7 @@ def render_specification(
             sections["Access Control"].append(cap.name.replace("_", " ").title())
         elif cap.name == "linear_decay":
             sections["Time Rules"].append("Linear threshold change")
-        elif cap.name in ("treasury", "vault", "withdrawal_policy"):
+        elif cap.name in ("treasury", "vault", "withdrawal_policy", "auction"):
             sections["Assets"].append(cap.name.replace("_", " ").title())
 
     if spec.parameters.get("holders"):
@@ -52,6 +52,10 @@ def render_specification(
         sections["Access Control"].append(f"Signers: {spec.parameters['signers']}")
     if spec.parameters.get("threshold"):
         sections["Access Control"].append(f"Threshold: {spec.parameters['threshold']}")
+    if spec.parameters.get("start_price") is not None:
+        sections["Assets"].append(f"Start price: {spec.parameters['start_price']} satoshis")
+    if spec.parameters.get("min_price") is not None:
+        sections["Assets"].append(f"Floor price: {spec.parameters['min_price']} satoshis")
 
     sections["Security"].extend([
         "Authorization required on spend paths",

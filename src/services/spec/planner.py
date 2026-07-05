@@ -111,5 +111,6 @@ def _default_module_for_capability(cap: str) -> str:
         "withdrawal_policy": "WithdrawalModule",
         "escrow": "EscrowModule",
         "vault": "VaultModule",
+        "auction": "DutchAuctionModule",
     }
     return mapping.get(cap, "")

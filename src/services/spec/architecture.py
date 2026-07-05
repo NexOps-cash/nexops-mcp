@@ -28,6 +28,7 @@ MODULE_CONTRACT_TYPE: Dict[str, tuple] = {
     "HybridTokenModule": ("token", "Hybrid"),
     "TimelockModule": ("time", "Timelock"),
     "WithdrawalModule": ("withdraw", "Withdrawal"),
+    "DutchAuctionModule": ("auction", "Auction"),
 }
 
 MODULE_STATE: Dict[str, tuple] = {
@@ -62,6 +63,18 @@ TRANSACTION_PATTERNS: Dict[str, List[TransactionSpec]] = {
             name="authorize",
             inputs=["PolicyUTXO", "SignerUTXOs"],
             outputs=["AuthUTXO"],
+        ),
+    ],
+    "Auction": [
+        TransactionSpec(
+            name="bid",
+            inputs=["AuctionUTXO", "BidBCH"],
+            outputs=["AuctionUTXO", "SellerPayout"],
+        ),
+        TransactionSpec(
+            name="cancel",
+            inputs=["AuctionUTXO", "AuthUTXO"],
+            outputs=["RefundBCH"],
         ),
     ],
 }

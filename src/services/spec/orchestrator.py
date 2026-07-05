@@ -92,6 +92,10 @@ def _default_for_field(field_name: str, intent: str) -> Any:
         return "0x00"
     if field_name == "max_supply":
         return 1000
+    if field_name == "start_price":
+        return 1000000
+    if field_name == "min_price":
+        return 10000
     return None
 
 
@@ -121,8 +125,12 @@ def _heuristic_raw_intent(intent: str) -> RawIntent:
         caps.append("nft_immutable" if "immutable" in il else "nft_mutable")
     if "fungible" in il or " token" in il:
         caps.append("token_ft")
+    if "auction" in il or "bid" in il or "dutch" in il:
+        caps.append("auction")
 
     primary = "generic"
+    if "auction" in il or "bid" in il:
+        primary = "auction"
     if "escrow" in il:
         primary = "escrow"
     elif "vault" in il or "treasury" in il:
@@ -270,6 +278,7 @@ def _contract_type_from_mode(mode: str) -> str:
         "hybrid_token": "hybrid_token",
         "linear_vesting": "linear_vesting",
         "timelock": "timelock",
+        "dutch_auction": "dutch_auction",
     }
     return mapping.get(mode, mode or "generic")
 

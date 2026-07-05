@@ -22,6 +22,7 @@ CONTRACT_TYPE_TO_MODE = {
     "Hybrid": "hybrid_token",
     "Timelock": "timelock",
     "Withdrawal": "vault",
+    "Auction": "dutch_auction",
 }
 
 MODULE_TO_MODE = {
@@ -39,6 +40,7 @@ MODULE_TO_MODE = {
     "HybridTokenModule": "hybrid_token",
     "TimelockModule": "timelock",
     "WithdrawalModule": "vault",
+    "DutchAuctionModule": "dutch_auction",
 }
 
 

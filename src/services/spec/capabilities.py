@@ -113,6 +113,19 @@ CAPABILITY_REGISTRY: Dict[str, Capability] = {
         documentation=["Self-continuing covenant with controlled withdrawal."],
         examples=["Cold storage vault", "Treasury vault"],
     ),
+    "auction": Capability(
+        name="auction",
+        required_fields=[
+            _f("start_price", "What is the starting (high) price?", "number"),
+            _f("min_price", "What is the minimum (floor) price?", "number"),
+            _f("duration_days", "How many days does the auction run?", "integer"),
+            _f("asset_type", "What is being auctioned? (BCH, NFT, FT)", "string"),
+        ],
+        recommendations=["Dutch auction: price decays linearly until a bid is accepted"],
+        documentation=["Time-decaying price auction; first acceptable bid wins."],
+        examples=["NFT dutch auction", "BCH declining-price sale"],
+        best_practices=["Bind bid authorization to multisig or single buyer pubkey"],
+    ),
     "token_ft": Capability(
         name="token_ft",
         required_fields=[_f("token_category", "What is the fungible token category?", "string")],

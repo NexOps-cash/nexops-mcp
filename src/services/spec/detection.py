@@ -13,6 +13,7 @@ _SPLIT_KEYS = ("split", "distribute", "distribution", "recipients", "payroll", "
 _VAULT_KEYS = ("vault", "cold storage", "withdrawal limit", "controlled release", "treasury")
 _WEIGHTED_KEYS = ("weighted", "weight", "weights", "voting weight")
 _DECAY_KEYS = ("linear decay", "decay", "threshold increase", "linear threshold")
+_AUCTION_KEYS = ("auction", "bid", "dutch", "price decay", "declining price", "marketplace")
 
 
 def detect_capabilities(raw: RawIntent, original_intent: str = "") -> ContractSpecification:
@@ -26,6 +27,8 @@ def detect_capabilities(raw: RawIntent, original_intent: str = "") -> ContractSp
         names.add("weighted_multisig")
     if any(k in intent_lower for k in _DECAY_KEYS) or "linear_decay" in names:
         names.add("linear_decay")
+    if any(k in intent_lower for k in _AUCTION_KEYS) or "auction" in names:
+        names.add("auction")
     if "timelock" in names or any(w in intent_lower for w in _ESCROW_KEYWORDS):
         if "multisig" in names or "escrow" in intent_lower:
             names.add("escrow")
@@ -51,6 +54,8 @@ def detect_capabilities(raw: RawIntent, original_intent: str = "") -> ContractSp
             valid = ["split", "multisig"]
         elif "vault" in intent_lower or "treasury" in intent_lower:
             valid = ["treasury", "vault"]
+        elif "auction" in intent_lower or "bid" in intent_lower or "dutch" in intent_lower:
+            valid = ["auction"]
         elif "nft" in intent_lower or "token" in intent_lower:
             valid = ["token_ft"]
         else:
