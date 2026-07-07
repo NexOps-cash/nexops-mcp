@@ -87,6 +87,7 @@ class GenerationController:
         engine = get_guarded_pipeline_engine()
 
         # Run the Guarded Loop (benchmark parity: free synthesis, no fallback)
+        ctx = req.context or {}
         result = await engine.generate_guarded(
             intent, 
             security_level, 
@@ -98,9 +99,12 @@ class GenerationController:
             disable_fallbacks=disable_fallbacks,
             resolution_mode=resolution_mode,
             existing_spec=existing_spec if existing_spec and str(getattr(existing_spec.status, "value", existing_spec.status)) == "confirmed" else None,
+            skip_composition_check=bool(ctx.get("skip_composition_check", False)),
+            allow_experimental=bool(ctx.get("allow_experimental", False)),
+            force_generate=bool(ctx.get("force_generate", False)),
         )
 
-        if result["type"] in ("needs_input", "review"):
+        if result["type"] in ("needs_input", "review", "unsupported_composition", "experimental_composition"):
             if session.current_specification is None and result.get("data", {}).get("specification"):
                 from src.models import ContractSpecification
                 session.current_specification = ContractSpecification(**result["data"]["specification"])

@@ -245,6 +245,34 @@ class PlanningReport(BaseModel):
     effective_mode: str = ""
 
 
+class SuggestedAlternative(BaseModel):
+    """A simpler supported pattern the user can generate instead."""
+    id: str
+    label: str
+    description: str
+    prompt_example: str = ""
+    capabilities: List[str] = Field(default_factory=list)
+
+
+class CompositionSupportAssessment(BaseModel):
+    """
+    Backend-authored support verdict for the frontend (Mode C / experimental banners).
+    The frontend should render this payload directly without inferring support locally.
+    """
+    status: str  # supported | experimental | unsupported
+    reason: str = ""
+    detail: str = ""
+    detected_capabilities: List[str] = Field(default_factory=list)
+    selected_modules: List[str] = Field(default_factory=list)
+    effective_mode: str = ""
+    suppressed_modules: List[str] = Field(default_factory=list)
+    supported_subset: List[str] = Field(default_factory=list)
+    suggestions: List[SuggestedAlternative] = Field(default_factory=list)
+    can_save_spec: bool = False
+    can_proceed: bool = True
+    capability_conflicts: List[str] = Field(default_factory=list)
+
+
 class RawIntent(BaseModel):
     intent: str = ""
     capabilities: List[str] = Field(default_factory=list)

@@ -11,6 +11,7 @@ from .architecture import ArchitectureBuilder
 from .phase2_adapter import resolve_effective_mode
 from .review import render_specification, confirm_specification, modify_specification
 from .orchestrator import run_spec_pipeline, derive_intent_model, apply_legacy_fallback, merge_answers
+from .support_assessment import assess_composition_support, assess_from_capabilities
 from .assistant import SpecificationAssistant
 
 __all__ = [
@@ -33,4 +34,7 @@ __all__ = [
     "run_spec_pipeline",
     "derive_intent_model",
     "apply_legacy_fallback",
+    "assess_composition_support",
+    "assess_from_capabilities",
+    "SpecificationAssistant",
 ]

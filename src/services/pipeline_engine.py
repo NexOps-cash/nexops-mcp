@@ -53,6 +53,9 @@ class GuardedPipelineEngine:
         disable_fallbacks: bool = False,
         resolution_mode: str = "non_interactive",
         existing_spec: Optional[Any] = None,
+        skip_composition_check: bool = False,
+        allow_experimental: bool = False,
+        force_generate: bool = False,
     ) -> Dict[str, Any]:
         """
         Execute the full 4-stage guarded pipeline.
@@ -123,11 +126,19 @@ class GuardedPipelineEngine:
                         ir.metadata.specification,
                         ir.metadata.utxo_architecture,
                     )
+                    from src.services.spec.support_assessment import assess_composition_support
+
+                    support = assess_composition_support(
+                        ir.metadata.specification,
+                        ir.metadata.planning_report,
+                    )
                     return {
                         "type": "review",
                         "data": {
                             "specification": ir.metadata.specification.model_dump(),
                             "review": review.model_dump(),
+                            "composition_support": support.model_dump(),
+                            "planning_report": ir.metadata.planning_report.model_dump(),
                         },
                     }
                 return {
@@ -139,6 +150,43 @@ class GuardedPipelineEngine:
                 }
 
         await _notify("phase1_complete", f"Intent parsed: {intent_model.contract_type} with features {intent_model.features}")
+
+        composition_support = None
+        if (
+            not skip_composition_check
+            and ir.metadata.specification
+            and ir.metadata.planning_report
+        ):
+            from src.services.spec.support_assessment import assess_composition_support
+
+            composition_support = assess_composition_support(
+                ir.metadata.specification,
+                ir.metadata.planning_report,
+            )
+            if composition_support.status == "unsupported" and not force_generate:
+                return {
+                    "type": "unsupported_composition",
+                    "data": {
+                        "composition_support": composition_support.model_dump(),
+                        "specification": ir.metadata.specification.model_dump(),
+                        "planning_report": ir.metadata.planning_report.model_dump(),
+                        "intent_model": intent_model.model_dump() if intent_model else {},
+                    },
+                }
+            if composition_support.status == "experimental" and not allow_experimental and not force_generate:
+                return {
+                    "type": "experimental_composition",
+                    "data": {
+                        "composition_support": composition_support.model_dump(),
+                        "specification": ir.metadata.specification.model_dump(),
+                        "planning_report": ir.metadata.planning_report.model_dump(),
+                        "intent_model": intent_model.model_dump() if intent_model else {},
+                        "message": (
+                            "This composition is experimental. "
+                            "Set context.allow_experimental=true to generate anyway."
+                        ),
+                    },
+                }
 
         # PHASE 2: Constrained Generation Loop
         max_gen_retries = 3 if disable_fallbacks else 2

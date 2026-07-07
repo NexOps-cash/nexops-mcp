@@ -11,6 +11,8 @@ from src.services.spec.assistant import SpecificationAssistant
 from src.services.spec.orchestrator import merge_answers, run_spec_pipeline
 from src.services.spec.review import confirm_specification, modify_specification, render_specification
 from src.services.spec.validator import SpecValidator
+from src.services.spec.support_assessment import assess_composition_support
+from src.services.spec.planner import ModulePlanner
 
 logger = logging.getLogger("nexops.spec.controller")
 
@@ -108,6 +110,24 @@ async def spec_review(req: MCPRequest) -> Dict[str, Any]:
 
     spec.status = SpecStatus.IN_REVIEW
     review = render_specification(spec)
+    modules, _ = ModulePlanner.select_modules(spec)
+    from src.models import ExecutionPlan, PlanningReport
+    from src.services.spec.architecture import ArchitectureBuilder
+    from src.services.spec.phase2_adapter import resolve_effective_mode
+
+    plan = ExecutionPlan(
+        modules=modules,
+        order=[m.name for m in modules],
+        dependencies={m.name: list(m.depends_on) for m in modules},
+        shared_parameters=dict(spec.parameters),
+    )
+    utxo = ArchitectureBuilder.build(plan, spec)
+    report = PlanningReport(
+        detected_capabilities=[c.name for c in spec.capabilities],
+        selected_modules=[m.name for m in modules],
+        effective_mode=resolve_effective_mode(utxo, plan),
+    )
+    composition_support = assess_composition_support(spec, report)
     session.current_specification = spec
     return {
         "request_id": req.request_id,
@@ -115,6 +135,8 @@ async def spec_review(req: MCPRequest) -> Dict[str, Any]:
         "data": {
             "review": review.model_dump(),
             "specification": spec.model_dump(),
+            "composition_support": composition_support.model_dump(),
+            "planning_report": report.model_dump(),
             "session_id": session.session_id,
         },
     }
