@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Optional, Set
 
 from src.models import ContractSpecification
 from src.services.spec.capabilities import all_known_field_names
@@ -117,7 +117,42 @@ def extract_parameters_from_message(
         if timeout_match and "duration_days" not in out:
             out["timeout_days"] = int(timeout_match.group(1))
 
+    people_count = _extract_people_count(lower)
+    if people_count:
+        if "holders" in allowed:
+            out["holders"] = people_count
+        if "signers" in allowed:
+            out["signers"] = [f"Signer{i + 1}" for i in range(people_count)]
+        if "weights" in allowed and ("equal" in lower or "same" in lower):
+            base = 100 // people_count
+            rem = 100 - (base * people_count)
+            weights = [base] * people_count
+            weights[0] += rem
+            out["weights"] = weights
+
+    if "threshold" in allowed:
+        threshold_match = re.search(
+            r"(?:threshold|approve|need|require|of)\s*(?:is|=|:)?\s*(\d+)\b",
+            lower,
+        )
+        if not threshold_match:
+            threshold_match = re.search(r"\b(\d+)\s*(?:of\s*\d+|enough|sufficient|signers?\b)", lower)
+        if threshold_match:
+            out["threshold"] = int(threshold_match.group(1))
+        elif re.match(r"^\s*(\d+)\s*$", lower):
+            out["threshold"] = int(lower.strip())
+
     return {k: v for k, v in out.items() if k in allowed and not is_empty_value(v)}
+
+
+def _extract_people_count(lower: str) -> Optional[int]:
+    match = re.search(
+        r"\b(\d+)\s*(?:ppl|people|persons?|signers?|holders?|members?|keys?)\b",
+        lower,
+    )
+    if match:
+        return int(match.group(1))
+    return None
 
 
 def extract_pending_from_assistant_message(message: str, spec: ContractSpecification) -> Dict[str, Any]:
@@ -166,9 +201,56 @@ def apply_parameter_updates(
     for key, value in updates.items():
         if is_empty_value(value):
             continue
-        updated.parameters[key] = value
+        updated.parameters[key] = _normalize_param_value(key, value, updated.parameters)
         applied.add(key)
         updated.pending_parameters.pop(key, None)
+
+    # If holders was set but signers is still a bare count / missing, expand names.
+    if "holders" in applied or "signers" in applied:
+        updated.parameters["signers"] = _expand_signers_param(
+            updated.parameters.get("signers"),
+            updated.parameters.get("holders"),
+        )
+        if not is_empty_value(updated.parameters.get("signers")):
+            applied.add("signers")
+
     if confirm and applied:
         confirm_fields(updated, applied)
     return updated
+
+
+def _normalize_param_value(key: str, value: Any, current: Dict[str, Any]) -> Any:
+    if key == "signers":
+        return _expand_signers_param(value, current.get("holders"))
+    if key in {"threshold", "holders", "timeout_days", "duration_days", "initial_threshold", "final_threshold"}:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return int(value)
+        if isinstance(value, str) and value.strip().isdigit():
+            return int(value.strip())
+    return value
+
+
+def _expand_signers_param(signers: Any, holders: Any = None) -> Any:
+    if isinstance(signers, list):
+        if len(signers) == 1 and isinstance(signers[0], (int, float)):
+            count = int(signers[0])
+            return [f"Signer{i + 1}" for i in range(max(0, count))]
+        if signers and all(isinstance(x, str) for x in signers):
+            return signers
+        if signers:
+            return [str(x) for x in signers]
+    if isinstance(signers, int):
+        return [f"Signer{i + 1}" for i in range(max(0, signers))]
+    if isinstance(signers, str) and signers.strip().isdigit():
+        return [f"Signer{i + 1}" for i in range(int(signers.strip()))]
+    if isinstance(signers, str) and signers.strip():
+        parts = [p.strip() for p in signers.replace(";", ",").split(",") if p.strip()]
+        if parts:
+            return parts
+    if isinstance(holders, int) and holders > 0:
+        return [f"Signer{i + 1}" for i in range(holders)]
+    if isinstance(holders, str) and holders.strip().isdigit():
+        return [f"Signer{i + 1}" for i in range(int(holders.strip()))]
+    return signers

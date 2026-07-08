@@ -107,6 +107,11 @@ def _heuristic_raw_intent(intent: str) -> RawIntent:
     caps: List[str] = []
     if any(k in il for k in ("treasury", "vault", "cold storage")):
         caps.extend(["treasury", "vault"])
+    if any(
+        k in il
+        for k in ("dao", "governance", "catalyst", "catlyst", "community fund", "proposal fund")
+    ):
+        caps.extend(["treasury", "vault", "weighted_multisig"])
     if any(k in il for k in ("weighted", "weight", "weights")):
         caps.append("weighted_multisig")
     if any(k in il for k in ("decay", "linear decay", "threshold")):
@@ -133,7 +138,7 @@ def _heuristic_raw_intent(intent: str) -> RawIntent:
         primary = "auction"
     if "escrow" in il:
         primary = "escrow"
-    elif "vault" in il or "treasury" in il:
+    elif "vault" in il or "treasury" in il or "dao" in il or "governance" in il:
         primary = "treasury"
     elif "split" in il:
         primary = "split"
@@ -257,12 +262,52 @@ def derive_intent_model(spec: ContractSpecification, effective_mode: str) -> Int
     return IntentModel(
         contract_type=contract_type,
         features=features,
-        signers=list(spec.parameters.get("signers") or []),
-        threshold=spec.parameters.get("threshold"),
-        timeout_days=spec.parameters.get("duration_days") or spec.parameters.get("timeout_days"),
+        signers=_normalize_signers(spec.parameters.get("signers"), spec.parameters.get("holders")),
+        threshold=_coerce_int(spec.parameters.get("threshold")),
+        timeout_days=_coerce_int(
+            spec.parameters.get("duration_days") or spec.parameters.get("timeout_days")
+        ),
         purpose=spec.intent,
         token_class=_token_class_from_caps(cap_names),
     )
+
+
+def _coerce_int(value: Any) -> Optional[int]:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_signers(signers: Any, holders: Any = None) -> List[str]:
+    """IntentModel.signers must be a list of names — expand counts like 4 → Signer1..Signer4."""
+    if isinstance(signers, list):
+        if not signers:
+            pass
+        elif all(isinstance(x, (int, float)) for x in signers) and len(signers) == 1:
+            count = int(signers[0])
+            return [f"Signer{i + 1}" for i in range(max(0, count))]
+        else:
+            return [str(x) for x in signers]
+    elif isinstance(signers, int):
+        return [f"Signer{i + 1}" for i in range(max(0, signers))]
+    elif isinstance(signers, str) and signers.strip().isdigit():
+        return [f"Signer{i + 1}" for i in range(int(signers.strip()))]
+    elif isinstance(signers, str) and signers.strip():
+        parts = [p.strip() for p in signers.replace(";", ",").split(",") if p.strip()]
+        if parts:
+            return parts
+
+    holder_count = _coerce_int(holders)
+    if holder_count and holder_count > 0:
+        return [f"Signer{i + 1}" for i in range(holder_count)]
+    return []
 
 
 def _contract_type_from_mode(mode: str) -> str:
