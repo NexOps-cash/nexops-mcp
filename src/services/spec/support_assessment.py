@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import FrozenSet, List, Set, Tuple
+from typing import Dict, FrozenSet, List, Set, Tuple
 
 from src.models import (
     CompositionSupportAssessment,
@@ -45,7 +45,20 @@ _BLOCKED_CAPABILITY_SETS: Tuple[FrozenSet[str], ...] = (
     frozenset({"treasury", "weighted_multisig", "linear_decay"}),
     frozenset({"vault", "weighted_multisig", "linear_decay"}),
     frozenset({"weighted_multisig", "linear_decay"}),
+    frozenset({"treasury", "linear_decay"}),
+    frozenset({"vault", "linear_decay"}),
 )
+
+_MODULE_LABELS: Dict[str, str] = {
+    "VaultModule": "A secure Vault",
+    "EscrowModule": "A secure Escrow",
+    "LinearThresholdModule": "A standalone Linear Threshold policy",
+    "VestingScheduleModule": "A linear vesting schedule",
+    "WeightedMultisigModule": "A weighted multisig authorization policy",
+    "MultisigModule": "A multisig wallet",
+    "SplitPaymentModule": "A split payment contract",
+    "DutchAuctionModule": "A Dutch auction",
+}
 
 _SUPPORTED_SUBSET_CATALOG: List[SuggestedAlternative] = [
     SuggestedAlternative(
@@ -80,10 +93,63 @@ _SUPPORTED_SUBSET_CATALOG: List[SuggestedAlternative] = [
         id="linear_vesting",
         label="Linear vesting / decay",
         description="Time-based unlock or threshold decay as a single pattern.",
-        prompt_example="Create linear vesting that unlocks over 30 days",
+        prompt_example="Create a linear decay threshold policy from 2 to 3 over 30 days",
         capabilities=["linear_decay"],
     ),
 ]
+
+
+def _unique_modules(modules: List[str]) -> List[str]:
+    seen: set[str] = set()
+    out: List[str] = []
+    for name in modules:
+        if name in seen:
+            continue
+        seen.add(name)
+        out.append(name)
+    return out
+
+
+def _module_label(module_name: str) -> str:
+    return _MODULE_LABELS.get(module_name, module_name.replace("Module", "").replace("_", " "))
+
+
+def _build_guidance(
+    *,
+    unique_modules: List[str],
+    suggestions: List[SuggestedAlternative],
+    include_future_note: bool = True,
+) -> str:
+    lines = [
+        "This request requires multi-module composition, which isn't supported yet.",
+        "",
+        "I can currently generate:",
+        "",
+    ]
+    for mod in unique_modules:
+        lines.append(f"  • {_module_label(mod)}.")
+    if suggestions:
+        lines.append("")
+        lines.append("Related patterns you can generate now:")
+        for alt in suggestions[:4]:
+            example = f' — e.g. "{alt.prompt_example}"' if alt.prompt_example else ""
+            lines.append(f"  • {alt.label}{example}")
+    if include_future_note:
+        lines.append("")
+        lines.append(
+            "When multi-module composition is available, these will be combined automatically."
+        )
+    return "\n".join(lines)
+
+
+def _attach_guidance(assessment: CompositionSupportAssessment) -> CompositionSupportAssessment:
+    unique = _unique_modules(assessment.selected_modules)
+    if assessment.status == "unsupported" and len(unique) >= 2 and not assessment.guidance:
+        assessment.guidance = _build_guidance(
+            unique_modules=unique,
+            suggestions=assessment.suggestions,
+        )
+    return assessment
 
 
 def _capability_conflicts(cap_names: Set[str]) -> List[str]:
@@ -128,7 +194,7 @@ def assess_composition_support(
     Single-pattern prompts (e.g. 2-of-3 escrow) must return status=supported.
   """
     cap_names = {c.name for c in spec.capabilities}
-    modules = list(report.selected_modules or [])
+    modules = _unique_modules(list(report.selected_modules or []))
     module_set = frozenset(modules)
     effective_mode = report.effective_mode or ""
     conflicts = _capability_conflicts(cap_names)
@@ -137,7 +203,7 @@ def assess_composition_support(
 
     if conflicts:
         suggestions = _subset_suggestions(cap_names)
-        return CompositionSupportAssessment(
+        return _attach_guidance(CompositionSupportAssessment(
             status="unsupported",
             reason="Capability conflict detected in the specification.",
             detail="; ".join(conflicts),
@@ -150,20 +216,15 @@ def assess_composition_support(
             can_save_spec=True,
             can_proceed=False,
             capability_conflicts=conflicts,
-        )
+        ))
 
     for blocked in _BLOCKED_CAPABILITY_SETS:
         if _is_subset(blocked, cap_names):
             suppressed = modules[1:] if len(modules) > 1 else []
             suggestions = _subset_suggestions(cap_names)
-            return CompositionSupportAssessment(
+            return _attach_guidance(CompositionSupportAssessment(
                 status="unsupported",
-                reason=(
-                    "This contract composition is not production-supported yet. "
-                    "NexOps can plan treasury, weighted multisig, and threshold decay together, "
-                    "but generation currently collapses to a single pattern "
-                    f"({effective_mode or 'vault'}) and drops the other modules."
-                ),
+                reason="This request requires multi-module composition, which isn't supported yet.",
                 detail=(
                     f"Detected capabilities: {', '.join(sorted(cap_names))}. "
                     f"Planned modules: {', '.join(modules)}. "
@@ -178,10 +239,10 @@ def assess_composition_support(
                 can_save_spec=True,
                 can_proceed=False,
                 capability_conflicts=[],
-            )
+            ))
 
     if "split" in cap_names and len(cap_names) > 1:
-        return CompositionSupportAssessment(
+        return _attach_guidance(CompositionSupportAssessment(
             status="unsupported",
             reason="Split payment cannot be composed with other patterns yet.",
             detail="Split distribution requires N-output conservation work that is not composition-ready.",
@@ -202,12 +263,12 @@ def assess_composition_support(
             ],
             can_save_spec=True,
             can_proceed=False,
-        )
+        ))
 
     if len(modules) >= 3:
-        return CompositionSupportAssessment(
+        return _attach_guidance(CompositionSupportAssessment(
             status="unsupported",
-            reason="Three or more generation modules are not supported in a single contract yet.",
+            reason="This request requires multi-module composition, which isn't supported yet.",
             detail=f"Planned modules: {', '.join(modules)}.",
             detected_capabilities=sorted(cap_names),
             selected_modules=modules,
@@ -217,12 +278,31 @@ def assess_composition_support(
             suggestions=_subset_suggestions(cap_names),
             can_save_spec=True,
             can_proceed=False,
-        )
+        ))
 
     if len(modules) == 2:
         if module_set not in _ALLOWED_TWO_MODULE_SETS:
-            if "WeightedMultisigModule" in modules or "LinearThresholdModule" in modules:
-                return CompositionSupportAssessment(
+            if module_set == frozenset({"VaultModule", "LinearThresholdModule"}) or module_set == frozenset(
+                {"VaultModule", "VestingScheduleModule"}
+            ):
+                return _attach_guidance(CompositionSupportAssessment(
+                    status="unsupported",
+                    reason="This request requires multi-module composition, which isn't supported yet.",
+                    detail=(
+                        f"Planned modules: {', '.join(modules)}. "
+                        "Treasury/vault and threshold decay must be generated separately for now."
+                    ),
+                    detected_capabilities=sorted(cap_names),
+                    selected_modules=modules,
+                    effective_mode=effective_mode,
+                    suppressed_modules=[m for m in modules if m != modules[0]],
+                    supported_subset=supported_subset,
+                    suggestions=_subset_suggestions(cap_names),
+                    can_save_spec=True,
+                    can_proceed=False,
+                ))
+            if "WeightedMultisigModule" in modules and "LinearThresholdModule" in modules:
+                return _attach_guidance(CompositionSupportAssessment(
                     status="unsupported",
                     reason="Weighted multisig and threshold decay cannot be generated together yet.",
                     detail=(
@@ -237,7 +317,7 @@ def assess_composition_support(
                     suggestions=_subset_suggestions(cap_names),
                     can_save_spec=True,
                     can_proceed=False,
-                )
+                ))
             return CompositionSupportAssessment(
                 status="experimental",
                 reason="This two-module composition is experimental and may not reflect all planned behavior.",
@@ -294,6 +374,31 @@ def assess_composition_support(
         can_save_spec=True,
         can_proceed=True,
     )
+
+
+def personalize_suggestion_prompt(
+    alt: SuggestedAlternative,
+    spec: ContractSpecification,
+) -> str:
+    """Build a generation prompt from the user's spec so alternatives stay relevant."""
+    params = spec.parameters or {}
+    if alt.id == "linear_vesting" or alt.capabilities == ["linear_decay"]:
+        initial = params.get("initial_threshold", 50)
+        final = params.get("final_threshold", initial)
+        days = params.get("duration_days", 30)
+        return (
+            f"Create a linear decay threshold policy from {initial} to {final} "
+            f"over {days} days"
+        )
+    if alt.id == "vault":
+        asset = str(params.get("asset_type", "BCH"))
+        days = params.get("duration_days", 7)
+        return (
+            f"Create a {asset} treasury vault with delayed withdrawal after {days} days"
+        )
+    if alt.id == "escrow_2of3":
+        return alt.prompt_example
+    return alt.prompt_example or alt.label
 
 
 def assess_from_capabilities(capability_names: List[str], modules: List[str], effective_mode: str) -> CompositionSupportAssessment:

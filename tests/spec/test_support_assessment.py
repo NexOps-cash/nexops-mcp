@@ -30,6 +30,31 @@ def test_escrow_multisig_is_supported():
     assert assessment.suggestions == []
 
 
+def test_single_vault_supported():
+    spec = ContractSpecification(
+        intent="treasury with decay",
+        capabilities=[
+            CapabilityInstance(name="treasury"),
+            CapabilityInstance(name="vault"),
+            CapabilityInstance(name="linear_decay"),
+        ],
+        parameters={"duration_days": 30, "asset_type": "ft"},
+    )
+    assessment = assess_composition_support(
+        spec,
+        _report(
+            ["treasury", "vault", "linear_decay"],
+            ["VaultModule", "LinearThresholdModule"],
+            "vault",
+        ),
+    )
+    assert assessment.status == "unsupported"
+    assert assessment.can_proceed is False
+    assert "multi-module composition" in assessment.reason.lower()
+    assert "Vault" in assessment.guidance
+    assert "Linear Threshold" in assessment.guidance
+
+
 def test_treasury_weighted_decay_is_unsupported():
     spec = ContractSpecification(
         intent="treasury with weighted multisig and linear decay after 30 days",
@@ -86,3 +111,31 @@ def test_single_vault_supported():
     )
     assert assessment.status == "supported"
     assert assessment.can_proceed is True
+
+
+def test_personalize_linear_decay_prompt_from_spec():
+    from src.models import SuggestedAlternative
+    from src.services.spec.support_assessment import personalize_suggestion_prompt
+
+    spec = ContractSpecification(
+        intent="decay treasury",
+        capabilities=[CapabilityInstance(name="linear_decay")],
+        parameters={
+            "initial_threshold": 50,
+            "final_threshold": 90,
+            "duration_days": 23,
+            "asset_type": "ft",
+        },
+    )
+    alt = SuggestedAlternative(
+        id="linear_vesting",
+        label="Linear vesting / decay",
+        description="",
+        prompt_example="generic",
+        capabilities=["linear_decay"],
+    )
+    prompt = personalize_suggestion_prompt(alt, spec)
+    assert "50" in prompt
+    assert "90" in prompt
+    assert "23" in prompt
+    assert "linear decay" in prompt.lower()
