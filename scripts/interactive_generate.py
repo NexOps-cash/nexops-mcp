@@ -37,14 +37,25 @@ from dotenv import load_dotenv
 
 load_dotenv(ROOT / ".env")
 
-from src.models import ContractSpecification, SpecStatus, SpecificationReview
+from src.models import (
+    CompositionSupportAssessment,
+    ContractSpecification,
+    ExecutionPlan,
+    PlanningReport,
+    SpecStatus,
+    SpecificationReview,
+)
 from src.services.pipeline_engine import get_guarded_pipeline_engine
 from src.services.session import get_session_manager
 from src.services.spec.assistant import SpecificationAssistant
+from src.services.spec.architecture import ArchitectureBuilder
 from src.services.spec.capabilities import CAPABILITY_REGISTRY
-from src.services.spec.clarification import build_clarification_plan
 from src.services.spec.orchestrator import run_spec_pipeline
+from src.services.spec.phase2_adapter import resolve_effective_mode
+from src.services.spec.planner import ModulePlanner
 from src.services.spec.review import confirm_specification, modify_specification, render_specification
+from src.services.spec.support_assessment import assess_composition_support, personalize_suggestion_prompt
+from src.services.spec.parameter_extraction import confirm_fields
 from src.services.spec.validator import SpecValidator
 
 
@@ -64,6 +75,11 @@ def _parse_args() -> argparse.Namespace:
         "--security-level",
         choices=("low", "medium", "high"),
         default="high",
+    )
+    p.add_argument(
+        "--spec-debug",
+        action="store_true",
+        help="Print ContractSpecification parameters before/after each assistant turn",
     )
     return p.parse_args()
 
@@ -143,13 +159,89 @@ def _print_review(review: SpecificationReview) -> None:
     print("\n" + "═" * 62)
 
 
+def _assess_spec(spec: ContractSpecification) -> CompositionSupportAssessment:
+    modules, _ = ModulePlanner.select_modules(spec)
+    plan = ExecutionPlan(
+        modules=modules,
+        order=[m.name for m in modules],
+        dependencies={m.name: list(m.depends_on) for m in modules},
+        shared_parameters=dict(spec.parameters),
+    )
+    utxo = ArchitectureBuilder.build(plan, spec)
+    report = PlanningReport(
+        detected_capabilities=[c.name for c in spec.capabilities],
+        selected_modules=[m.name for m in modules],
+        effective_mode=resolve_effective_mode(utxo, plan),
+    )
+    return assess_composition_support(spec, report)
+
+
+def _print_composition_guidance(support: CompositionSupportAssessment, spec: ContractSpecification) -> None:
+    print("\n" + "═" * 62)
+    print("  COMPOSITION NOT SUPPORTED YET")
+    print("═" * 62 + "\n")
+    if support.guidance:
+        for line in support.guidance.splitlines():
+            print(f"  {line}" if line else "")
+    else:
+        print(f"  {support.reason}")
+        if support.detail:
+            print(f"\n  {support.detail}")
+    if support.suggestions:
+        print("\n  Supported alternatives:")
+        for i, alt in enumerate(support.suggestions[:4], start=1):
+            example = personalize_suggestion_prompt(alt, spec) if spec else alt.prompt_example
+            print(f"    [{i}] {alt.label}")
+            if example:
+                print(f"        \"{example}\"")
+    print("\n" + "═" * 62)
+
+
+def _composition_menu(support: CompositionSupportAssessment, spec: ContractSpecification) -> str:
+    """Returns 'modify', 'quit', or a prompt to generate."""
+    options = support.suggestions[:4]
+    n = len(options)
+    while True:
+        choice = _prompt(
+            f"\n  [1-{n}] Generate a supported alternative  [M]odify spec  [Q]uit: "
+        ).upper()
+        if choice in ("Q", "QUIT"):
+            return "quit"
+        if choice in ("M", "MODIFY"):
+            return "modify"
+        if choice in ("Y", "YES"):
+            print(f"  Y confirms a different step — pick 1-{n}, M, or Q here.")
+            continue
+        if choice.isdigit():
+            idx = int(choice) - 1
+            if 0 <= idx < n:
+                alt = options[idx]
+                return personalize_suggestion_prompt(alt, spec)
+        print(f"  Please enter 1-{n}, M, or Q.")
+
+
+def _print_spec_snapshot(label: str, spec: ContractSpecification) -> None:
+    print(
+        f"\n  [spec:{label}] parameters={spec.parameters} "
+        f"confirmed={spec.confirmed_fields} pending={spec.pending_parameters}\n"
+    )
+
+
 async def _assistant_turn(
     spec: ContractSpecification,
     user_message: str,
     api_key: Optional[str],
     openrouter_key: Optional[str],
-) -> ContractSpecification:
+    *,
+    spec_debug: bool = False,
+    last_assistant_message: str = "",
+    session=None,
+) -> tuple[ContractSpecification, str]:
+    if spec_debug:
+        _print_spec_snapshot("before", spec)
+
     validation = SpecValidator.validate(spec)
+    chat_history = list(session.spec_chat_history) if session else []
     turn = await SpecificationAssistant.respond(
         spec,
         validation,
@@ -157,11 +249,22 @@ async def _assistant_turn(
         api_key=api_key,
         openrouter_key=openrouter_key or api_key,
         provider="openrouter",
+        last_assistant_message=last_assistant_message,
+        chat_history=chat_history,
     )
+
+    if session is not None:
+        mgr = get_session_manager()
+        mgr.append_spec_chat(session.session_id, "user", user_message)
+        mgr.append_spec_chat(session.session_id, "assistant", turn.message)
+
+    if spec_debug:
+        _print_spec_snapshot("after", turn.updated_spec)
+
     print(f"\n  NexOps: {turn.message}\n")
-    if turn.still_missing:
-        print(f"  Still needed: {', '.join(turn.still_missing)}\n")
-    return turn.updated_spec
+    if turn.progress:
+        print(f"  ({turn.progress})\n")
+    return turn.updated_spec, turn.message
 
 
 async def _fill_via_registry(spec: ContractSpecification) -> ContractSpecification:
@@ -178,6 +281,7 @@ async def _fill_via_registry(spec: ContractSpecification) -> ContractSpecificati
             val = _coerce_answer(field, ans)
             if val is not None:
                 spec.parameters[field] = val
+                confirm_fields(spec, {field})
         spec.status = SpecStatus.NEEDS_INPUT
 
 
@@ -186,23 +290,28 @@ async def _conversation_loop(
     original_intent: str,
     use_llm: bool,
     api_key: Optional[str],
+    session,
+    *,
+    spec_debug: bool = False,
 ) -> ContractSpecification:
     validation = SpecValidator.validate(spec)
-    clarification = build_clarification_plan(validation)
 
     if validation.is_complete:
         spec.status = SpecStatus.IN_REVIEW
         return spec
 
     print("\n  NexOps is drafting your specification...\n")
-    if clarification.questions:
-        print("  To build this safely, I need to know:\n")
-        for q in clarification.questions:
-            print(f"    • {q}")
-        print()
+    caps = ", ".join(c.name.replace("_", " ") for c in spec.capabilities)
+    if caps:
+        print(f"  Detected: {caps}\n")
 
     if use_llm:
-        print("  Answer in plain language (or type 'fields' for one-by-one prompts).\n")
+        opening = SpecificationAssistant.opening_message(spec)
+        print(f"  NexOps: {opening}\n")
+        if session is not None:
+            get_session_manager().append_spec_chat(session.session_id, "assistant", opening)
+        print('  Answer in plain language (or say "use standard" for a sensible default).\n')
+        last_assistant_message = opening
         while True:
             validation = SpecValidator.validate(spec)
             if validation.is_complete:
@@ -214,7 +323,15 @@ async def _conversation_loop(
             if msg.lower() in ("fields", "manual", "registry"):
                 spec = await _fill_via_registry(spec)
                 break
-            spec = await _assistant_turn(spec, msg, api_key, api_key)
+            spec, last_assistant_message = await _assistant_turn(
+                spec,
+                msg,
+                api_key,
+                api_key,
+                spec_debug=spec_debug,
+                last_assistant_message=last_assistant_message,
+                session=session,
+            )
     else:
         print("  (No OPENROUTER_API_KEY — using registry prompts.)\n")
         spec = await _fill_via_registry(spec)
@@ -226,20 +343,125 @@ async def _modify_loop(
     spec: ContractSpecification,
     use_llm: bool,
     api_key: Optional[str],
+    session,
+    *,
+    spec_debug: bool = False,
 ) -> ContractSpecification:
     spec = modify_specification(spec)
     print("\n  What would you like to change?\n")
     msg = _prompt("  You: ")
     if use_llm and msg:
-        spec = await _assistant_turn(spec, msg, api_key, api_key)
+        spec, _ = await _assistant_turn(
+            spec, msg, api_key, api_key, spec_debug=spec_debug, session=session
+        )
         validation = SpecValidator.validate(spec)
         if not validation.is_complete:
-            spec = await _conversation_loop(spec, spec.intent, use_llm, api_key)
+            spec = await _conversation_loop(
+                spec, spec.intent, use_llm, api_key, session, spec_debug=spec_debug
+            )
     elif msg:
-        spec = await _assistant_turn(spec, msg, api_key, api_key) if use_llm else spec
+        if use_llm:
+            spec, _ = await _assistant_turn(
+                spec, msg, api_key, api_key, spec_debug=spec_debug, session=session
+            )
         if not SpecValidator.validate(spec).is_complete:
             spec = await _fill_via_registry(spec)
     return spec
+
+
+async def _finish_generate_result(result: dict, out_path: str) -> int:
+    rtype = result.get("type")
+    if rtype == "unsupported_composition":
+        data = result.get("data", {})
+        support = CompositionSupportAssessment(**data.get("composition_support", {}))
+        spec_data = data.get("specification")
+        spec_obj = ContractSpecification(**spec_data) if spec_data else ContractSpecification()
+        _print_composition_guidance(support, spec_obj)
+        action = _composition_menu(support, spec_obj)
+        if action == "quit":
+            print("  Specification saved. You can return to generate a supported pattern later.")
+            return 0
+        if action == "modify":
+            return 2
+        if action:
+            return await _generate_simple(action, os.getenv("OPENROUTER_API_KEY"), out_path)
+        return 0
+    if rtype == "experimental_composition":
+        data = result.get("data", {})
+        support = CompositionSupportAssessment(**data.get("composition_support", {}))
+        spec_data = data.get("specification")
+        spec_obj = ContractSpecification(**spec_data) if spec_data else ContractSpecification()
+        _print_composition_guidance(support, spec_obj)
+        print("\n  This composition is experimental.")
+        choice = _prompt("  [Y] Generate anyway  [Q] Quit: ").upper()
+        if choice not in ("Y", "YES"):
+            return 0
+        return 1
+    if rtype != "success":
+        err = result.get("error", {})
+        print(f"\n  Generation failed: {err.get('code', rtype or 'error')}", file=sys.stderr)
+        if err.get("message"):
+            print(f"  {err['message']}", file=sys.stderr)
+        elif rtype:
+            print(f"  {result}", file=sys.stderr)
+        return 1
+
+    data = result["data"]
+    code = data.get("code", "")
+    contract_type = (data.get("intent_model") or {}).get("contract_type", "?")
+
+    if out_path:
+        path = Path(out_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(code, encoding="utf-8")
+        print(f"\n  Wrote {path}", file=sys.stderr)
+
+    print("\n" + "═" * 62)
+    print("  GENERATED CONTRACT")
+    print(f"  contract_type: {contract_type}")
+    if data.get("toll_gate"):
+        print(f"  structural_score: {data['toll_gate'].get('structural_score', 0):.2f}")
+    print("═" * 62 + "\n")
+    print(code)
+    print("\n" + "═" * 62)
+    return 0
+
+
+async def _generate_simple(
+    intent: str,
+    api_key: Optional[str],
+    out_path: str,
+    security_level: str = "high",
+) -> int:
+    engine = get_guarded_pipeline_engine()
+
+    async def on_update(msg: dict) -> None:
+        if not isinstance(msg, dict):
+            return
+        stage = msg.get("stage", "")
+        message = msg.get("message", "")
+        attempt = msg.get("attempt", "")
+        if stage:
+            line = f"  [{stage}] {message}"
+            if attempt:
+                line += f" (attempt {attempt})"
+            print(line, file=sys.stderr)
+
+    print(f"\n  Generating: {intent}\n", file=sys.stderr)
+
+    result = await engine.generate_guarded(
+        intent,
+        security_level=security_level,
+        on_update=on_update,
+        openrouter_key=api_key,
+        api_key=api_key,
+        provider="openrouter",
+        disable_golden=True,
+        disable_fallbacks=True,
+        resolution_mode="non_interactive",
+        existing_spec=None,
+    )
+    return await _finish_generate_result(result, out_path)
 
 
 async def _generate(
@@ -278,34 +500,28 @@ async def _generate(
         existing_spec=spec,
     )
 
-    if result.get("type") != "success":
-        err = result.get("error", {})
-        print(f"\n  Generation failed: {err.get('code', 'error')}", file=sys.stderr)
-        print(f"  {err.get('message', result)}", file=sys.stderr)
-        return 1
-
-    data = result["data"]
-    code = data.get("code", "")
-    contract_type = (data.get("intent_model") or {}).get("contract_type", "?")
-
-    if out_path:
-        path = Path(out_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(code, encoding="utf-8")
-        print(f"\n  Wrote {path}", file=sys.stderr)
-
-    print("\n" + "═" * 62)
-    print("  GENERATED CONTRACT")
-    print(f"  contract_type: {contract_type}")
-    if data.get("toll_gate"):
-        print(f"  structural_score: {data['toll_gate'].get('structural_score', 0):.2f}")
-    print("═" * 62 + "\n")
-    print(code)
-    print("\n" + "═" * 62)
-    return 0
+    code = await _finish_generate_result(result, out_path)
+    if code == 2:
+        return 2
+    if code == 1 and result.get("type") == "experimental_composition":
+        result = await engine.generate_guarded(
+            intent,
+            security_level=security_level,
+            on_update=on_update,
+            openrouter_key=api_key,
+            api_key=api_key,
+            provider="openrouter",
+            disable_golden=True,
+            disable_fallbacks=True,
+            resolution_mode="interactive",
+            existing_spec=spec,
+            allow_experimental=True,
+        )
+        return await _finish_generate_result(result, out_path)
+    return code
 
 
-async def run(initial_intent: str, security_level: str, out_path: str) -> int:
+async def run(initial_intent: str, security_level: str, out_path: str, spec_debug: bool = False) -> int:
     print(BANNER)
     api_key = os.getenv("OPENROUTER_API_KEY")
     use_llm = bool(api_key)
@@ -336,20 +552,42 @@ async def run(initial_intent: str, security_level: str, out_path: str) -> int:
     session.current_specification = spec
 
     if clarification or not SpecValidator.validate(spec).is_complete:
-        print(f"\n  Detected capabilities: {', '.join(c.name for c in spec.capabilities)}")
-        spec = await _conversation_loop(spec, intent, use_llm, api_key)
+        spec = await _conversation_loop(spec, intent, use_llm, api_key, session, spec_debug=spec_debug)
         session.current_specification = spec
 
     # Review / confirm loop
     while True:
         validation = SpecValidator.validate(spec)
         if not validation.is_complete:
-            spec = await _conversation_loop(spec, intent, use_llm, api_key)
+            spec = await _conversation_loop(spec, intent, use_llm, api_key, session, spec_debug=spec_debug)
             continue
 
         spec.status = SpecStatus.IN_REVIEW
+        support = _assess_spec(spec)
+
+        if support.status == "unsupported":
+            print("\n  Your specification is complete, but this combination cannot be generated yet.\n")
+            _print_composition_guidance(support, spec)
+            action = _composition_menu(support, spec)
+            if action == "quit":
+                print("  Specification saved. You can return to generate a supported pattern later.")
+                return 0
+            if action == "modify":
+                spec = await _modify_loop(spec, use_llm, api_key, session, spec_debug=spec_debug)
+                session.current_specification = spec
+                continue
+            if action and api_key:
+                return await _generate_simple(action, api_key, out_path, security_level)
+            if not api_key:
+                print("\n  Error: set OPENROUTER_API_KEY to generate code.", file=sys.stderr)
+                return 1
+            continue
+
         review = render_specification(spec)
         _print_review(review)
+
+        if support.status == "experimental":
+            print("\n  Note: This composition is experimental and may not reflect all planned behavior.")
 
         choice = _prompt("\n  Confirm specification?  [Y]es  [M]odify  [Q]uit: ").upper()
         if choice in ("Y", "YES"):
@@ -357,7 +595,7 @@ async def run(initial_intent: str, security_level: str, out_path: str) -> int:
             session.current_specification = spec
             break
         if choice in ("M", "MODIFY"):
-            spec = await _modify_loop(spec, use_llm, api_key)
+            spec = await _modify_loop(spec, use_llm, api_key, session, spec_debug=spec_debug)
             session.current_specification = spec
             continue
         if choice in ("Q", "QUIT", "N", "NO"):
@@ -369,12 +607,19 @@ async def run(initial_intent: str, security_level: str, out_path: str) -> int:
         print("\n  Error: set OPENROUTER_API_KEY to generate code.", file=sys.stderr)
         return 1
 
-    return await _generate(intent, spec, security_level, api_key, out_path)
+    while True:
+        code = await _generate(intent, spec, security_level, api_key, out_path)
+        if code != 2:
+            return code
+        spec = await _modify_loop(spec, use_llm, api_key, session, spec_debug=spec_debug)
+        session.current_specification = spec
+        spec = confirm_specification(spec)
 
 
 def main() -> None:
     args = _parse_args()
-    code = asyncio.run(run(args.intent, args.security_level, args.out))
+    spec_debug = args.spec_debug or os.getenv("NEXOPS_SPEC_DEBUG", "").lower() in ("1", "true", "yes")
+    code = asyncio.run(run(args.intent, args.security_level, args.out, spec_debug=spec_debug))
     sys.exit(code)
 
 
