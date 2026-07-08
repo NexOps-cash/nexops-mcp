@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from src.models import ContractSpecification, ValidationResult
 from src.services.spec.capabilities import get_capability
+from src.services.spec.parameter_extraction import is_empty_value
 
 
 class SpecValidator:
@@ -26,10 +27,10 @@ class SpecValidator:
             if cap.recommendations:
                 recommendations[cap.name] = list(cap.recommendations)
             for fs in cap.required_fields:
-                val = spec.parameters.get(fs.name)
-                if val is None or val == "" or val == []:
-                    if fs.name not in missing:
-                        missing.append(fs.name)
+                if SpecValidator._field_is_satisfied(spec, fs.name):
+                    continue
+                if fs.name not in missing:
+                    missing.append(fs.name)
 
         return ValidationResult(
             missing_fields=missing,
@@ -37,3 +38,11 @@ class SpecValidator:
             recommendations_available=recommendations,
             is_complete=len(missing) == 0,
         )
+
+    @staticmethod
+    def _field_is_satisfied(spec: ContractSpecification, field_name: str) -> bool:
+        val = spec.parameters.get(field_name)
+        if not is_empty_value(val):
+            return True
+        # Confirmed fields with empty values still count as missing until filled.
+        return False

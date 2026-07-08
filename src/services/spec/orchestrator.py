@@ -301,9 +301,9 @@ def merge_answers(
     spec: ContractSpecification,
     answers: Dict[str, Any],
 ) -> ContractSpecification:
-    updated = spec.model_copy(deep=True)
-    for k, v in answers.items():
-        updated.parameters[k] = v
+    from src.services.spec.parameter_extraction import apply_parameter_updates
+
+    updated = apply_parameter_updates(spec, answers)
     validation = SpecValidator.validate(updated)
     updated.status = SpecStatus.IN_REVIEW if validation.is_complete else SpecStatus.NEEDS_INPUT
     return updated

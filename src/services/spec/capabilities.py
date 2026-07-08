@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Set
 
 
 @dataclass(frozen=True)
@@ -128,19 +128,22 @@ CAPABILITY_REGISTRY: Dict[str, Capability] = {
     ),
     "token_ft": Capability(
         name="token_ft",
-        required_fields=[_f("token_category", "What is the fungible token category?", "string")],
+        required_fields=[],
+        optional_fields=[_f("token_category", "What is the fungible token category?", "string")],
         documentation=["CashTokens fungible transfer/mint patterns."],
         examples=["Reward points", "Stablecoin sidecar"],
     ),
     "nft_immutable": Capability(
         name="nft_immutable",
-        required_fields=[_f("token_category", "What is the NFT category?", "string")],
+        required_fields=[],
+        optional_fields=[_f("token_category", "What is the NFT category?", "string")],
         documentation=["Immutable NFT transfer with commitment preservation."],
         examples=["Collectible", "Membership badge"],
     ),
     "nft_mutable": Capability(
         name="nft_mutable",
-        required_fields=[_f("token_category", "What is the NFT category?", "string")],
+        required_fields=[],
+        optional_fields=[_f("token_category", "What is the NFT category?", "string")],
         documentation=["Mutable NFT with state updates in commitment."],
         examples=["Game item", "Governance badge"],
     ),
@@ -167,7 +170,7 @@ def get_capability(name: str) -> Optional[Capability]:
 
 
 def all_required_field_names(capability_names: List[str]) -> Dict[str, str]:
-    """Map field name -> owning capability for required fields."""
+    """Map field name -> owning capability for generation-required fields."""
     out: Dict[str, str] = {}
     for cap_name in capability_names:
         cap = get_capability(cap_name)
@@ -176,3 +179,17 @@ def all_required_field_names(capability_names: List[str]) -> Dict[str, str]:
         for fs in cap.required_fields:
             out[fs.name] = cap_name
     return out
+
+
+def all_known_field_names(capability_names: List[str]) -> Set[str]:
+    """Required + optional field names for active capabilities."""
+    names: Set[str] = set()
+    for cap_name in capability_names:
+        cap = get_capability(cap_name)
+        if not cap:
+            continue
+        for fs in cap.required_fields:
+            names.add(fs.name)
+        for fs in cap.optional_fields:
+            names.add(fs.name)
+    return names

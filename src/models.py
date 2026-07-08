@@ -173,6 +173,8 @@ class ContractSpecification(BaseModel):
     capabilities: List[CapabilityInstance] = Field(default_factory=list)
     parameters: Dict[str, Any] = Field(default_factory=dict)
     status: SpecStatus = SpecStatus.DRAFT
+    confirmed_fields: List[str] = Field(default_factory=list)
+    pending_parameters: Dict[str, Any] = Field(default_factory=dict)
 
 
 class GenerationModule(BaseModel):
@@ -228,6 +230,8 @@ class AssistantTurn(BaseModel):
     updated_spec: ContractSpecification
     message: str = ""
     still_missing: List[str] = Field(default_factory=list)
+    progress: str = ""
+    suggested_default: Optional[Dict[str, Any]] = None
 
 
 class SpecificationReview(BaseModel):
@@ -271,6 +275,7 @@ class CompositionSupportAssessment(BaseModel):
     can_save_spec: bool = False
     can_proceed: bool = True
     capability_conflicts: List[str] = Field(default_factory=list)
+    guidance: str = ""  # Human-readable Mode C explanation for CLI / frontend
 
 
 class RawIntent(BaseModel):
@@ -311,6 +316,11 @@ class TollGateResult(BaseModel):
 
 # ─── Session State ────────────────────────────────────────────────────
 
+class SpecChatTurn(BaseModel):
+  role: str  # user | assistant
+  content: str = ""
+
+
 class TurnRecord(BaseModel):
     turn: int
     intent: str
@@ -327,6 +337,7 @@ class SessionState(BaseModel):
     current_contract: Optional[ContractIR] = None
     current_code: str = ""
     current_specification: Optional[ContractSpecification] = None
+    spec_chat_history: List[SpecChatTurn] = Field(default_factory=list)
 
 # ─── Phase AR (Audit & Repair) Models ────────────────────────────────
 

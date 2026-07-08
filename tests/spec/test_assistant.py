@@ -17,7 +17,7 @@ def test_strip_unknown_capabilities():
     assert cleaned.capabilities[0].name == "weighted_multisig"
 
 
-def test_protect_confirmed_fields():
+def test_protect_confirmed_fields_on_confirmed_spec():
     original = ContractSpecification(
         intent="treasury",
         parameters={"holders": 3},
@@ -27,3 +27,19 @@ def test_protect_confirmed_fields():
     updated.parameters["holders"] = 99
     protected = _merge_allowed_parameters(updated, original)
     assert protected.parameters["holders"] == 3
+
+
+def test_merge_preserves_in_progress_parameters():
+    original = ContractSpecification(
+        intent="treasury",
+        parameters={"initial_threshold": 50},
+        confirmed_fields=["initial_threshold"],
+        status=SpecStatus.NEEDS_INPUT,
+    )
+    updated = original.model_copy(deep=True)
+    updated.parameters = {"duration_days": 30}
+    updated.confirmed_fields = ["duration_days"]
+    merged = _merge_allowed_parameters(updated, original)
+    assert merged.parameters["initial_threshold"] == 50
+    assert merged.parameters["duration_days"] == 30
+    assert set(merged.confirmed_fields) == {"initial_threshold", "duration_days"}
