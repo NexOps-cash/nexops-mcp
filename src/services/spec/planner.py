@@ -7,6 +7,18 @@ from typing import Dict, List, Tuple
 from src.models import ContractSpecification, GenerationModule
 
 
+def _dedupe_modules_by_name(modules: List[GenerationModule]) -> List[GenerationModule]:
+    """Keep first occurrence of each module name (treasury and vault both map to VaultModule)."""
+    seen: set[str] = set()
+    out: List[GenerationModule] = []
+    for mod in modules:
+        if mod.name in seen:
+            continue
+        seen.add(mod.name)
+        out.append(mod)
+    return out
+
+
 class ModulePlanner:
     """Maps capabilities to generation modules (not 1:1 with capabilities)."""
 
@@ -23,10 +35,14 @@ class ModulePlanner:
         if "treasury" in cap_names or "vault" in cap_names:
             if asset in ("nft", "token") or "nft" in spec.intent.lower():
                 mod = GenerationModule(name="EscrowModule", capability="treasury", params={"variant": "escrow"})
-                decisions["treasury"] = "EscrowModule"
+                mod_name = "EscrowModule"
             else:
                 mod = GenerationModule(name="VaultModule", capability="treasury", params={"variant": "vault"})
-                decisions["treasury"] = "VaultModule"
+                mod_name = "VaultModule"
+            if "treasury" in cap_names:
+                decisions["treasury"] = mod_name
+            if "vault" in cap_names:
+                decisions["vault"] = mod_name
             modules.append(mod)
 
         if "weighted_multisig" in cap_names:
@@ -97,7 +113,7 @@ class ModulePlanner:
             modules.append(GenerationModule(name="MultisigModule", capability="multisig", params={}))
             decisions["multisig"] = "MultisigModule"
 
-        return modules, decisions
+        return _dedupe_modules_by_name(modules), decisions
 
 
 def _default_module_for_capability(cap: str) -> str:
