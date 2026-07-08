@@ -20,17 +20,20 @@ from src.services.spec.field_guidance import (
     attach_pending_default,
     build_progress_line,
     field_label,
-    format_suggestion_prompt,
     next_field_to_ask,
     question_for_field_human,
     suggest_field_default,
+)
+from src.services.spec.intent_pivot import (
+    backdoor_refusal_message,
+    is_backdoor_request,
+    looks_like_cashscript_injection,
+    try_pivot_specification,
 )
 from src.services.spec.parameter_extraction import is_affirmation, is_empty_value
 from src.services.spec.validator import SpecValidator
 
 logger = logging.getLogger("nexops.spec.assistant")
-
-_CASHSCRIPT_MARKERS = re.compile(r"\b(pragma|require\(|contract\s+\w+|function\s+\w+)", re.I)
 
 
 class SpecificationAssistant:
@@ -49,12 +52,36 @@ class SpecificationAssistant:
         last_assistant_message: str = "",
         chat_history: Optional[List[SpecChatTurn]] = None,
     ) -> AssistantTurn:
-        if _CASHSCRIPT_MARKERS.search(user_message):
+        if is_backdoor_request(user_message):
             return AssistantTurn(
                 updated_spec=spec,
-                message="I help complete the specification only — I cannot generate CashScript here.",
+                message=backdoor_refusal_message(),
+                still_missing=fields_to_ask(spec, validation),
+                progress=build_progress_line(spec, validation),
+            )
+
+        if looks_like_cashscript_injection(user_message):
+            return AssistantTurn(
+                updated_spec=spec,
+                message=(
+                    "Paste CashScript later if you want — for now let's keep this as a clean "
+                    "specification. Once we confirm the design, NexOps will generate the contract "
+                    "code for you."
+                ),
                 still_missing=list(validation.missing_fields),
                 progress=build_progress_line(spec, validation),
+            )
+
+        pivot_spec, pivot_ack = try_pivot_specification(spec, user_message)
+        if pivot_spec is not None:
+            validation = SpecValidator.validate(pivot_spec)
+            nxt = next_field_to_ask(pivot_spec, validation)
+            follow = f"\n\nNext: {question_for_field_human(nxt)}" if nxt else ""
+            return AssistantTurn(
+                updated_spec=pivot_spec,
+                message=f"{pivot_ack}{follow}",
+                still_missing=fields_to_ask(pivot_spec, validation),
+                progress=build_progress_line(pivot_spec, validation),
             )
 
         updated = apply_conversation_turn(
@@ -132,12 +159,14 @@ class SpecificationAssistant:
         if not message or _looks_like_form_dump(message):
             message = _craft_fallback_message(updated, revalidation, still_missing)
 
+        # Soften overconfident external/IDE handoff language if the model slips
+        message = _strip_external_handoff_language(message)
+
         suggested_default = None
         nxt = next_field_to_ask(updated, revalidation)
         if nxt and nxt in still_missing:
             updated, hint = attach_pending_default(updated, nxt)
             suggested_default = {nxt: updated.pending_parameters.get(nxt)}
-            # Keep pending for "use standard"/yes, but don't duplicate when the LLM already asked.
             if hint and (
                 not message
                 or _looks_like_form_dump(message)
@@ -158,6 +187,27 @@ class SpecificationAssistant:
             progress=build_progress_line(updated, revalidation),
             suggested_default=suggested_default,
         )
+
+
+def _strip_external_handoff_language(message: str) -> str:
+    """NexOps owns generation — never tell users to leave for another IDE mid-spec."""
+    banned = (
+        "hand it to a developer",
+        "cashscript ide",
+        "outside what i do",
+        "outside of what i do",
+        "you'll need a developer",
+        "someone else must implement",
+    )
+    lower = message.lower()
+    if any(b in lower for b in banned):
+        return (
+            "I'm with you inside NexOps — we'll finish the specification here, then generate "
+            "CashScript from it. I won't design hidden or undisclosed spend paths, but honest "
+            "controls (owner recovery, timelock, burn, vault) are fair game.\n\n"
+            "What direction should we take the design?"
+        )
+    return message
 
 
 def _looks_like_form_dump(message: str) -> bool:
@@ -225,17 +275,28 @@ def _build_assistant_prompt(
     if spec.pending_parameters:
         pending_note = f"Pending user confirmation: {spec.pending_parameters}"
 
-    return f"""You are NexOps, a friendly Bitcoin Cash contract architect helping a user complete their specification.
+    return f"""You are NexOps — the in-product Bitcoin Cash contract architect.
+You stay with the user for the whole flow: clarify → specify → review → generate.
+You are NOT an external consultant and you must NEVER tell them to leave for another IDE,
+hire a developer, or "hand the spec to someone else to implement".
 
 Tone:
-- Warm, concise, and human — like a helpful colleague, not a form or API
-- Acknowledge what the user already provided before asking anything new
+- Warm, concise, and human — like a teammate inside NexOps
+- Acknowledge what the user provided, then move the design forward
 - Ask at most ONE follow-up question per turn (focus field: {focus_label or 'none'})
 - Use plain language; avoid raw field names like "final_threshold" in your message text
-- If suggesting a default, phrase it as an offer: "We can keep the final threshold at 50 — same as the start. Sound good?"
+
+Pivots:
+- If the user changes their mind (e.g. "do a fund lock instead", "burn forever"), acknowledge the new direction
+- Stop asking about fields that no longer apply
+- Prefer listing the new intent in plain terms over clinging to the old pattern
+
+Safety (product policy):
+- Refuse hidden backdoors / secret spend paths only the requester knows about
+- Offer honest alternatives: documented owner recovery, timelock vault, or permanent burn
 
 Rules:
-- Do NOT generate CashScript
+- Do NOT generate CashScript source in chat
 - Do NOT invent unsupported capabilities
 - Do NOT re-ask confirmed fields: {confirmed}
 - Do NOT list every missing field — only discuss the focus field unless the user asked something broader
@@ -260,7 +321,7 @@ Respond with JSON only:
 {{
   "message": "your warm conversational reply (1-3 short paragraphs max)",
   "parameters": {{ "field_name": value }},
-  "capabilities": ["existing capability names only"]
+  "capabilities": ["capability names for THIS design — may change on pivot"]
 }}"""
 
 
