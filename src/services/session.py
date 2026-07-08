@@ -71,6 +71,15 @@ class SessionManager:
             return True
         return False
 
+    def append_spec_chat(self, session_id: str, role: str, content: str) -> None:
+        session = self.get_or_create(session_id)
+        from src.models import SpecChatTurn
+
+        session.spec_chat_history.append(SpecChatTurn(role=role, content=content))
+        # Keep last 20 turns for context window
+        if len(session.spec_chat_history) > 20:
+            session.spec_chat_history = session.spec_chat_history[-20:]
+
 
 # Singleton
 _session_manager: Optional[SessionManager] = None

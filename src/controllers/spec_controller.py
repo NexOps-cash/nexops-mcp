@@ -62,21 +62,53 @@ async def spec_turn(req: MCPRequest) -> Dict[str, Any]:
 
     validation = SpecValidator.validate(spec)
     if user_message and not validation.is_complete:
+        mgr = get_session_manager()
+        opening_msg = None
+        if not session.spec_chat_history:
+            opening_msg = SpecificationAssistant.opening_message(spec)
+            mgr.append_spec_chat(session.session_id, "assistant", opening_msg)
         turn = await SpecificationAssistant.respond(
-            spec, validation, user_message,
-            api_key=api_key, provider=provider, openrouter_key=openrouter_key,
+            spec,
+            validation,
+            user_message,
+            api_key=api_key,
+            provider=provider,
+            openrouter_key=openrouter_key,
+            chat_history=session.spec_chat_history,
         )
+        mgr.append_spec_chat(session.session_id, "user", user_message)
+        mgr.append_spec_chat(session.session_id, "assistant", turn.message)
         spec = turn.updated_spec
         validation = SpecValidator.validate(spec)
+        session.current_specification = spec
+        display_message = f"{opening_msg}\n\n{turn.message}" if opening_msg else turn.message
+        return {
+            "request_id": req.request_id,
+            "type": "spec_turn",
+            "data": {
+                "message": display_message,
+                "specification": spec.model_dump(),
+                "still_missing": turn.still_missing,
+                "progress": turn.progress,
+                "suggested_default": turn.suggested_default,
+                "is_complete": validation.is_complete,
+                "session_id": session.session_id,
+            },
+        }
+
+    if not validation.is_complete and not session.spec_chat_history:
+        opening = SpecificationAssistant.opening_message(spec)
+        get_session_manager().append_spec_chat(session.session_id, "assistant", opening)
         session.current_specification = spec
         return {
             "request_id": req.request_id,
             "type": "spec_turn",
             "data": {
-                "message": turn.message,
+                "message": opening,
                 "specification": spec.model_dump(),
-                "still_missing": turn.still_missing,
-                "is_complete": validation.is_complete,
+                "still_missing": validation.missing_fields,
+                "progress": "",
+                "is_complete": False,
                 "session_id": session.session_id,
             },
         }
