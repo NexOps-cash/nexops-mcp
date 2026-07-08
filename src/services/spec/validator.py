@@ -16,6 +16,14 @@ class SpecValidator:
         capability_context: Dict[str, dict] = {}
         recommendations: Dict[str, List[str]] = {}
 
+        if not spec.capabilities:
+            return ValidationResult(
+                missing_fields=["contract_type"],
+                capability_context=capability_context,
+                recommendations_available=recommendations,
+                is_complete=False,
+            )
+
         for cap_inst in spec.capabilities:
             cap = get_capability(cap_inst.name)
             if not cap:

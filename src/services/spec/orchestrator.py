@@ -186,7 +186,11 @@ async def run_spec_pipeline(
                 openrouter_key=openrouter_key,
                 phase1_model=phase1_model,
             )
-        spec = detect_capabilities(raw, original_intent=intent)
+        spec = detect_capabilities(
+            raw,
+            original_intent=intent,
+            allow_generic_multisig_default=(resolution_mode == "non_interactive"),
+        )
         spec.intent = spec.intent or intent
         validation = SpecValidator.validate(spec)
 

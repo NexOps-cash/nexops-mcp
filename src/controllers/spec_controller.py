@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 from src.models import ContractSpecification, MCPRequest, SpecStatus
 from src.services.session import get_session_manager
 from src.services.spec.assistant import SpecificationAssistant
+from src.services.spec.discovery import is_in_discovery_phase
 from src.services.spec.orchestrator import merge_answers, run_spec_pipeline
 from src.services.spec.review import confirm_specification, modify_specification, render_specification
 from src.services.spec.validator import SpecValidator
@@ -65,8 +66,9 @@ async def spec_turn(req: MCPRequest) -> Dict[str, Any]:
         mgr = get_session_manager()
         opening_msg = None
         if not session.spec_chat_history:
-            opening_msg = SpecificationAssistant.opening_message(spec)
-            mgr.append_spec_chat(session.session_id, "assistant", opening_msg)
+            if not is_in_discovery_phase(spec):
+                opening_msg = SpecificationAssistant.opening_message(spec)
+                mgr.append_spec_chat(session.session_id, "assistant", opening_msg)
         turn = await SpecificationAssistant.respond(
             spec,
             validation,
@@ -97,7 +99,13 @@ async def spec_turn(req: MCPRequest) -> Dict[str, Any]:
         }
 
     if not validation.is_complete and not session.spec_chat_history:
-        opening = SpecificationAssistant.opening_message(spec)
+        if is_in_discovery_phase(spec):
+            opening = (
+                "Hey — I'm NexOps, your contract architect. "
+                "Tell me what you're trying to build and we'll shape it together."
+            )
+        else:
+            opening = SpecificationAssistant.opening_message(spec)
         get_session_manager().append_spec_chat(session.session_id, "assistant", opening)
         session.current_specification = spec
         return {

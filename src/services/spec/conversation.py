@@ -66,6 +66,12 @@ def build_opening_message(spec: ContractSpecification) -> str:
     if validation.is_complete:
         return "Your specification looks complete — let's review it together."
 
+    if not spec.capabilities:
+        return (
+            "Hey — I'm NexOps, your contract architect. Tell me what you're trying to build "
+            "(multisig wallet, escrow, DAO treasury, auction, token, etc.) and we'll shape it together."
+        )
+
     caps = ", ".join(c.name.replace("_", " ") for c in spec.capabilities)
     progress = build_progress_line(spec, validation)
     nxt = next_field_to_ask(spec, validation)

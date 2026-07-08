@@ -38,7 +38,12 @@ def _is_governance_dao(intent_lower: str) -> bool:
     return False
 
 
-def detect_capabilities(raw: RawIntent, original_intent: str = "") -> ContractSpecification:
+def detect_capabilities(
+    raw: RawIntent,
+    original_intent: str = "",
+    *,
+    allow_generic_multisig_default: bool = False,
+) -> ContractSpecification:
     intent_lower = (original_intent or raw.intent or "").lower()
     names: Set[str] = {c.lower().strip() for c in raw.capabilities if c}
 
@@ -86,7 +91,7 @@ def detect_capabilities(raw: RawIntent, original_intent: str = "") -> ContractSp
             valid = ["auction"]
         elif "nft" in intent_lower or "token" in intent_lower:
             valid = ["token_ft"]
-        else:
+        elif allow_generic_multisig_default:
             valid = ["multisig"]
 
     caps = [CapabilityInstance(name=n, parameters={}) for n in sorted(set(valid))]

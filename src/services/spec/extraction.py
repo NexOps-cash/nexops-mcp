@@ -24,6 +24,10 @@ Rules:
 
 User request: "{intent}"
 
+If the message is NOT a contract request (greeting, small talk, off-topic, or unclear), return:
+{{"intent": "", "capabilities": [], "constraints": {{}}}}
+Do NOT guess a contract type for greetings or casual chat.
+
 Output ONLY valid JSON:
 {{
   "intent": "...",

@@ -55,6 +55,7 @@ from src.services.spec.phase2_adapter import resolve_effective_mode
 from src.services.spec.planner import ModulePlanner
 from src.services.spec.review import confirm_specification, modify_specification, render_specification
 from src.services.spec.support_assessment import assess_composition_support, personalize_suggestion_prompt
+from src.services.spec.discovery import is_in_discovery_phase
 from src.services.spec.parameter_extraction import confirm_fields
 from src.services.spec.validator import SpecValidator
 
@@ -262,7 +263,7 @@ async def _assistant_turn(
         _print_spec_snapshot("after", turn.updated_spec)
 
     print(f"\n  NexOps: {turn.message}\n")
-    if turn.progress:
+    if turn.progress and turn.progress not in turn.message:
         print(f"  ({turn.progress})\n")
     return turn.updated_spec, turn.message
 
@@ -300,18 +301,29 @@ async def _conversation_loop(
         spec.status = SpecStatus.IN_REVIEW
         return spec
 
-    print("\n  NexOps is drafting your specification...\n")
-    caps = ", ".join(c.name.replace("_", " ") for c in spec.capabilities)
-    if caps:
-        print(f"  Detected: {caps}\n")
-
     if use_llm:
-        opening = SpecificationAssistant.opening_message(spec)
-        print(f"  NexOps: {opening}\n")
-        if session is not None:
-            get_session_manager().append_spec_chat(session.session_id, "assistant", opening)
-        print('  Answer in plain language (or say "use standard" for a sensible default).\n')
-        last_assistant_message = opening
+        last_assistant_message = ""
+        if is_in_discovery_phase(spec):
+            spec, last_assistant_message = await _assistant_turn(
+                spec,
+                original_intent,
+                api_key,
+                api_key,
+                spec_debug=spec_debug,
+                last_assistant_message="",
+                session=session,
+            )
+        else:
+            print("\n  NexOps is drafting your specification...\n")
+            caps = ", ".join(c.name.replace("_", " ") for c in spec.capabilities)
+            if caps:
+                print(f"  Detected: {caps}\n")
+            opening = SpecificationAssistant.opening_message(spec)
+            print(f"  NexOps: {opening}\n")
+            if session is not None:
+                get_session_manager().append_spec_chat(session.session_id, "assistant", opening)
+            last_assistant_message = opening
+
         while True:
             validation = SpecValidator.validate(spec)
             if validation.is_complete:
@@ -532,7 +544,7 @@ async def run(initial_intent: str, security_level: str, out_path: str, spec_debu
 
     intent = initial_intent.strip()
     if not intent:
-        intent = _prompt("  What contract do you want to build?\n  > ")
+        intent = _prompt("  What contract do you want to build?\n  > ").strip()
 
     if not intent:
         print("  No intent provided.", file=sys.stderr)

@@ -36,3 +36,29 @@ def test_decay_treasury_still_maps():
     assert "treasury" in names
     assert "vault" in names
     assert "linear_decay" in names
+
+
+def test_vague_greeting_does_not_default_to_multisig():
+    spec = detect_capabilities(
+        RawIntent(intent="", capabilities=[], constraints={}),
+        original_intent="hi",
+    )
+    assert spec.capabilities == []
+
+
+def test_casual_chat_does_not_default_to_multisig():
+    spec = detect_capabilities(
+        RawIntent(intent="", capabilities=[], constraints={}),
+        original_intent="how r u",
+    )
+    assert spec.capabilities == []
+
+
+def test_non_interactive_may_still_default_multisig():
+    spec = detect_capabilities(
+        RawIntent(intent="", capabilities=[], constraints={}),
+        original_intent="something vague but long enough",
+        allow_generic_multisig_default=True,
+    )
+    names = {c.name for c in spec.capabilities}
+    assert "multisig" in names

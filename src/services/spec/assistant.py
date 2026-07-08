@@ -16,6 +16,7 @@ from src.services.spec.conversation import (
     merge_assistant_proposal,
     offer_default_for_uncertainty,
 )
+from src.services.spec.discovery import is_in_discovery_phase, try_discover_specification
 from src.services.spec.field_guidance import (
     attach_pending_default,
     build_progress_line,
@@ -70,6 +71,17 @@ class SpecificationAssistant:
                 ),
                 still_missing=list(validation.missing_fields),
                 progress=build_progress_line(spec, validation),
+            )
+
+        if is_in_discovery_phase(spec):
+            return await _discovery_turn(
+                spec,
+                validation,
+                user_message,
+                api_key=api_key,
+                provider=provider,
+                openrouter_key=openrouter_key,
+                chat_history=chat_history,
             )
 
         pivot_spec, pivot_ack = try_pivot_specification(spec, user_message)
@@ -187,6 +199,106 @@ class SpecificationAssistant:
             progress=build_progress_line(updated, revalidation),
             suggested_default=suggested_default,
         )
+
+
+async def _discovery_turn(
+    spec: ContractSpecification,
+    validation: ValidationResult,
+    user_message: str,
+    *,
+    api_key: Optional[str] = None,
+    provider: Optional[str] = None,
+    openrouter_key: Optional[str] = None,
+    chat_history: Optional[List[SpecChatTurn]] = None,
+) -> AssistantTurn:
+    """Conversational discovery — no assumed contract type, no field rush."""
+    discovered = try_discover_specification(spec, user_message)
+    if discovered is not None:
+        revalidation = SpecValidator.validate(discovered)
+        caps = ", ".join(c.name.replace("_", " ") for c in discovered.capabilities)
+        nxt = next_field_to_ask(discovered, revalidation)
+        follow = question_for_field_human(nxt) if nxt else ""
+        message = (
+            f"Got it — let's shape a {caps} contract."
+            + (f" {follow}" if follow else "")
+        )
+        return AssistantTurn(
+            updated_spec=discovered,
+            message=message,
+            still_missing=fields_to_ask(discovered, revalidation),
+            progress=build_progress_line(discovered, revalidation),
+        )
+
+    from src.services.llm.factory import LLMFactory
+
+    prompt = _build_discovery_prompt(user_message, chat_history or [])
+    llm = LLMFactory.get_provider(
+        "spec_chat",
+        api_key=api_key,
+        provider_type=provider,
+        openrouter_key=openrouter_key,
+    )
+    raw = await llm.complete(prompt)
+    working = spec.model_copy(deep=True)
+    _, message = _parse_assistant_response(raw, working)
+
+    if not message:
+        message = (
+            "I'm here to help you design a Bitcoin Cash smart contract. "
+            "What are you trying to build?"
+        )
+
+    discovered = try_discover_specification(working, user_message)
+    if discovered is None and working.capabilities:
+        discovered = working
+        discovered.status = SpecStatus.NEEDS_INPUT
+
+    if discovered is not None and discovered.capabilities:
+        revalidation = SpecValidator.validate(discovered)
+        nxt = next_field_to_ask(discovered, revalidation)
+        if nxt:
+            message = f"{message}\n\n{question_for_field_human(nxt)}"
+        return AssistantTurn(
+            updated_spec=discovered,
+            message=message.strip(),
+            still_missing=fields_to_ask(discovered, revalidation),
+            progress=build_progress_line(discovered, revalidation),
+        )
+
+    return AssistantTurn(
+        updated_spec=spec,
+        message=message.strip(),
+        still_missing=["contract_type"],
+        progress="",
+    )
+
+
+def _build_discovery_prompt(user_message: str, chat_history: List[SpecChatTurn]) -> str:
+    cap_names = ", ".join(sorted(CAPABILITY_REGISTRY.keys()))
+    return f"""You are NexOps — the in-product Bitcoin Cash contract architect.
+The user has not chosen a contract pattern yet. They may be greeting you, making small talk, or exploring ideas.
+
+Tone:
+- Respond naturally to what they actually said (answer greetings briefly and warmly)
+- Do NOT assume multisig or any specific contract type
+- Do NOT ask for signers, thresholds, weights, or other spec fields yet
+- Gently invite them to describe what they want to build when it fits the conversation
+- Stay concise (1-2 short paragraphs)
+
+When they clearly describe a contract pattern, set "capabilities" using ONLY names from:
+{cap_names}
+
+Conversation so far:
+{_format_chat_history(chat_history)}
+
+User message: {user_message}
+
+Respond with JSON only:
+{{
+  "message": "your conversational reply",
+  "parameters": {{}},
+  "capabilities": []
+}}"""
 
 
 def _strip_external_handoff_language(message: str) -> str:
