@@ -73,9 +73,22 @@ def build_opening_message(spec: ContractSpecification) -> str:
         return f"I've got the basics for your {caps} contract. {progress}"
 
     question = question_for_field_human(nxt)
+    dao_note = ""
+    cap_set = {c.name for c in spec.capabilities}
+    if {"treasury", "vault", "weighted_multisig"}.issubset(cap_set) or (
+        "weighted_multisig" in cap_set and ("treasury" in cap_set or "vault" in cap_set)
+    ):
+        dao_note = (
+            " This sounds like a governance/funding DAO — we'll shape a treasury vault "
+            "with weighted voting. Full Catalyst-style proposal voting isn't generated end-to-end yet, "
+            "but we can capture the policy and point you to what we can generate today.\n\n"
+        )
+
     return (
         f"I'll help you shape this {caps} contract step by step. {progress}\n\n"
-        f"First: {question} (You can answer in plain language, or say \"use standard\" if you'd like a sensible default.)"
+        f"{dao_note}"
+        f"First: {question} "
+        f'(Answer in plain language, or say "use standard" for a sensible default.)'
     )
 
 

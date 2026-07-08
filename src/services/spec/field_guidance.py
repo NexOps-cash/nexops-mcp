@@ -128,6 +128,21 @@ def suggest_field_default(
         if isinstance(signers, list) and len(signers) >= 2:
             return max(1, len(signers) - 1), f"use {max(1, len(signers) - 1)}-of-{len(signers)} multisig"
 
+    if field_name == "holders":
+        if "dao" in intent.lower() or "governance" in intent.lower() or "catalyst" in intent.lower():
+            return 5, "a 5-holder council — common for small DAO treasuries"
+        return 3, "a 3-holder setup — simple and common"
+
+    if field_name == "weights":
+        holders = params.get("holders")
+        if isinstance(holders, int) and holders > 0:
+            base = 100 // holders
+            rem = 100 - (base * holders)
+            weights = [base] * holders
+            weights[0] += rem
+            return weights, f"equal voting weights across {holders} holders summing to 100"
+        return [40, 30, 30], "weights [40, 30, 30] for a 3-holder weighted council"
+
     default = _default_for_field(field_name, intent)
     if default is not None:
         return default, f"use the standard value: {default}"
