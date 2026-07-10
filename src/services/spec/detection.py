@@ -25,6 +25,34 @@ _GOVERNANCE_KEYS = (
 )
 _DECAY_KEYS = ("linear decay", "decay", "threshold increase", "linear threshold")
 _AUCTION_KEYS = ("auction", "bid", "dutch", "price decay", "declining price", "marketplace")
+_VESTING_VAULT_KEYS = ("vesting", "founder vesting", "cliff vest", "vesting vault")
+
+
+def is_cliff_vesting_vault(intent_lower: str) -> bool:
+    """
+    Founder/cliff vesting: lock funds for N days, then release/split — not treasury voting decay.
+    """
+    if not intent_lower:
+        return False
+    has_vesting = any(k in intent_lower for k in _VESTING_VAULT_KEYS) or (
+        "vest" in intent_lower and "vault" in intent_lower
+    )
+    has_lock_or_release = any(
+        k in intent_lower
+        for k in (
+            "locked",
+            "lock",
+            "cliff",
+            "days",
+            "release",
+            "distribute",
+            "distributed",
+            "split",
+            "%",
+            "founder",
+        )
+    )
+    return has_vesting and has_lock_or_release
 
 
 def _is_governance_dao(intent_lower: str) -> bool:
@@ -46,6 +74,17 @@ def detect_capabilities(
 ) -> ContractSpecification:
     intent_lower = (original_intent or raw.intent or "").lower()
     names: Set[str] = {c.lower().strip() for c in raw.capabilities if c}
+
+    if is_cliff_vesting_vault(intent_lower):
+        caps = [
+            CapabilityInstance(name=n, parameters={})
+            for n in sorted({"vault", "timelock", "split"})
+        ]
+        return ContractSpecification(
+            intent=raw.intent or original_intent,
+            capabilities=caps,
+            parameters=dict(raw.constraints),
+        )
 
     if any(k in intent_lower for k in _VAULT_KEYS) or raw.intent.lower() in ("treasury", "vault"):
         names.add("treasury")
@@ -83,6 +122,8 @@ def detect_capabilities(
             valid = ["escrow", "multisig"]
         elif "split" in intent_lower or "distribute" in intent_lower:
             valid = ["split", "multisig"]
+        elif is_cliff_vesting_vault(intent_lower):
+            valid = ["vault", "timelock", "split"]
         elif _is_governance_dao(intent_lower):
             valid = ["treasury", "vault", "weighted_multisig"]
         elif "vault" in intent_lower or "treasury" in intent_lower:

@@ -19,8 +19,10 @@ Rules:
 2. List "capabilities" using ONLY names from this set when applicable:
    treasury, weighted_multisig, linear_decay, withdrawal_policy, multisig, timelock,
    escrow, split, vault, token_ft, nft_immutable, nft_mutable, nft_minting, hybrid_token
-3. Put ONLY values explicitly stated by the user in "constraints". Do NOT guess.
-4. Do NOT include defaults, signer counts, thresholds, or weights unless the user stated them.
+3. Founder/cliff vesting (lock for N days, then release to named recipients): use vault, timelock, split.
+   Do NOT use linear_decay or treasury voting thresholds for simple founder vesting vaults.
+4. Put ONLY values explicitly stated by the user in "constraints". Do NOT guess.
+5. Do NOT include defaults, signer counts, thresholds, or weights unless the user stated them.
 
 User request: "{intent}"
 

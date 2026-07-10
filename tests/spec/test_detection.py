@@ -62,3 +62,19 @@ def test_non_interactive_may_still_default_multisig():
     )
     names = {c.name for c in spec.capabilities}
     assert "multisig" in names
+
+
+def test_founder_vesting_vault_maps_to_timelock_split():
+    intent = (
+        "Create a founder vesting vault. Requirements: "
+        "- Funds remain locked for 180 days. "
+        "- Released funds are distributed: 60% to Founder A, 40% to Founder B."
+    )
+    spec = detect_capabilities(
+        RawIntent(intent="vault", capabilities=["treasury", "vault", "linear_decay"], constraints={}),
+        original_intent=intent,
+    )
+    names = {c.name for c in spec.capabilities}
+    assert names == {"split", "timelock", "vault"}
+    assert "linear_decay" not in names
+    assert "treasury" not in names

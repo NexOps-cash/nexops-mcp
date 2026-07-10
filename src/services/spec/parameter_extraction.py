@@ -57,10 +57,47 @@ def extract_parameters_from_message(
 ) -> Dict[str, Any]:
     """Best-effort parse of user text into specification parameters."""
     text = message.strip()
-    lower = text.lower()
-    out: Dict[str, Any] = {}
+    if not text:
+        return {}
     cap_names = [c.name for c in spec.capabilities]
     allowed = all_known_field_names(cap_names)
+
+    if "\n" in text or text.strip().startswith("-") or "requirements" in text.lower():
+        merged: Dict[str, Any] = {}
+        for line in re.split(r"\n+", text):
+            cleaned = re.sub(r"^[\s\-•*]+", "", line).strip()
+            if not cleaned or cleaned.lower().rstrip(":") == "requirements":
+                continue
+            _merge_extracted(merged, _extract_single_line(cleaned, allowed, cap_names))
+        if merged:
+            return {k: v for k, v in merged.items() if k in allowed and not is_empty_value(v)}
+
+    return {
+        k: v
+        for k, v in _extract_single_line(text, allowed, cap_names).items()
+        if k in allowed and not is_empty_value(v)
+    }
+
+
+def _merge_extracted(merged: Dict[str, Any], part: Dict[str, Any]) -> None:
+    """Merge line extractions; append split recipients/shares from multiple bullets."""
+    for key, value in part.items():
+        if key in ("recipients", "shares") and key in merged and isinstance(merged[key], list):
+            if isinstance(value, list):
+                merged[key] = merged[key] + value
+            else:
+                merged[key] = value
+        else:
+            merged[key] = value
+
+
+def _extract_single_line(
+    text: str,
+    allowed: Set[str],
+    cap_names: List[str],
+) -> Dict[str, Any]:
+    lower = text.lower()
+    out: Dict[str, Any] = {}
 
     if "asset_type" in allowed:
         asset_match = re.search(
@@ -75,6 +112,21 @@ def extract_parameters_from_message(
             token = re.search(r"\b(ft|nft)\b", lower)
             if token:
                 out["asset_type"] = normalize_asset_type(token.group(1))
+        elif re.search(r"\bpreserve\s+bch\b|\bbch\s+value\b", lower):
+            out["asset_type"] = "bch"
+
+    if "recipients" in allowed or "shares" in allowed:
+        pct_matches = re.findall(r"(\d+)\s*%\s*to\s+([^,\n%.]+)", text, flags=re.I)
+        if pct_matches:
+            recipients: List[str] = []
+            shares: List[int] = []
+            for pct, name in pct_matches:
+                shares.append(int(pct))
+                recipients.append(_normalize_recipient_name(name))
+            if "recipients" in allowed:
+                out["recipients"] = recipients
+            if "shares" in allowed:
+                out["shares"] = shares
 
     if "duration_days" in allowed:
         duration_match = re.search(r"(\d+)\s*days?\b", lower)
@@ -115,13 +167,57 @@ def extract_parameters_from_message(
     if "timeout_days" in allowed:
         timeout_match = re.search(r"(\d+)\s*days?\b", lower)
         if timeout_match and "duration_days" not in out:
-            out["timeout_days"] = int(timeout_match.group(1))
+            vesting_lock = any(
+                k in lower
+                for k in (
+                    "locked",
+                    "lock",
+                    "vesting",
+                    "cliff",
+                    "reclaim",
+                    "refund",
+                    "timeout",
+                    "expire",
+                    "delivery",
+                    "deadline",
+                    "within",
+                    "after",
+                )
+            )
+            if vesting_lock:
+                out["timeout_days"] = int(timeout_match.group(1))
+
+    if "signers" in allowed:
+        party_signers = _extract_escrow_party_signers(lower)
+        if party_signers:
+            out["signers"] = party_signers
+        else:
+            named = _extract_comma_separated_names(text)
+            if named and len(named) >= 2:
+                out["signers"] = named
+
+    if "threshold" in allowed:
+        m_of_n = re.search(r"\b(\d+)\s*[- ]?of\s*[- ]?(\d+)\b", lower)
+        if m_of_n:
+            out["threshold"] = int(m_of_n.group(1))
+            if "signers" in allowed and "signers" not in out:
+                count = int(m_of_n.group(2))
+                if count >= 2:
+                    out["signers"] = [f"Signer{i + 1}" for i in range(count)]
+        elif "both" in lower and "buyer" in lower and "seller" in lower:
+            out["threshold"] = 2
+            if "signers" in allowed and "signers" not in out:
+                out["signers"] = _extract_escrow_party_signers(lower) or [
+                    "Buyer",
+                    "Seller",
+                    "Arbiter",
+                ]
 
     people_count = _extract_people_count(lower)
     if people_count:
         if "holders" in allowed:
             out["holders"] = people_count
-        if "signers" in allowed:
+        if "signers" in allowed and "signers" not in out:
             out["signers"] = [f"Signer{i + 1}" for i in range(people_count)]
         if "weights" in allowed and ("equal" in lower or "same" in lower):
             base = 100 // people_count
@@ -130,7 +226,7 @@ def extract_parameters_from_message(
             weights[0] += rem
             out["weights"] = weights
 
-    if "threshold" in allowed:
+    if "threshold" in allowed and "threshold" not in out:
         threshold_match = re.search(
             r"(?:threshold|approve|need|require|of)\s*(?:is|=|:)?\s*(\d+)\b",
             lower,
@@ -142,7 +238,42 @@ def extract_parameters_from_message(
         elif re.match(r"^\s*(\d+)\s*$", lower):
             out["threshold"] = int(lower.strip())
 
-    return {k: v for k, v in out.items() if k in allowed and not is_empty_value(v)}
+    return out
+
+
+def _normalize_recipient_name(raw: str) -> str:
+    name = raw.strip().rstrip(".- ")
+    if re.match(r"^founder\s+[a-z]$", name, re.I):
+        parts = name.split()
+        return f"Founder {parts[-1].upper()}"
+    if name.lower().startswith("founder "):
+        rest = name[8:].strip()
+        return f"Founder {rest.upper() if len(rest) == 1 else rest.title()}"
+    return name.title() if name.islower() else name
+
+
+def _extract_escrow_party_signers(lower: str) -> Optional[List[str]]:
+    parties: List[str] = []
+    for key, label in (
+        ("buyer", "Buyer"),
+        ("seller", "Seller"),
+        ("arbiter", "Arbiter"),
+        ("arbitrator", "Arbiter"),
+    ):
+        if re.search(rf"\b{key}\b", lower) and label not in parties:
+            parties.append(label)
+    return parties if len(parties) >= 2 else None
+
+
+def _extract_comma_separated_names(text: str) -> List[str]:
+    if "," not in text:
+        return []
+    parts = [p.strip() for p in text.replace(";", ",").split(",") if p.strip()]
+    if len(parts) < 2:
+        return []
+    if all(re.match(r"^[A-Za-z][A-Za-z0-9_\- ]*$", p) for p in parts):
+        return [p.title() if p.islower() else p for p in parts]
+    return []
 
 
 def _extract_people_count(lower: str) -> Optional[int]:

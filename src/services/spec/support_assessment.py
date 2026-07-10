@@ -11,6 +11,7 @@ from src.models import (
     SuggestedAlternative,
 )
 from src.services.spec.capabilities import CAPABILITY_REGISTRY, get_capability
+from src.services.spec.detection import is_cliff_vesting_vault
 
 # Module pairs known to work today (benchmark/scorecard evidence).
 _ALLOWED_TWO_MODULE_SETS: Tuple[FrozenSet[str], ...] = (
@@ -167,6 +168,33 @@ def _capability_conflicts(cap_names: Set[str]) -> List[str]:
     return conflicts
 
 
+def _vesting_vault_suggestions(spec: ContractSpecification) -> List[SuggestedAlternative]:
+    params = spec.parameters or {}
+    days = params.get("timeout_days") or params.get("duration_days", 180)
+    recipients = params.get("recipients") or ["Founder A", "Founder B"]
+    shares = params.get("shares") or [60, 40]
+    if isinstance(recipients, list) and isinstance(shares, list) and recipients and shares:
+        split_desc = ", ".join(f"{s}% to {r}" for s, r in zip(shares, recipients))
+    else:
+        split_desc = "60% to Founder A, 40% to Founder B"
+    return [
+        SuggestedAlternative(
+            id="vault_timelock",
+            label="Timed vault (lock then release)",
+            description="Lock BCH for N days, then allow release.",
+            prompt_example=f"Create a BCH vault with funds locked for {days} days then releasable",
+            capabilities=["vault", "timelock"],
+        ),
+        SuggestedAlternative(
+            id="split_only",
+            label="Split payment (post-unlock)",
+            description="Standalone split distribution after unlock.",
+            prompt_example=f"Split payment: {split_desc}",
+            capabilities=["split"],
+        ),
+    ]
+
+
 def _subset_suggestions(cap_names: Set[str], limit: int = 4) -> List[SuggestedAlternative]:
     out: List[SuggestedAlternative] = []
     for alt in _SUPPORTED_SUBSET_CATALOG:
@@ -242,6 +270,18 @@ def assess_composition_support(
             ))
 
     if "split" in cap_names and len(cap_names) > 1:
+        suggestions = [
+            SuggestedAlternative(
+                id="split_only",
+                label="Split payment only",
+                description="Generate a standalone split contract without other patterns.",
+                prompt_example="Split payment to two recipients 50/50",
+                capabilities=["split"],
+            ),
+            *_SUPPORTED_SUBSET_CATALOG[:2],
+        ]
+        if is_cliff_vesting_vault((spec.intent or "").lower()):
+            suggestions = _vesting_vault_suggestions(spec)
         return _attach_guidance(CompositionSupportAssessment(
             status="unsupported",
             reason="Split payment cannot be composed with other patterns yet.",
@@ -251,16 +291,7 @@ def assess_composition_support(
             effective_mode=effective_mode,
             suppressed_modules=modules[1:] if len(modules) > 1 else [],
             supported_subset=supported_subset,
-            suggestions=[
-                SuggestedAlternative(
-                    id="split_only",
-                    label="Split payment only",
-                    description="Generate a standalone split contract without other patterns.",
-                    prompt_example="Split payment to two recipients 50/50",
-                    capabilities=["split"],
-                ),
-                *_SUPPORTED_SUBSET_CATALOG[:2],
-            ],
+            suggestions=suggestions,
             can_save_spec=True,
             can_proceed=False,
         ))
@@ -392,10 +423,20 @@ def personalize_suggestion_prompt(
         )
     if alt.id == "vault":
         asset = str(params.get("asset_type", "BCH"))
-        days = params.get("duration_days", 7)
+        days = params.get("timeout_days") or params.get("duration_days", 7)
         return (
             f"Create a {asset} treasury vault with delayed withdrawal after {days} days"
         )
+    if alt.id == "vault_timelock":
+        asset = str(params.get("asset_type", "BCH"))
+        days = params.get("timeout_days") or params.get("duration_days", 180)
+        return f"Create a {asset} vault with funds locked for {days} days then releasable"
+    if alt.id == "split_only" or alt.capabilities == ["split"]:
+        recipients = params.get("recipients") or ["Founder A", "Founder B"]
+        shares = params.get("shares") or [60, 40]
+        if isinstance(recipients, list) and isinstance(shares, list):
+            split_desc = ", ".join(f"{s}% to {r}" for s, r in zip(shares, recipients))
+            return f"Split payment: {split_desc}"
     if alt.id == "escrow_2of3":
         return alt.prompt_example
     return alt.prompt_example or alt.label

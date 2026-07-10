@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import re
 import sys
 import uuid
 from typing import Any, Optional
@@ -91,6 +92,29 @@ def _prompt(line: str = "> ") -> str:
     except (EOFError, KeyboardInterrupt):
         print("\nCancelled.")
         sys.exit(130)
+
+
+def _looks_like_modification_input(text: str) -> bool:
+    """Requirement bullets or long notes at the confirm prompt — not Y/M/Q."""
+    stripped = text.strip()
+    if not stripped:
+        return False
+    upper = stripped.upper()
+    if upper in ("Y", "YES", "M", "MODIFY", "Q", "QUIT", "N", "NO"):
+        return False
+    if len(stripped) > 25:
+        return True
+    if stripped.startswith(("-", "•", "*")):
+        return True
+    if re.match(r"^\d+[\).\]]\s", stripped):
+        return True
+    if "\n" in stripped:
+        return True
+    if stripped.lower().rstrip(":") == "requirements":
+        return True
+    if "requirements" in stripped.lower() and len(stripped) > 12:
+        return True
+    return False
 
 
 def _question_for_field(field_name: str) -> str:
@@ -198,14 +222,20 @@ def _print_composition_guidance(support: CompositionSupportAssessment, spec: Con
     print("\n" + "═" * 62)
 
 
-def _composition_menu(support: CompositionSupportAssessment, spec: ContractSpecification) -> str:
-    """Returns 'modify', 'quit', or a prompt to generate."""
+def _composition_menu(
+    support: CompositionSupportAssessment,
+    spec: ContractSpecification,
+) -> str | tuple[str, str]:
+    """Returns 'modify', 'quit', a prompt to generate, or ('apply', text) for pasted requirements."""
     options = support.suggestions[:4]
     n = len(options)
     while True:
-        choice = _prompt(
+        raw = _prompt(
             f"\n  [1-{n}] Generate a supported alternative  [M]odify spec  [Q]uit: "
-        ).upper()
+        )
+        if _looks_like_modification_input(raw):
+            return ("apply", raw.strip())
+        choice = raw.upper()
         if choice in ("Q", "QUIT"):
             return "quit"
         if choice in ("M", "MODIFY"):
@@ -218,7 +248,7 @@ def _composition_menu(support: CompositionSupportAssessment, spec: ContractSpeci
             if 0 <= idx < n:
                 alt = options[idx]
                 return personalize_suggestion_prompt(alt, spec)
-        print(f"  Please enter 1-{n}, M, or Q.")
+        print(f"  Please enter 1-{n}, M, or Q — or paste requirement bullets to update the spec.")
 
 
 def _print_spec_snapshot(label: str, spec: ContractSpecification) -> None:
@@ -304,15 +334,16 @@ async def _conversation_loop(
     if use_llm:
         last_assistant_message = ""
         if is_in_discovery_phase(spec):
-            spec, last_assistant_message = await _assistant_turn(
-                spec,
-                original_intent,
-                api_key,
-                api_key,
-                spec_debug=spec_debug,
-                last_assistant_message="",
-                session=session,
-            )
+            if session is None or not session.spec_chat_history:
+                spec, last_assistant_message = await _assistant_turn(
+                    spec,
+                    original_intent,
+                    api_key,
+                    api_key,
+                    spec_debug=spec_debug,
+                    last_assistant_message="",
+                    session=session,
+                )
         else:
             print("\n  NexOps is drafting your specification...\n")
             caps = ", ".join(c.name.replace("_", " ") for c in spec.capabilities)
@@ -358,10 +389,13 @@ async def _modify_loop(
     session,
     *,
     spec_debug: bool = False,
+    change_message: str = "",
 ) -> ContractSpecification:
     spec = modify_specification(spec)
-    print("\n  What would you like to change?\n")
-    msg = _prompt("  You: ")
+    msg = change_message.strip()
+    if not msg:
+        print("\n  What would you like to change?\n")
+        msg = _prompt("  You: ")
     if use_llm and msg:
         spec, _ = await _assistant_turn(
             spec, msg, api_key, api_key, spec_debug=spec_debug, session=session
@@ -581,6 +615,18 @@ async def run(initial_intent: str, security_level: str, out_path: str, spec_debu
             print("\n  Your specification is complete, but this combination cannot be generated yet.\n")
             _print_composition_guidance(support, spec)
             action = _composition_menu(support, spec)
+            if isinstance(action, tuple) and action[0] == "apply":
+                print("\n  I'll fold those details into your specification.\n")
+                spec = await _modify_loop(
+                    spec,
+                    use_llm,
+                    api_key,
+                    session,
+                    spec_debug=spec_debug,
+                    change_message=action[1],
+                )
+                session.current_specification = spec
+                continue
             if action == "quit":
                 print("  Specification saved. You can return to generate a supported pattern later.")
                 return 0
@@ -601,7 +647,21 @@ async def run(initial_intent: str, security_level: str, out_path: str, spec_debu
         if support.status == "experimental":
             print("\n  Note: This composition is experimental and may not reflect all planned behavior.")
 
-        choice = _prompt("\n  Confirm specification?  [Y]es  [M]odify  [Q]uit: ").upper()
+        raw_choice = _prompt("\n  Confirm specification?  [Y]es  [M]odify  [Q]uit: ")
+        if _looks_like_modification_input(raw_choice):
+            print("\n  I'll fold those details into your specification.\n")
+            spec = await _modify_loop(
+                spec,
+                use_llm,
+                api_key,
+                session,
+                spec_debug=spec_debug,
+                change_message=raw_choice,
+            )
+            session.current_specification = spec
+            continue
+
+        choice = raw_choice.strip().upper()
         if choice in ("Y", "YES"):
             spec = confirm_specification(spec)
             session.current_specification = spec
@@ -613,7 +673,7 @@ async def run(initial_intent: str, security_level: str, out_path: str, spec_debu
         if choice in ("Q", "QUIT", "N", "NO"):
             print("  Aborted.")
             return 0
-        print("  Please enter Y, M, or Q.")
+        print("  Please enter Y, M, or Q — or paste requirement bullets to update the spec.")
 
     if not api_key:
         print("\n  Error: set OPENROUTER_API_KEY to generate code.", file=sys.stderr)

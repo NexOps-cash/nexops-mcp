@@ -16,7 +16,12 @@ from src.services.spec.conversation import (
     merge_assistant_proposal,
     offer_default_for_uncertainty,
 )
-from src.services.spec.discovery import is_in_discovery_phase, try_discover_specification
+from src.services.spec.discovery import (
+    has_ambiguous_pattern_choice,
+    is_in_discovery_phase,
+    is_pushback_or_confusion,
+    try_discover_specification,
+)
 from src.services.spec.field_guidance import (
     attach_pending_default,
     build_progress_line,
@@ -176,7 +181,13 @@ class SpecificationAssistant:
 
         suggested_default = None
         nxt = next_field_to_ask(updated, revalidation)
-        if nxt and nxt in still_missing:
+        if (
+            nxt
+            and nxt in still_missing
+            and not _is_chitchat(user_message)
+            and not is_pushback_or_confusion(user_message)
+            and not has_ambiguous_pattern_choice(user_message)
+        ):
             updated, hint = attach_pending_default(updated, nxt)
             suggested_default = {nxt: updated.pending_parameters.get(nxt)}
             if hint and (
@@ -253,10 +264,15 @@ async def _discovery_turn(
         discovered = working
         discovered.status = SpecStatus.NEEDS_INPUT
 
-    if discovered is not None and discovered.capabilities:
+    if (
+        discovered is not None
+        and discovered.capabilities
+        and not has_ambiguous_pattern_choice(user_message)
+        and not is_pushback_or_confusion(user_message)
+    ):
         revalidation = SpecValidator.validate(discovered)
         nxt = next_field_to_ask(discovered, revalidation)
-        if nxt:
+        if nxt and not _llm_addressed_field(message, nxt):
             message = f"{message}\n\n{question_for_field_human(nxt)}"
         return AssistantTurn(
             updated_spec=discovered,
@@ -327,17 +343,59 @@ def _looks_like_form_dump(message: str) -> bool:
     return lower.count("**") >= 2 or "still need" in lower or "please provide" in lower
 
 
+def _is_chitchat(message: str) -> bool:
+    text = message.strip().lower().rstrip(".!?")
+    return text in {
+        "hi",
+        "hello",
+        "hey",
+        "yo",
+        "hiya",
+        "good morning",
+        "good afternoon",
+        "good evening",
+        "thanks",
+        "thank you",
+        "ok",
+        "okay",
+    }
+
+
 def _llm_addressed_field(message: str, field_name: str) -> bool:
     """True when the LLM reply already asks about this field naturally."""
     lower = message.lower()
     label = field_label(field_name).lower()
     keywords = {
+        "signers": (
+            "signer",
+            "who",
+            "parties",
+            "keys",
+            "buyer",
+            "seller",
+            "arbiter",
+            "holding the",
+            "roles",
+        ),
+        "threshold": (
+            "threshold",
+            "signature",
+            "how many",
+            "multisig",
+            "agree",
+            "sign off",
+            "of 3",
+            "2-of",
+        ),
         "final_threshold": ("final", "end up", "where should it end", "ramp", "ending"),
-        "duration_days": ("how long", "days", "timeframe", "period", "over"),
+        "duration_days": ("how long", "days", "timeframe", "period", "over", "refund"),
+        "timeout_days": ("timeout", "refund", "reclaim", "deadline", "days", "expire"),
         "asset_type": ("asset", "bch", "ft", "nft", "holding", "token"),
         "initial_threshold": ("starting", "initial", "baseline", "begin"),
     }
     if label in lower:
+        return True
+    if "?" in message and any(kw in lower for kw in keywords.get(field_name, ())):
         return True
     return any(kw in lower for kw in keywords.get(field_name, ()))
 

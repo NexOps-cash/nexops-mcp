@@ -128,6 +128,32 @@ def suggest_field_default(
         if isinstance(signers, list) and len(signers) >= 2:
             return max(1, len(signers) - 1), f"use {max(1, len(signers) - 1)}-of-{len(signers)} multisig"
 
+    if field_name == "signers":
+        if "escrow" in cap_names:
+            return (
+                ["Buyer", "Seller", "Arbiter"],
+                "Buyer, Seller, and Arbiter — the classic escrow trio",
+            )
+        return ["Alice", "Bob", "Carol"], "Alice, Bob, and Carol as placeholder signers"
+
+    if field_name == "recipients":
+        if "founder a" in intent.lower() and "founder b" in intent.lower():
+            return ["Founder A", "Founder B"], "Founder A and Founder B"
+        if "founder" in intent.lower():
+            return ["Founder A", "Founder B"], "two founder recipients (A and B)"
+
+    if field_name == "shares":
+        if "60" in intent and "40" in intent:
+            return [60, 40], "a 60% / 40% split between the founders"
+        if "50" in intent and "50" in intent:
+            return [50, 50], "an even 50/50 split"
+
+    if field_name == "timeout_days":
+        for token in intent.replace(",", " ").split():
+            if token.isdigit():
+                return int(token), f"a {token}-day lock before funds can release"
+        return 180, "a 180-day cliff lock (common for founder vesting)"
+
     if field_name == "holders":
         if "dao" in intent.lower() or "governance" in intent.lower() or "catalyst" in intent.lower():
             return 5, "a 5-holder council — common for small DAO treasuries"
@@ -186,15 +212,24 @@ def question_for_field_human(field_name: str) -> str:
 def format_suggestion_prompt(field_name: str, value: Any, explanation: str) -> str:
     label = field_label(field_name)
     expl = explanation.rstrip(".")
-    if str(value) in expl:
+    display = _format_value_for_user(field_name, value)
+    if display in expl or str(value) in expl:
         return (
             f"No problem — {expl.capitalize()}. "
             f"Reply yes to confirm, or tell me what you'd prefer."
         )
     return (
-        f"No problem — I'll use {value} for {label}: {expl}. "
+        f"No problem — I'll use {display} for {label}: {expl}. "
         f"Reply yes to confirm, or tell me what you'd prefer."
     )
+
+
+def _format_value_for_user(field_name: str, value: Any) -> str:
+    if field_name == "signers" and isinstance(value, list):
+        return ", ".join(str(x) for x in value)
+    if field_name == "weights" and isinstance(value, list):
+        return ", ".join(str(x) for x in value)
+    return str(value)
 
 
 def format_applied_default_message(
