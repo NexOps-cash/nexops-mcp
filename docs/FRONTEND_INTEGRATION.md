@@ -284,28 +284,50 @@ flowchart TD
 
 ### 6.2 Review — `spec_review`
 
+With **Constraint Graph v2** (default), `spec_review` returns the authoritative graph plus projected sections. Edits mutate the graph via optional `graph_edits` in the request payload.
+
 ```json
 {
   "action": "spec_review",
-  "payload": { "session_id": "sess-xyz" }
+  "payload": {
+    "session_id": "sess-xyz",
+    "graph_edits": {
+      "intent": "optional updated summary",
+      "nodes": [{ "id": "n_abc123", "params": { "threshold": 2 } }]
+    }
+  }
 }
 ```
 
-### Response (includes composition support)
+### Response (includes composition support + constraint graph)
 
 ```json
 {
   "type": "spec_review",
   "data": {
+    "graph_v2": true,
+    "constraint_graph": {
+      "version": 1,
+      "intent": "Create a treasury with weighted multisig",
+      "nodes": [],
+      "edges": [],
+      "field_confidences": []
+    },
     "review": {
       "sections": {
+        "Patterns": ["treasury", "weighted_multisig", "linear_decay"],
+        "Actors": [],
+        "Lifecycle": ["Draft", "Funded", "Locked"],
+        "Policies": ["Decay/Linear: {...}"],
+        "Invariants": ["value_preservation"],
         "Core Pattern": ["Create a treasury with..."],
-        "Access Control": ["Weighted Multisig", "Key holders: 3", "Voting weights: [50, 30, 20]"],
-        "Time Rules": ["Linear threshold change", "Initial threshold: 2", "Final threshold: 3", "Duration: 30 days"],
-        "Assets": ["Treasury", "Asset: BCH"],
-        "Operations": ["withdraw: [TreasuryNFT, AuthUTXO] -> [TreasuryNFT, WithdrawalBCH]", "deposit: ..."],
-        "Security": ["Authorization required on spend paths", "State TreasuryState: Mutable NFT Commitment"]
+        "Access Control": ["Weighted: {...}"],
+        "Time Rules": [],
+        "Assets": [],
+        "Operations": [],
+        "Security": []
       },
+      "constraint_graph": { "version": 1, "nodes": [], "edges": [] },
       "utxo_architecture": {
         "contracts": [
           { "id": "treasury", "type": "Vault" },

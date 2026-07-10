@@ -78,6 +78,7 @@ class GenerationController:
 
         session = self.session_mgr.get_or_create(session_id)
         existing_spec = session.current_specification
+        existing_graph = session.current_constraint_graph
         if req.payload.get("specification"):
             from src.models import ContractSpecification
             existing_spec = ContractSpecification(**req.payload["specification"])
@@ -99,6 +100,7 @@ class GenerationController:
             disable_fallbacks=disable_fallbacks,
             resolution_mode=resolution_mode,
             existing_spec=existing_spec if existing_spec and str(getattr(existing_spec.status, "value", existing_spec.status)) == "confirmed" else None,
+            existing_graph=existing_graph if existing_spec and str(getattr(existing_spec.status, "value", existing_spec.status)) == "confirmed" else None,
             skip_composition_check=bool(ctx.get("skip_composition_check", False)),
             allow_experimental=bool(ctx.get("allow_experimental", False)),
             force_generate=bool(ctx.get("force_generate", False)),

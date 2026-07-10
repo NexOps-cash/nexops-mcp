@@ -238,6 +238,7 @@ class SpecificationReview(BaseModel):
     sections: Dict[str, List[str]] = Field(default_factory=dict)
     utxo_architecture: Optional[UTXOArchitecture] = None
     spec_snapshot: Optional[ContractSpecification] = None
+    constraint_graph: Optional[Dict[str, Any]] = None
 
 
 class PlanningReport(BaseModel):
@@ -337,6 +338,7 @@ class SessionState(BaseModel):
     current_contract: Optional[ContractIR] = None
     current_code: str = ""
     current_specification: Optional[ContractSpecification] = None
+    current_constraint_graph: Optional[Dict[str, Any]] = None
     spec_chat_history: List[SpecChatTurn] = Field(default_factory=list)
 
 # ─── Phase AR (Audit & Repair) Models ────────────────────────────────

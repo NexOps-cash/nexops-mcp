@@ -53,6 +53,7 @@ class GuardedPipelineEngine:
         disable_fallbacks: bool = False,
         resolution_mode: str = "non_interactive",
         existing_spec: Optional[Any] = None,
+        existing_graph: Optional[Any] = None,
         skip_composition_check: bool = False,
         allow_experimental: bool = False,
         force_generate: bool = False,
@@ -83,6 +84,7 @@ class GuardedPipelineEngine:
             disable_fallbacks=disable_fallbacks,
             resolution_mode=resolution_mode,
             existing_spec=existing_spec,
+            existing_graph=existing_graph,
         )
         ir.metadata.disable_golden = disable_golden
         ir.metadata.disable_fallbacks = disable_fallbacks

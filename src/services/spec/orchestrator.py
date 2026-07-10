@@ -19,8 +19,9 @@ from src.models import (
 )
 from src.services.spec.clarification import build_clarification_plan
 from src.services.spec.composer import Composer
-from src.services.spec.detection import detect_capabilities
+from src.services.spec.detection import detect_capabilities, is_cliff_vesting_vault
 from src.services.spec.extraction import extract_intent
+from src.services.spec.parameter_extraction import apply_parameter_updates, extract_parameters_from_message
 from src.services.spec.phase2_adapter import resolve_effective_mode
 from src.services.spec.planner import ModulePlanner
 from src.services.spec.validator import SpecValidator
@@ -83,10 +84,17 @@ def _default_for_field(field_name: str, intent: str) -> Any:
     if field_name == "threshold":
         return 2
     if field_name == "timeout_days":
+        for token in intent_lower.replace(",", " ").split():
+            if token.isdigit():
+                return int(token)
         return 7
     if field_name == "recipients":
+        if "founder a" in intent_lower and "founder b" in intent_lower:
+            return ["Founder A", "Founder B"]
         return ["RecipientA", "RecipientB"]
     if field_name == "shares":
+        if "60" in intent_lower and "40" in intent_lower:
+            return [60, 40]
         return [50, 50]
     if field_name == "token_category":
         return "0x00"
@@ -105,7 +113,9 @@ def _heuristic_raw_intent(intent: str) -> RawIntent:
 
     il = intent.lower()
     caps: List[str] = []
-    if any(k in il for k in ("treasury", "vault", "cold storage")):
+    if is_cliff_vesting_vault(il):
+        caps.extend(["vault", "timelock", "split"])
+    elif any(k in il for k in ("treasury", "vault", "cold storage")):
         caps.extend(["treasury", "vault"])
     if any(
         k in il
@@ -114,7 +124,7 @@ def _heuristic_raw_intent(intent: str) -> RawIntent:
         caps.extend(["treasury", "vault", "weighted_multisig"])
     if any(k in il for k in ("weighted", "weight", "weights")):
         caps.append("weighted_multisig")
-    if any(k in il for k in ("decay", "linear decay", "threshold")):
+    if not is_cliff_vesting_vault(il) and any(k in il for k in ("decay", "linear decay")):
         caps.append("linear_decay")
     if "escrow" in il or "arbiter" in il:
         caps.extend(["escrow", "multisig"])
@@ -122,7 +132,9 @@ def _heuristic_raw_intent(intent: str) -> RawIntent:
         caps.append("multisig")
     if any(k in il for k in ("split", "distribute", "payroll", "recipients")):
         caps.append("split")
-    if "timelock" in il or any(k in il for k in ("timeout", "refund", "reclaim")):
+    if is_cliff_vesting_vault(il) or "timelock" in il or any(
+        k in il for k in ("timeout", "refund", "reclaim", "locked", "lock")
+    ):
         caps.append("timelock")
     if "nft" in il and "mint" in il:
         caps.append("nft_minting")
@@ -157,6 +169,7 @@ async def run_spec_pipeline(
     openrouter_key: Optional[str] = None,
     phase1_model: Optional[str] = None,
     existing_spec: Optional[ContractSpecification] = None,
+    existing_graph: Optional[Any] = None,
 ) -> Tuple[
     ContractSpecification,
     Optional[ClarificationPlan],
@@ -168,7 +181,81 @@ async def run_spec_pipeline(
     legacy_fallback = False
     inferred: Dict[str, Any] = {}
 
+    from src.services.spec.constraint_graph import NodeCategory
+    from src.services.spec.discovery import lacks_contract_signal
+    from src.services.spec.graph_generation_bridge import GraphGenerationBridge
+    from src.services.spec.graph_pattern_detection import GraphPatternDetection
+    from src.services.spec.graph_pipeline import bootstrap_graph, should_use_graph_pipeline
+
+    use_graph = should_use_graph_pipeline(resolution_mode) and existing_spec is None
+
+    if use_graph and existing_graph is None:
+        graph, spec, graph_validation, clarification_batch = await bootstrap_graph(
+            intent,
+            api_key=api_key,
+            provider=provider,
+            openrouter_key=openrouter_key,
+        )
+        patterns = GraphPatternDetection.detect_patterns(graph)
+        has_pattern = bool(patterns) or any(
+            n.category in (
+                NodeCategory.AUTHORIZATION,
+                NodeCategory.POLICY,
+                NodeCategory.BRANCH,
+                NodeCategory.CONSTRAINT,
+            )
+            for n in graph.nodes
+        )
+
+        if not has_pattern or not graph_validation.is_complete:
+            if resolution_mode == "interactive":
+                spec.status = SpecStatus.NEEDS_INPUT
+                if not clarification_batch.questions and not lacks_contract_signal(intent):
+                    clarification_batch.questions = [
+                        "What kind of contract are you trying to build? "
+                        "(e.g. escrow, treasury vault, vesting, split payments)"
+                    ]
+                clarification = ClarificationPlan(
+                    status="needs_input",
+                    missing_fields=[
+                        i.field_path or i.message for i in graph_validation.blocking_issues
+                    ] or ["contract_type"],
+                    questions=list(clarification_batch.questions),
+                )
+                report = PlanningReport(
+                    detected_capabilities=patterns,
+                    missing_fields=clarification.missing_fields,
+                    selected_modules=[],
+                    effective_mode="",
+                )
+                return spec, clarification, None, None, report, None
+            spec = graph.to_specification()
+            spec.intent = intent
+            spec, inferred = apply_legacy_fallback(spec, intent, security_level)
+            legacy_fallback = True
+        else:
+            spec.status = SpecStatus.CONFIRMED
+            plan, utxo_arch, report, spec = GraphGenerationBridge.resolve_from_graph(
+                graph,
+                benchmark_mode=(resolution_mode == "non_interactive"),
+            )
+            intent_model = derive_intent_model(spec, report.effective_mode)
+            return spec, None, plan, utxo_arch, report, intent_model
+
     if existing_spec and existing_spec.status == SpecStatus.CONFIRMED:
+        if existing_graph:
+            from src.services.spec.constraint_graph import ConstraintGraph
+            graph = (
+                ConstraintGraph.from_dict(existing_graph)
+                if isinstance(existing_graph, dict)
+                else existing_graph
+            )
+            plan, utxo_arch, report, spec = GraphGenerationBridge.resolve_from_graph(
+                graph,
+                benchmark_mode=(resolution_mode == "non_interactive"),
+            )
+            intent_model = derive_intent_model(spec, report.effective_mode)
+            return spec, None, plan, utxo_arch, report, intent_model
         spec = existing_spec
         validation = ValidationResult(is_complete=True)
     elif existing_spec:
@@ -192,6 +279,9 @@ async def run_spec_pipeline(
             allow_generic_multisig_default=(resolution_mode == "non_interactive"),
         )
         spec.intent = spec.intent or intent
+        extracted = extract_parameters_from_message(intent, spec)
+        if extracted:
+            spec = apply_parameter_updates(spec, extracted, confirm=True)
         validation = SpecValidator.validate(spec)
 
     clarification: Optional[ClarificationPlan] = None

@@ -35,6 +35,7 @@ OPENROUTER_FAST_FALLBACK_MODEL = os.getenv(
 _MAX_TOKENS = {
     "phase1": 512,
     "spec_chat": 1024,
+    "spec_extract": 2048,
     "phase2": 1000,
     "phase2_retry": 600,
     "golden": 800,
@@ -91,6 +92,8 @@ class LLMFactory:
                 model = OPENROUTER_PHASE1_MODEL
             elif task_type == "spec_chat":
                 model = OPENROUTER_PHASE1_MODEL
+            elif task_type == "spec_extract":
+                model = OPENROUTER_PHASE1_MODEL
 
             if "openai" in target_provider and "openrouter" not in target_provider:
                 provider = OpenAIProvider(model="gpt-4o", api_key=target_key)
@@ -136,6 +139,20 @@ class LLMFactory:
                 temperature=0.5,
                 label="OpenRouter-SpecChat-Fallback",
                 max_tokens=_MAX_TOKENS["spec_chat"],
+            ))
+
+        elif task_type == "spec_extract":
+            configs.append(_or(
+                OPENROUTER_PHASE1_MODEL,
+                temperature=0.2,
+                label="OpenRouter-SpecExtract-Primary",
+                max_tokens=_MAX_TOKENS["spec_extract"],
+            ))
+            configs.append(_or(
+                OPENROUTER_PHASE1_FALLBACK_MODEL,
+                temperature=0.2,
+                label="OpenRouter-SpecExtract-Fallback",
+                max_tokens=_MAX_TOKENS["spec_extract"],
             ))
 
         elif task_type == "phase2":

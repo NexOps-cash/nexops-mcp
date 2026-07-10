@@ -13,6 +13,12 @@ from .review import render_specification, confirm_specification, modify_specific
 from .orchestrator import run_spec_pipeline, derive_intent_model, apply_legacy_fallback, merge_answers
 from .support_assessment import assess_composition_support, assess_from_capabilities
 from .assistant import SpecificationAssistant
+from .constraint_graph import ConstraintGraph, GraphNode, NodeCategory
+from .graph_config import use_spec_graph_v2
+from .graph_pipeline import bootstrap_graph, should_use_graph_pipeline
+from .graph_generation_bridge import GraphGenerationBridge
+from .validator_v2 import ValidatorV2, GraphValidationResult
+from .clarification_engine import ClarificationEngine, ClarificationBatch
 
 __all__ = [
     "CAPABILITY_REGISTRY",
@@ -37,4 +43,15 @@ __all__ = [
     "assess_composition_support",
     "assess_from_capabilities",
     "SpecificationAssistant",
+    "ConstraintGraph",
+    "GraphNode",
+    "NodeCategory",
+    "use_spec_graph_v2",
+    "bootstrap_graph",
+    "should_use_graph_pipeline",
+    "GraphGenerationBridge",
+    "ValidatorV2",
+    "GraphValidationResult",
+    "ClarificationEngine",
+    "ClarificationBatch",
 ]

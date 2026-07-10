@@ -749,6 +749,7 @@ class Phase1:
         phase1_model: Optional[str] = None,
         resolution_mode: str = "non_interactive",
         existing_spec: Optional[Any] = None,
+        existing_graph: Optional[Any] = None,
     ) -> ContractIR:
         """Specification-first Phase 1 orchestrator. Returns ContractIR."""
         from src.models import IntentModel
@@ -763,6 +764,7 @@ class Phase1:
             openrouter_key=openrouter_key,
             phase1_model=phase1_model,
             existing_spec=existing_spec,
+            existing_graph=existing_graph,
         )
 
         if not intent_model:
