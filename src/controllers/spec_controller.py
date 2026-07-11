@@ -11,12 +11,9 @@ from src.services.spec.assistant import SpecificationAssistant
 from src.services.spec.constraint_graph import ConstraintGraph
 from src.services.spec.discovery import is_in_discovery_phase
 from src.services.spec.graph_config import use_spec_graph_v2
-from src.services.spec.graph_pipeline import (
-    apply_graph_user_message,
-    bootstrap_graph,
-    build_planning_report,
-    graph_turn_message,
-)
+from src.services.spec.graph_cli import cli_bootstrap, cli_apply_message, load_last_clarification
+from src.services.spec.clarification_engine import ClarificationBatch
+from src.services.spec.graph_pipeline import build_planning_report
 from src.services.spec.orchestrator import merge_answers, run_spec_pipeline
 from src.services.spec.review import (
     apply_graph_edits,
@@ -70,27 +67,32 @@ async def _spec_turn_graph(req: MCPRequest, session, intent: str, user_message: 
 
     graph = _load_graph(req, session)
     if graph is None and intent:
-        graph, spec, validation, clarification = await bootstrap_graph(
+        graph, spec, validation, message = await cli_bootstrap(
             intent,
+            session,
             api_key=api_key,
             provider=provider,
             openrouter_key=openrouter_key,
         )
+        clarification = load_last_clarification(session) or ClarificationBatch()
     elif graph is not None and user_message:
-        graph, validation, clarification = await apply_graph_user_message(
+        graph, spec, validation, clarification, message = await cli_apply_message(
+            session,
             graph,
             user_message,
             api_key=api_key,
             provider=provider,
             openrouter_key=openrouter_key,
         )
-        spec = graph.to_specification()
-        spec.intent = graph.intent or spec.intent
     elif graph is not None:
         spec = graph.to_specification()
         validation = ValidatorV2.validate(graph)
         from src.services.spec.clarification_engine import ClarificationEngine
-        clarification = ClarificationEngine.build_batch(graph, validation)
+
+        clarification = ClarificationEngine.build_batch(graph, validation, max_questions=1)
+        from src.services.spec.graph_conversation import single_clarification_message
+
+        message = single_clarification_message(clarification, validation)
     else:
         return _error(req.request_id, "MISSING_SPEC", "No specification in session or payload.")
 
@@ -98,19 +100,6 @@ async def _spec_turn_graph(req: MCPRequest, session, intent: str, user_message: 
         spec.status = SpecStatus.IN_REVIEW
     else:
         spec.status = SpecStatus.NEEDS_INPUT
-
-    message = graph_turn_message(clarification, validation)
-    if user_message:
-        mgr = get_session_manager()
-        mgr.append_spec_chat(session.session_id, "user", user_message)
-        mgr.append_spec_chat(session.session_id, "assistant", message)
-    elif not session.spec_chat_history:
-        opening = (
-            "Hey — I'm NexOps, your contract architect. "
-            "Tell me what you're trying to build and we'll shape it together."
-        )
-        get_session_manager().append_spec_chat(session.session_id, "assistant", opening)
-        message = opening
 
     _store_graph(session, graph, spec)
     return {

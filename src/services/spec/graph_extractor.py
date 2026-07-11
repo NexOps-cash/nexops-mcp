@@ -106,9 +106,12 @@ class GraphExtractor:
         openrouter_key: Optional[str] = None,
         user_message: Optional[str] = None,
     ) -> ConstraintGraph:
-        prompt = user_message or intent
-        if lacks_contract_signal(prompt):
-            return ConstraintGraph(intent=prompt)
+        if user_message and intent and user_message.strip() != intent.strip():
+            prompt = f"Original request:\n{intent}\n\nLatest clarification:\n{user_message}"
+        else:
+            prompt = user_message or intent
+        if lacks_contract_signal(prompt) and lacks_contract_signal(intent):
+            return ConstraintGraph(intent=intent or prompt)
 
         try:
             llm = LLMFactory.get_provider(

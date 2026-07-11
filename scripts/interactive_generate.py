@@ -10,6 +10,9 @@ Usage:
 
 Requires OPENROUTER_API_KEY in .env for AI-assisted clarification and generation.
 Without the key, missing fields are collected via registry prompts (no LLM chat).
+
+Graph v2 (default): ConstraintGraph SSOT — same path as spec_turn API.
+Use --legacy to force the old wizard/regex pipeline.
 """
 
 from __future__ import annotations
@@ -59,6 +62,18 @@ from src.services.spec.support_assessment import assess_composition_support, per
 from src.services.spec.discovery import is_in_discovery_phase
 from src.services.spec.parameter_extraction import confirm_fields
 from src.services.spec.validator import SpecValidator
+from src.services.spec.graph_config import use_spec_graph_v2
+from src.services.spec.graph_cli import (
+    cli_apply_message,
+    cli_bootstrap,
+    confirm_graph_session,
+    modify_graph_session,
+    persist_graph_session,
+)
+from src.services.spec.graph_pipeline import build_planning_report
+from src.services.spec.review import render_graph_specification
+from src.services.spec.validator_v2 import ValidatorV2
+from src.services.spec.constraint_graph import ConstraintGraph
 
 
 BANNER = """
@@ -77,6 +92,11 @@ def _parse_args() -> argparse.Namespace:
         "--security-level",
         choices=("low", "medium", "high"),
         default="high",
+    )
+    p.add_argument(
+        "--legacy",
+        action="store_true",
+        help="Use legacy wizard/regex spec pipeline instead of Constraint Graph v2",
     )
     p.add_argument(
         "--spec-debug",
@@ -182,6 +202,12 @@ def _print_review(review: SpecificationReview) -> None:
         for st in review.utxo_architecture.state_objects:
             print(f"    • State {st.name}: {st.storage}")
     print("\n" + "═" * 62)
+
+
+def _assess_graph(graph: ConstraintGraph) -> CompositionSupportAssessment:
+    spec = graph.to_specification()
+    _, _, report = build_planning_report(graph)
+    return assess_composition_support(spec, report)
 
 
 def _assess_spec(spec: ContractSpecification) -> CompositionSupportAssessment:
@@ -314,6 +340,93 @@ async def _fill_via_registry(spec: ContractSpecification) -> ContractSpecificati
                 spec.parameters[field] = val
                 confirm_fields(spec, {field})
         spec.status = SpecStatus.NEEDS_INPUT
+
+
+def _print_graph_debug(graph: ConstraintGraph, spec: ContractSpecification) -> None:
+    from src.services.spec.graph_pattern_detection import GraphPatternDetection
+
+    patterns = GraphPatternDetection.detect_patterns(graph)
+    print(
+        f"\n  [graph] nodes={len(graph.nodes)} patterns={patterns} "
+        f"parameters={spec.parameters} confirmed={spec.confirmed_fields}\n"
+    )
+
+
+async def _graph_conversation_loop(
+    session,
+    graph: ConstraintGraph,
+    spec: ContractSpecification,
+    use_llm: bool,
+    api_key: Optional[str],
+    *,
+    spec_debug: bool = False,
+) -> tuple[ConstraintGraph, ContractSpecification]:
+    last_clarification = None
+    while True:
+        validation = ValidatorV2.validate(graph)
+        if validation.is_complete:
+            spec.status = SpecStatus.IN_REVIEW
+            return graph, spec
+        msg = _prompt("  You: ")
+        if not msg:
+            continue
+        if msg.lower() in ("fields", "manual", "registry"):
+            if not use_llm:
+                spec = await _fill_via_registry(spec)
+            else:
+                print("  Registry fill is only available without graph v2 or use --legacy.\n")
+                continue
+            graph = ConstraintGraph.from_specification(spec)
+            persist_graph_session(session, graph, spec)
+            continue
+        graph, spec, validation, last_clarification, assistant_msg = await cli_apply_message(
+            session,
+            graph,
+            msg,
+            api_key=api_key,
+            openrouter_key=api_key,
+            last_clarification=last_clarification,
+        )
+        print(f"\n  NexOps: {assistant_msg}\n")
+        if spec_debug:
+            _print_graph_debug(graph, spec)
+
+
+async def _graph_modify_loop(
+    session,
+    graph: ConstraintGraph,
+    spec: ContractSpecification,
+    use_llm: bool,
+    api_key: Optional[str],
+    *,
+    spec_debug: bool = False,
+    change_message: str = "",
+) -> tuple[ConstraintGraph, ContractSpecification]:
+    spec = modify_graph_session(session, graph, spec)
+    msg = change_message.strip()
+    if not msg:
+        print("\n  What would you like to change?\n")
+        msg = _prompt("  You: ")
+    if use_llm and msg:
+        graph, spec, validation, _, assistant_msg = await cli_apply_message(
+            session,
+            graph,
+            msg,
+            api_key=api_key,
+            openrouter_key=api_key,
+        )
+        print(f"\n  NexOps: {assistant_msg}\n")
+        if spec_debug:
+            _print_graph_debug(graph, spec)
+        if not validation.is_complete:
+            graph, spec = await _graph_conversation_loop(
+                session, graph, spec, use_llm, api_key, spec_debug=spec_debug
+            )
+    elif msg and not use_llm:
+        spec = await _fill_via_registry(spec)
+        graph = ConstraintGraph.from_specification(spec)
+        persist_graph_session(session, graph, spec)
+    return graph, spec
 
 
 async def _conversation_loop(
@@ -516,6 +629,8 @@ async def _generate(
     security_level: str,
     api_key: Optional[str],
     out_path: str,
+    *,
+    existing_graph: Optional[dict] = None,
 ) -> int:
     engine = get_guarded_pipeline_engine()
 
@@ -544,6 +659,7 @@ async def _generate(
         disable_fallbacks=True,
         resolution_mode="interactive",
         existing_spec=spec,
+        existing_graph=existing_graph,
     )
 
     code = await _finish_generate_result(result, out_path)
@@ -561,20 +677,21 @@ async def _generate(
             disable_fallbacks=True,
             resolution_mode="interactive",
             existing_spec=spec,
+            existing_graph=existing_graph,
             allow_experimental=True,
         )
         return await _finish_generate_result(result, out_path)
     return code
 
 
-async def run(initial_intent: str, security_level: str, out_path: str, spec_debug: bool = False) -> int:
-    print(BANNER)
+async def run_legacy(
+    initial_intent: str,
+    security_level: str,
+    out_path: str,
+    spec_debug: bool = False,
+) -> int:
     api_key = os.getenv("OPENROUTER_API_KEY")
     use_llm = bool(api_key)
-
-    if not use_llm:
-        print("  Warning: OPENROUTER_API_KEY not set — chat uses registry prompts only.")
-        print("  Generation still requires the key.\n")
 
     intent = initial_intent.strip()
     if not intent:
@@ -688,10 +805,178 @@ async def run(initial_intent: str, security_level: str, out_path: str, spec_debu
         spec = confirm_specification(spec)
 
 
+async def run_graph(
+    initial_intent: str,
+    security_level: str,
+    out_path: str,
+    spec_debug: bool = False,
+) -> int:
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    use_llm = bool(api_key)
+
+    intent = initial_intent.strip()
+    if not intent:
+        intent = _prompt("  What contract do you want to build?\n  > ").strip()
+
+    if not intent:
+        print("  No intent provided.", file=sys.stderr)
+        return 1
+
+    session = get_session_manager().get_or_create(str(uuid.uuid4()))
+    session.current_specification = None
+    session.current_constraint_graph = None
+
+    graph, spec, validation, opening = await cli_bootstrap(
+        intent,
+        session,
+        api_key=api_key if use_llm else None,
+        openrouter_key=api_key,
+    )
+    print(f"\n  NexOps: {opening}\n")
+    if spec_debug:
+        _print_graph_debug(graph, spec)
+
+    if not validation.is_complete:
+        graph, spec = await _graph_conversation_loop(
+            session, graph, spec, use_llm, api_key, spec_debug=spec_debug
+        )
+
+    while True:
+        validation = ValidatorV2.validate(graph)
+        if not validation.is_complete:
+            graph, spec = await _graph_conversation_loop(
+                session, graph, spec, use_llm, api_key, spec_debug=spec_debug
+            )
+            continue
+
+        spec.status = SpecStatus.IN_REVIEW
+        support = _assess_graph(graph)
+
+        if support.status == "unsupported":
+            print("\n  Your specification is complete, but this combination cannot be generated yet.\n")
+            _print_composition_guidance(support, spec)
+            action = _composition_menu(support, spec)
+            if isinstance(action, tuple) and action[0] == "apply":
+                print("\n  I'll fold those details into your specification.\n")
+                graph, spec = await _graph_modify_loop(
+                    session,
+                    graph,
+                    spec,
+                    use_llm,
+                    api_key,
+                    spec_debug=spec_debug,
+                    change_message=action[1],
+                )
+                continue
+            if action == "quit":
+                print("  Specification saved. You can return to generate a supported pattern later.")
+                return 0
+            if action == "modify":
+                graph, spec = await _graph_modify_loop(
+                    session, graph, spec, use_llm, api_key, spec_debug=spec_debug
+                )
+                continue
+            if action and api_key:
+                return await _generate_simple(action, api_key, out_path, security_level)
+            if not api_key:
+                print("\n  Error: set OPENROUTER_API_KEY to generate code.", file=sys.stderr)
+                return 1
+            continue
+
+        review = render_graph_specification(graph)
+        _print_review(review)
+
+        if support.status == "experimental":
+            print("\n  Note: This composition is experimental and may not reflect all planned behavior.")
+
+        raw_choice = _prompt("\n  Confirm specification?  [Y]es  [M]odify  [Q]uit: ")
+        if _looks_like_modification_input(raw_choice):
+            print("\n  I'll fold those details into your specification.\n")
+            graph, spec = await _graph_modify_loop(
+                session,
+                graph,
+                spec,
+                use_llm,
+                api_key,
+                spec_debug=spec_debug,
+                change_message=raw_choice,
+            )
+            continue
+
+        choice = raw_choice.strip().upper()
+        if choice in ("Y", "YES"):
+            spec = confirm_graph_session(session, graph, spec)
+            break
+        if choice in ("M", "MODIFY"):
+            graph, spec = await _graph_modify_loop(
+                session, graph, spec, use_llm, api_key, spec_debug=spec_debug
+            )
+            continue
+        if choice in ("Q", "QUIT", "N", "NO"):
+            print("  Aborted.")
+            return 0
+        print("  Please enter Y, M, or Q — or paste requirement bullets to update the spec.")
+
+    if not api_key:
+        print("\n  Error: set OPENROUTER_API_KEY to generate code.", file=sys.stderr)
+        return 1
+
+    confirmed_graph = session.current_constraint_graph
+    while True:
+        code = await _generate(
+            intent,
+            spec,
+            security_level,
+            api_key,
+            out_path,
+            existing_graph=confirmed_graph,
+        )
+        if code != 2:
+            return code
+        graph, spec = await _graph_modify_loop(
+            session, graph, spec, use_llm, api_key, spec_debug=spec_debug
+        )
+        spec = confirm_graph_session(session, graph, spec)
+        confirmed_graph = session.current_constraint_graph
+
+
+async def run(
+    initial_intent: str,
+    security_level: str,
+    out_path: str,
+    spec_debug: bool = False,
+    *,
+    legacy: bool = False,
+) -> int:
+    print(BANNER)
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    use_llm = bool(api_key)
+
+    if not use_llm:
+        print("  Warning: OPENROUTER_API_KEY not set — chat uses registry prompts only.")
+        print("  Generation still requires the key.\n")
+
+    if use_spec_graph_v2() and not legacy:
+        print("  Mode: Constraint Graph v2 (use --legacy for wizard pipeline)\n")
+        return await run_graph(initial_intent, security_level, out_path, spec_debug)
+
+    if legacy:
+        print("  Mode: legacy wizard pipeline\n")
+    return await run_legacy(initial_intent, security_level, out_path, spec_debug)
+
+
 def main() -> None:
     args = _parse_args()
     spec_debug = args.spec_debug or os.getenv("NEXOPS_SPEC_DEBUG", "").lower() in ("1", "true", "yes")
-    code = asyncio.run(run(args.intent, args.security_level, args.out, spec_debug=spec_debug))
+    code = asyncio.run(
+        run(
+            args.intent,
+            args.security_level,
+            args.out,
+            spec_debug=spec_debug,
+            legacy=args.legacy,
+        )
+    )
     sys.exit(code)
 
 

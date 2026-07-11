@@ -49,7 +49,7 @@ async def bootstrap_graph(
     graph = GraphPatternDetection.apply_to_graph(graph)
     graph = ConfidenceEngine.apply(graph)
     validation = ValidatorV2.validate(graph)
-    clarification = ClarificationEngine.build_batch(graph, validation)
+    clarification = ClarificationEngine.build_batch(graph, validation, max_questions=1)
     spec = graph.to_specification()
     spec.intent = intent
     return graph, spec, validation, clarification
@@ -62,14 +62,34 @@ async def apply_graph_user_message(
     api_key: Optional[str] = None,
     provider: Optional[str] = None,
     openrouter_key: Optional[str] = None,
+    last_clarification: Optional[ClarificationBatch] = None,
 ) -> Tuple[ConstraintGraph, GraphValidationResult, ClarificationBatch]:
     """Re-extract or merge user clarification into graph."""
-    from src.services.spec.parameter_extraction import extract_parameters_from_message
+    from src.services.spec.discovery import has_ambiguous_pattern_choice, lacks_contract_signal
+    from src.services.spec.parameter_extraction import (
+        extract_parameters_for_graph,
+        extract_parameters_from_message,
+        apply_contextual_graph_answer,
+    )
     from src.services.spec.constraint_graph import NodeCategory
 
-    patterns = GraphPatternDetection.detect_patterns(graph)
+    msg = user_message.strip()
+    if msg:
+        if graph.intent and msg not in graph.intent:
+            graph.intent = f"{graph.intent} {msg}".strip()
+        elif not graph.intent:
+            graph.intent = msg
+
+    if has_ambiguous_pattern_choice(user_message) or has_ambiguous_pattern_choice(graph.intent or ""):
+        validation = ValidatorV2.validate(graph)
+        return graph, validation, ClarificationBatch()
+
+    applied_context = apply_contextual_graph_answer(graph, user_message, last_clarification)
+
     spec = graph.to_specification()
-    params = extract_parameters_from_message(user_message, spec)
+    params = extract_parameters_for_graph(user_message, graph)
+    if not params:
+        params = extract_parameters_from_message(user_message, spec)
 
     for node in graph.nodes:
         if node.category == NodeCategory.AUTHORIZATION:
@@ -89,7 +109,12 @@ async def apply_graph_user_message(
             if params.get("timeout_days") is not None:
                 node.params["timeout_days"] = params["timeout_days"]
 
-    if not params:
+    should_reextract = (
+        not params
+        and not applied_context
+        and not lacks_contract_signal(user_message)
+    )
+    if should_reextract:
         refined = await GraphExtractor.extract(
             graph.intent,
             user_message=user_message,
@@ -98,13 +123,39 @@ async def apply_graph_user_message(
             openrouter_key=openrouter_key,
         )
         if refined.nodes:
-            graph = refined
+            graph = _merge_graph_refinement(graph, refined)
 
     graph = GraphPatternDetection.apply_to_graph(graph)
     graph = ConfidenceEngine.apply(graph)
     validation = ValidatorV2.validate(graph)
-    clarification = ClarificationEngine.build_batch(graph, validation)
+    clarification = ClarificationEngine.build_batch(graph, validation, max_questions=1)
     return graph, validation, clarification
+
+
+def _merge_graph_refinement(base: ConstraintGraph, refined: ConstraintGraph) -> ConstraintGraph:
+    """Keep user-filled params; merge in new structure from re-extract."""
+    if not base.nodes:
+        refined.intent = base.intent or refined.intent
+        return refined
+    if not refined.nodes:
+        return base
+
+    from src.services.spec.constraint_graph import NodeCategory
+
+    for ref_node in refined.nodes:
+        matched = None
+        for base_node in base.nodes:
+            if base_node.category == ref_node.category and (base_node.kind or "") == (ref_node.kind or ""):
+                matched = base_node
+                break
+        if matched:
+            for key, value in ref_node.params.items():
+                if matched.params.get(key) in (None, "", []):
+                    matched.params[key] = value
+        else:
+            base.add_node(ref_node)
+    refined.intent = base.intent or refined.intent
+    return base
 
 
 def build_planning_report(graph: ConstraintGraph) -> Tuple[ExecutionPlan, UTXOArchitecture, PlanningReport]:
@@ -129,5 +180,11 @@ def graph_turn_message(clarification: ClarificationBatch, validation: GraphValid
     if validation.is_complete:
         return "Specification complete. Request spec_review to confirm."
     if clarification.questions:
-        return " ".join(clarification.questions)
+        return clarification.questions[0]
+    for issue in validation.blocking_issues:
+        if issue.field_path == "contract_type" or issue.message == "No contract pattern identified yet":
+            return (
+                "What kind of contract are you building? "
+                "For example: escrow, treasury vault, founder vesting, auction, or token split."
+            )
     return "Tell me more about the contract requirements."

@@ -339,6 +339,7 @@ class SessionState(BaseModel):
     current_code: str = ""
     current_specification: Optional[ContractSpecification] = None
     current_constraint_graph: Optional[Dict[str, Any]] = None
+    graph_last_clarification: Optional[Dict[str, Any]] = None
     spec_chat_history: List[SpecChatTurn] = Field(default_factory=list)
 
 # ─── Phase AR (Audit & Repair) Models ────────────────────────────────
