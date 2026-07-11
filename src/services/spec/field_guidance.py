@@ -6,6 +6,7 @@ from typing import Any, List, Optional, Tuple
 
 from src.models import ContractSpecification, ValidationResult
 from src.services.spec.capabilities import CAPABILITY_REGISTRY, get_capability
+from src.services.spec.detection import is_founder_vesting_spec
 from src.services.spec.parameter_extraction import is_empty_value
 from src.services.spec.orchestrator import _default_for_field
 
@@ -73,7 +74,10 @@ def is_explicit_standard_request(message: str) -> bool:
 
 def next_field_to_ask(spec: ContractSpecification, validation: ValidationResult) -> Optional[str]:
     """Return the single highest-priority missing field, or None if complete."""
+    skip = {"initial_threshold", "final_threshold", "duration_days"} if is_founder_vesting_spec(spec) else set()
     for field in validation.missing_fields:
+        if field in skip:
+            continue
         if field in spec.confirmed_fields and not is_empty_value(spec.parameters.get(field)):
             continue
         return field
@@ -92,6 +96,9 @@ def suggest_field_default(
     params = spec.parameters
     intent = spec.intent or ""
     cap_names = {c.name for c in spec.capabilities}
+
+    if is_founder_vesting_spec(spec) and field_name in {"initial_threshold", "final_threshold", "duration_days"}:
+        return None, ""
 
     if field_name == "initial_threshold":
         if "linear_decay" in cap_names or "treasury" in cap_names or "vault" in cap_names:

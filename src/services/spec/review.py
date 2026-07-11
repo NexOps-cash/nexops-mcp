@@ -13,6 +13,7 @@ from src.models import (
 )
 from src.services.spec.architecture import ArchitectureBuilder
 from src.services.spec.constraint_graph import ConstraintGraph, NodeCategory
+from src.services.spec.detection import is_founder_vesting_spec
 from src.services.spec.graph_pattern_detection import GraphPatternDetection
 from src.services.spec.graph_pipeline import build_planning_report
 from src.services.spec.planner import ModulePlanner
@@ -111,20 +112,37 @@ def render_specification(
     for cap in spec.capabilities:
         if cap.name in ("weighted_multisig", "multisig", "escrow"):
             sections["Access Control"].append(cap.name.replace("_", " ").title())
-        elif cap.name == "linear_decay":
+        elif cap.name == "linear_decay" and not is_founder_vesting_spec(spec):
             sections["Time Rules"].append("Linear threshold change")
         elif cap.name in ("treasury", "vault", "withdrawal_policy", "auction"):
-            sections["Assets"].append(cap.name.replace("_", " ").title())
+            if is_founder_vesting_spec(spec) and cap.name == "vault":
+                sections["Core Pattern"].append("Founder vesting vault")
+            else:
+                sections["Assets"].append(cap.name.replace("_", " ").title())
+        elif cap.name == "timelock" and is_founder_vesting_spec(spec):
+            sections["Time Rules"].append("Cliff timelock / vesting schedule")
+        elif cap.name == "split" and is_founder_vesting_spec(spec):
+            sections["Operations"].append("Founder token split on release")
+
+    if is_founder_vesting_spec(spec):
+        if spec.parameters.get("timeout_days"):
+            sections["Time Rules"].append(f"Cliff lock: {spec.parameters['timeout_days']} days")
+        if spec.parameters.get("vesting_years"):
+            sections["Time Rules"].append(f"Total vesting: {spec.parameters['vesting_years']} years")
+        if spec.parameters.get("recipients"):
+            sections["Operations"].append(f"Recipients: {spec.parameters['recipients']}")
+        if spec.parameters.get("shares"):
+            sections["Operations"].append(f"Split: {spec.parameters['shares']}")
 
     if spec.parameters.get("holders"):
         sections["Access Control"].append(f"Key holders: {spec.parameters['holders']}")
     if spec.parameters.get("weights"):
         sections["Access Control"].append(f"Voting weights: {spec.parameters['weights']}")
-    if spec.parameters.get("initial_threshold") is not None:
+    if not is_founder_vesting_spec(spec) and spec.parameters.get("initial_threshold") is not None:
         sections["Time Rules"].append(f"Initial threshold: {spec.parameters['initial_threshold']}")
-    if spec.parameters.get("final_threshold") is not None:
+    if not is_founder_vesting_spec(spec) and spec.parameters.get("final_threshold") is not None:
         sections["Time Rules"].append(f"Final threshold: {spec.parameters['final_threshold']}")
-    if spec.parameters.get("duration_days"):
+    if not is_founder_vesting_spec(spec) and spec.parameters.get("duration_days"):
         sections["Time Rules"].append(f"Duration: {spec.parameters['duration_days']} days")
     if spec.parameters.get("asset_type"):
         sections["Assets"].append(f"Asset: {spec.parameters['asset_type']}")
@@ -132,7 +150,7 @@ def render_specification(
         sections["Access Control"].append(f"Signers: {spec.parameters['signers']}")
     if spec.parameters.get("threshold"):
         sections["Access Control"].append(f"Threshold: {spec.parameters['threshold']}")
-    if spec.parameters.get("timeout_days"):
+    if spec.parameters.get("timeout_days") and not is_founder_vesting_spec(spec):
         sections["Time Rules"].append(f"Refund timeout: {spec.parameters['timeout_days']} days")
     if spec.parameters.get("start_price") is not None:
         sections["Assets"].append(f"Start price: {spec.parameters['start_price']} satoshis")

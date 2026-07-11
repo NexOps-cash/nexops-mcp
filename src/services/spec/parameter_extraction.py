@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Set
 
 from src.models import ContractSpecification
 from src.services.spec.capabilities import all_known_field_names
+from src.services.spec.detection import is_founder_vesting_spec
 
 _AFFIRMATIONS = frozenset({
     "yes",
@@ -70,18 +71,123 @@ def extract_parameters_from_message(
                 continue
             _merge_extracted(merged, _extract_single_line(cleaned, allowed, cap_names))
         if merged:
-            return {k: v for k, v in merged.items() if k in allowed and not is_empty_value(v)}
+            return {
+                k: v
+                for k, v in merged.items()
+                if (k in allowed or k in ("vesting_years", "vesting_total_days", "token_amount"))
+                and not is_empty_value(v)
+            }
 
     return {
         k: v
         for k, v in _extract_single_line(text, allowed, cap_names).items()
-        if k in allowed and not is_empty_value(v)
+        if (k in allowed or k in ("vesting_years", "vesting_total_days", "token_amount")) and not is_empty_value(v)
     }
+
+
+def _allowed_fields_from_graph(graph) -> Set[str]:
+    from src.services.spec.constraint_graph import NodeCategory
+
+    fields: Set[str] = set()
+    for node in graph.nodes:
+        if node.category == NodeCategory.AUTHORIZATION:
+            fields.update({"signers", "threshold", "holders", "weights"})
+        elif node.category == NodeCategory.POLICY:
+            fields.update(
+                {
+                    "duration_days",
+                    "initial_threshold",
+                    "final_threshold",
+                    "recipients",
+                    "shares",
+                    "vesting_years",
+                }
+            )
+        elif node.category == NodeCategory.TIME:
+            fields.add("timeout_days")
+        elif node.category == NodeCategory.ASSET:
+            fields.update({"asset_type", "token_category"})
+    return fields
+
+
+def extract_parameters_for_graph(message: str, graph) -> Dict[str, Any]:
+    """Parse user text using fields implied by graph nodes (not only spec capabilities)."""
+    allowed = _allowed_fields_from_graph(graph)
+    if not allowed:
+        return {}
+    cap_names = [t for n in graph.nodes for t in (n.pattern_tags or [])]
+    extracted = _extract_single_line(message.strip(), allowed, cap_names)
+    return {k: v for k, v in extracted.items() if k in allowed and not is_empty_value(v)}
+
+
+def apply_contextual_graph_answer(graph, message: str, last_clarification) -> bool:
+    """Bind short replies like 'me' or '2 years' to the last asked field."""
+    if not last_clarification or not last_clarification.target_node_ids:
+        return False
+
+    from src.services.spec.constraint_graph import NodeCategory
+
+    text = message.strip()
+    lower = text.lower().rstrip(".!?")
+    if not text or len(text) > 40:
+        return False
+
+    node_id = last_clarification.target_node_ids[0]
+    field_path = last_clarification.field_paths[0] if last_clarification.field_paths else ""
+    question = (last_clarification.questions[0] if last_clarification.questions else "").lower()
+    node = graph.node_by_id(node_id)
+    if not node:
+        return False
+
+    if lower in {"me", "myself", "i", "mine"} and (
+        field_path == "recipients" or "recipient" in question or "receive" in question
+    ):
+        node.params["recipients"] = ["Me"]
+        return True
+
+    year_match = re.match(r"^(\d+)\s*years?$", lower)
+    if year_match and (
+        field_path in ("duration_days", "timeout_days")
+        or "duration" in question
+        or "vesting" in question
+        or "cliff" in question
+    ):
+        days = int(year_match.group(1)) * 365
+        if node.category == NodeCategory.TIME:
+            node.params["timeout_days"] = days
+        else:
+            node.params["duration_days"] = days
+        return True
+
+    day_match = re.match(r"^(\d+)\s*days?$", lower)
+    if day_match and field_path in ("duration_days", "timeout_days", ""):
+        days = int(day_match.group(1))
+        if node.category == NodeCategory.TIME or field_path == "timeout_days":
+            node.params["timeout_days"] = days
+        else:
+            node.params["duration_days"] = days
+        return True
+
+    if re.match(r"^\d+$", lower):
+        value = int(lower)
+        if field_path == "initial_threshold" or "initial approval" in question:
+            node.params["initial_threshold"] = value
+            return True
+        if field_path == "final_threshold" or "final approval" in question:
+            node.params["final_threshold"] = value
+            return True
+        if field_path == "threshold" or "multisig threshold" in question:
+            node.params["threshold"] = value
+            return True
+
+    return False
 
 
 def _merge_extracted(merged: Dict[str, Any], part: Dict[str, Any]) -> None:
     """Merge line extractions; append split recipients/shares from multiple bullets."""
     for key, value in part.items():
+        if key == "asset_type" and merged.get("asset_type") == "ft" and value == "bch":
+            continue
         if key in ("recipients", "shares") and key in merged and isinstance(merged[key], list):
             if isinstance(value, list):
                 merged[key] = merged[key] + value
@@ -99,21 +205,70 @@ def _extract_single_line(
     lower = text.lower()
     out: Dict[str, Any] = {}
 
+    founder_vesting = (
+        {"vault", "timelock", "split"}.issubset(set(cap_names))
+        and "linear_decay" not in cap_names
+        and any(k in lower for k in ("vest", "founder", "cliff", "year"))
+    )
+
+    if founder_vesting:
+        dual_cliff = re.search(r"(\d+)\s*year(?:s)?\s+(\d+)\s*year(?:s)?\s+cliff", lower)
+        if dual_cliff:
+            if "vesting_years" not in out:
+                out["vesting_years"] = int(dual_cliff.group(1))
+            if "timeout_days" in allowed:
+                out["timeout_days"] = int(dual_cliff.group(2)) * 365
+        cliff_m = re.search(r"(\d+)\s*year(?:s)?\s+cliff", lower)
+        vest_m = re.search(r"(\d+)\s*year(?:s)?\s+vesting", lower)
+        founders_m = re.search(r"(\d+)\s+founders?", lower)
+        if cliff_m and "timeout_days" in allowed:
+            out["timeout_days"] = int(cliff_m.group(1)) * 365
+        if vest_m:
+            out["vesting_years"] = int(vest_m.group(1))
+        if founders_m and "recipients" in allowed:
+            count = int(founders_m.group(1))
+            out["recipients"] = [f"Founder {chr(65 + i)}" for i in range(count)]
+        if re.search(r"50\s*[/\s]+\s*50|50\s*50\s*%", lower):
+            if "shares" in allowed:
+                out["shares"] = [50, 50]
+            if "recipients" in allowed and "recipients" not in out:
+                out["recipients"] = ["Founder A", "Founder B"]
+        if "token" in lower and "asset_type" in allowed:
+            out["asset_type"] = "ft"
+
     if "asset_type" in allowed:
-        asset_match = re.search(
-            r"(?:asset(?:\s*type)?|hold(?:s|ing)?)\s*(?:is\s*)?(ft|nft|bch|token)\b",
-            lower,
-        )
-        if not asset_match:
-            asset_match = re.search(r"\basset\s+(ft|nft|bch|token)\b", lower)
-        if asset_match:
-            out["asset_type"] = normalize_asset_type(asset_match.group(1))
-        elif re.search(r"\b(ft|nft)\b", lower) and re.search(r"\basset\b", lower):
-            token = re.search(r"\b(ft|nft)\b", lower)
-            if token:
-                out["asset_type"] = normalize_asset_type(token.group(1))
-        elif re.search(r"\bpreserve\s+bch\b|\bbch\s+value\b", lower):
+        if "fungible token" in lower or "cashtoken" in lower:
+            out["asset_type"] = "ft"
+        elif re.search(r"\bpreserve\s+bch\b|\bbch\s+value\b", lower) and "token" not in lower:
             out["asset_type"] = "bch"
+        else:
+            asset_match = re.search(
+                r"(?:asset(?:\s*type)?|hold(?:s|ing)?)\s*(?:is\s*)?(ft|nft|bch|token)\b",
+                lower,
+            )
+            if not asset_match:
+                asset_match = re.search(r"\basset\s+(ft|nft|bch|token)\b", lower)
+            if asset_match:
+                out["asset_type"] = normalize_asset_type(asset_match.group(1))
+            elif re.search(r"\b(ft|nft)\b", lower) and re.search(r"\basset\b", lower):
+                token = re.search(r"\b(ft|nft)\b", lower)
+                if token:
+                    out["asset_type"] = normalize_asset_type(token.group(1))
+
+    lock_tokens = re.search(r"lock\s+([\d,]+)\s+(?:fungible\s+)?tokens?", lower)
+    if lock_tokens:
+        amount = int(lock_tokens.group(1).replace(",", ""))
+        if "max_supply" in allowed:
+            out["max_supply"] = amount
+        else:
+            out["token_amount"] = amount
+
+    if "beneficiary" in lower and ("recipients" in allowed or "beneficiary" in allowed):
+        out["recipients"] = ["Beneficiary"]
+
+    if "recipients" in allowed or "shares" in allowed:
+        if re.match(r"^(me|myself|i|mine)\.?$", lower):
+            out["recipients"] = ["Me"]
 
     if "recipients" in allowed or "shares" in allowed:
         pct_matches = re.findall(r"(\d+)\s*%\s*to\s+([^,\n%.]+)", text, flags=re.I)
@@ -128,12 +283,15 @@ def _extract_single_line(
             if "shares" in allowed:
                 out["shares"] = shares
 
-    if "duration_days" in allowed:
+    if not founder_vesting and "duration_days" in allowed:
+        year_match = re.search(r"(\d+)\s*years?", lower)
+        if year_match:
+            out["duration_days"] = int(year_match.group(1)) * 365
         duration_match = re.search(r"(\d+)\s*days?\b", lower)
-        if duration_match:
+        if duration_match and "duration_days" not in out:
             out["duration_days"] = int(duration_match.group(1))
 
-    if "initial_threshold" in allowed or "final_threshold" in allowed:
+    if not founder_vesting and ("initial_threshold" in allowed or "final_threshold" in allowed):
         threshold_days = re.match(r"^\s*(\d+)\s+(\d+)\s*days?\b", lower)
         if threshold_days:
             if "initial_threshold" in allowed:
@@ -237,6 +395,11 @@ def _extract_single_line(
             out["threshold"] = int(threshold_match.group(1))
         elif re.match(r"^\s*(\d+)\s*$", lower):
             out["threshold"] = int(lower.strip())
+
+    if re.search(r"\blinear\b", lower):
+        out["vesting_schedule"] = "linear"
+    elif re.search(r"\bchunk", lower) or "per year" in lower or "tranche" in lower:
+        out["vesting_schedule"] = "chunks"
 
     return out
 

@@ -5,7 +5,16 @@ from __future__ import annotations
 from typing import Optional
 
 from src.models import CapabilityInstance, ContractSpecification, RawIntent, SpecStatus
-from src.services.spec.detection import detect_capabilities
+from src.services.spec.detection import (
+    detect_capabilities,
+    explicit_founder_vesting_choice,
+    founder_vesting_capability_instances,
+    is_cliff_vesting_vault,
+    is_simple_token_timelock_vesting,
+    normalize_founder_vesting_spec,
+    simple_token_vesting_capability_instances,
+)
+from src.services.spec.parameter_extraction import extract_parameters_from_message
 from src.services.spec.validator import SpecValidator
 
 _GREETING_ONLY = frozenset({
@@ -100,6 +109,10 @@ def is_pushback_or_confusion(message: str) -> bool:
         p in t
         for p in (
             "what do you mean",
+            "answer my question",
+            "answer the question",
+            "you didn't answer",
+            "didn't answer",
             "slow down",
             "hold on",
             "hang on",
@@ -130,9 +143,43 @@ def try_discover_specification(
     if has_ambiguous_pattern_choice(user_message):
         return None
 
+    combined = f"{spec.intent or ''} {user_message}".strip()
+
+    if is_simple_token_timelock_vesting(user_message):
+        discovered = ContractSpecification(
+            intent=user_message.strip(),
+            capabilities=simple_token_vesting_capability_instances(),
+            parameters={"lifecycle_mode": "token_vesting"},
+            confirmed_fields=list(spec.confirmed_fields),
+            pending_parameters=dict(spec.pending_parameters),
+            status=SpecStatus.NEEDS_INPUT,
+        )
+        params = extract_parameters_from_message(user_message, discovered)
+        if params:
+            discovered.parameters.update(params)
+        validation = SpecValidator.validate(discovered)
+        discovered.status = (
+            SpecStatus.IN_REVIEW if validation.is_complete else SpecStatus.NEEDS_INPUT
+        )
+        return discovered
+
+    if explicit_founder_vesting_choice(user_message) or explicit_founder_vesting_choice(combined):
+        discovered = ContractSpecification(
+            intent=combined,
+            capabilities=founder_vesting_capability_instances(),
+            parameters={"lifecycle_mode": "vesting"},
+            confirmed_fields=list(spec.confirmed_fields),
+            pending_parameters=dict(spec.pending_parameters),
+            status=SpecStatus.NEEDS_INPUT,
+        )
+        params = extract_parameters_from_message(user_message, discovered)
+        if params:
+            discovered.parameters.update(params)
+        return normalize_founder_vesting_spec(discovered)
+
     detected = detect_capabilities(
         RawIntent(intent=user_message.strip(), capabilities=[], constraints={}),
-        original_intent=user_message,
+        original_intent=combined,
     )
     if not detected.capabilities:
         return None
@@ -151,4 +198,4 @@ def try_discover_specification(
         SpecStatus.IN_REVIEW if validation.is_complete else SpecStatus.NEEDS_INPUT
     )
     discovered.intent = discovered.intent or labels
-    return discovered
+    return normalize_founder_vesting_spec(discovered)

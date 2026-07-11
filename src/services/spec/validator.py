@@ -6,6 +6,7 @@ from typing import Any, Dict, List
 
 from src.models import ContractSpecification, ValidationResult
 from src.services.spec.capabilities import get_capability
+from src.services.spec.detection import is_founder_vesting_spec
 from src.services.spec.parameter_extraction import is_empty_value
 
 
@@ -25,6 +26,10 @@ class SpecValidator:
             )
 
         for cap_inst in spec.capabilities:
+            if is_founder_vesting_spec(spec) and cap_inst.name in (
+                "linear_decay", "treasury", "weighted_multisig"
+            ):
+                continue
             cap = get_capability(cap_inst.name)
             if not cap:
                 continue

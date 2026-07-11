@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from src.models import ContractSpecification, SpecStatus
+from src.services.spec.detection import is_founder_vesting_spec, normalize_founder_vesting_spec, _TREASURY_DECAY_FIELDS
+from src.services.spec.discovery import lacks_contract_signal
 from src.services.spec.parameter_extraction import (
     apply_parameter_updates,
     extract_parameters_from_message,
@@ -110,6 +112,7 @@ def apply_conversation_turn(
     Handles incremental natural-language updates and affirmation of pending values.
     """
     updated = spec.model_copy(deep=True)
+    updated.intent = _merge_spec_intent(updated.intent, user_message)
 
     if is_affirmation(user_message) and updated.pending_parameters:
         updated = apply_parameter_updates(updated, dict(updated.pending_parameters))
@@ -120,7 +123,18 @@ def apply_conversation_turn(
 
     validation = SpecValidator.validate(updated)
     updated.status = SpecStatus.IN_REVIEW if validation.is_complete else SpecStatus.NEEDS_INPUT
-    return updated
+    return normalize_founder_vesting_spec(updated)
+
+
+def _merge_spec_intent(current: str, message: str) -> str:
+    if lacks_contract_signal(message):
+        return current
+    msg = message.strip()
+    if not msg:
+        return current
+    if current and msg.lower() in current.lower():
+        return current
+    return f"{current} {msg}".strip() if current else msg
 
 
 def merge_assistant_proposal(
@@ -147,13 +161,16 @@ def merge_assistant_proposal(
     updated.pending_parameters = pending
     validation = SpecValidator.validate(updated)
     updated.status = SpecStatus.IN_REVIEW if validation.is_complete else SpecStatus.NEEDS_INPUT
-    return updated
+    return normalize_founder_vesting_spec(updated)
 
 
 def fields_to_ask(spec: ContractSpecification, validation) -> list[str]:
     """Fields still missing that are not already confirmed with values."""
     out = []
+    skip = _TREASURY_DECAY_FIELDS if is_founder_vesting_spec(spec) else frozenset()
     for field in validation.missing_fields:
+        if field in skip:
+            continue
         if field in spec.confirmed_fields and not _value_missing(spec.parameters.get(field)):
             continue
         out.append(field)
