@@ -16,6 +16,7 @@ from src.services.spec.conversation import (
     merge_assistant_proposal,
     offer_default_for_uncertainty,
 )
+from src.services.spec.detection import is_founder_vesting_spec, normalize_founder_vesting_spec
 from src.services.spec.discovery import (
     has_ambiguous_pattern_choice,
     is_in_discovery_phase,
@@ -37,6 +38,14 @@ from src.services.spec.intent_pivot import (
     try_pivot_specification,
 )
 from src.services.spec.parameter_extraction import is_affirmation, is_empty_value
+from src.services.spec.spec_messaging import (
+    ambiguous_pattern_message,
+    apply_parameterization_preferences,
+    founder_vesting_ack_message,
+    is_parameterization_request,
+    maybe_completion_message,
+    opening_message,
+)
 from src.services.spec.validator import SpecValidator
 
 logger = logging.getLogger("nexops.spec.assistant")
@@ -92,6 +101,13 @@ class SpecificationAssistant:
         pivot_spec, pivot_ack = try_pivot_specification(spec, user_message)
         if pivot_spec is not None:
             validation = SpecValidator.validate(pivot_spec)
+            if pivot_spec.parameters.get("awaiting_token_vesting_details"):
+                return AssistantTurn(
+                    updated_spec=pivot_spec,
+                    message=pivot_ack.strip(),
+                    still_missing=fields_to_ask(pivot_spec, validation),
+                    progress=build_progress_line(pivot_spec, validation),
+                )
             nxt = next_field_to_ask(pivot_spec, validation)
             follow = f"\n\nNext: {question_for_field_human(nxt)}" if nxt else ""
             return AssistantTurn(
@@ -106,7 +122,17 @@ class SpecificationAssistant:
             user_message,
             last_assistant_message=last_assistant_message,
         )
+        if is_parameterization_request(user_message):
+            updated = apply_parameterization_preferences(updated, user_message)
         validation = SpecValidator.validate(updated)
+        ready = maybe_completion_message(updated, validation)
+        if ready:
+            return AssistantTurn(
+                updated_spec=updated,
+                message=ready,
+                still_missing=[],
+                progress=build_progress_line(updated, validation),
+            )
 
         # User unsure → offer a standard default (e.g. final threshold = initial 50)
         uncertain_msg, updated, suggested = offer_default_for_uncertainty(updated, user_message)
@@ -203,6 +229,8 @@ class SpecificationAssistant:
         else:
             updated.status = SpecStatus.NEEDS_INPUT
 
+        updated = normalize_founder_vesting_spec(updated)
+
         return AssistantTurn(
             updated_spec=updated,
             message=message,
@@ -225,19 +253,31 @@ async def _discovery_turn(
     """Conversational discovery — no assumed contract type, no field rush."""
     discovered = try_discover_specification(spec, user_message)
     if discovered is not None:
+        discovered = normalize_founder_vesting_spec(discovered)
         revalidation = SpecValidator.validate(discovered)
-        caps = ", ".join(c.name.replace("_", " ") for c in discovered.capabilities)
-        nxt = next_field_to_ask(discovered, revalidation)
-        follow = question_for_field_human(nxt) if nxt else ""
-        message = (
-            f"Got it — let's shape a {caps} contract."
-            + (f" {follow}" if follow else "")
-        )
+        if is_founder_vesting_spec(discovered):
+            message = founder_vesting_ack_message(discovered)
+        else:
+            caps = ", ".join(c.name.replace("_", " ") for c in discovered.capabilities)
+            nxt = next_field_to_ask(discovered, revalidation)
+            follow = question_for_field_human(nxt) if nxt else ""
+            message = (
+                f"Got it — let's shape a {caps} contract."
+                + (f" {follow}" if follow else "")
+            )
         return AssistantTurn(
             updated_spec=discovered,
             message=message,
             still_missing=fields_to_ask(discovered, revalidation),
             progress=build_progress_line(discovered, revalidation),
+        )
+
+    if has_ambiguous_pattern_choice(user_message):
+        return AssistantTurn(
+            updated_spec=spec,
+            message=ambiguous_pattern_message(),
+            still_missing=["contract_type"],
+            progress="",
         )
 
     from src.services.llm.factory import LLMFactory

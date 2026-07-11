@@ -6,7 +6,12 @@ import re
 from typing import List, Optional, Set, Tuple
 
 from src.models import CapabilityInstance, ContractSpecification, SpecStatus, RawIntent
-from src.services.spec.detection import detect_capabilities
+from src.services.spec.detection import (
+    detect_capabilities,
+    is_simple_token_timelock_vesting,
+    simple_token_vesting_capability_instances,
+)
+from src.services.spec.parameter_extraction import extract_parameters_from_message
 from src.services.spec.validator import SpecValidator
 
 _PIVOT_PHRASES = (
@@ -23,7 +28,26 @@ _PIVOT_PHRASES = (
     "actually",
     "switch to",
     "pivot",
+    "no lets",
+    "no let's",
 )
+
+
+def looks_like_spec_replacement(message: str) -> bool:
+    """User pasted a full requirements block or explicitly replaced the prior design."""
+    lower = message.lower().strip()
+    if "requirements:" in lower:
+        return True
+    if re.search(r"\bno[,.]?\s+let'?s\s+do\b", lower):
+        return True
+    if re.search(r"let'?s\s+do\s+this\b", lower) and any(
+        k in lower for k in ("requirements", "create a", "cashtoken")
+    ):
+        return True
+    if lower.startswith("create a") and any(k in lower for k in ("cashtoken", "contract", "vesting")):
+        return True
+    bullet_lines = sum(1 for line in message.splitlines() if line.strip().startswith("-"))
+    return bullet_lines >= 2
 
 _BURN_KEYS = (
     "never release",
@@ -137,6 +161,9 @@ def try_pivot_specification(
 
     Returns (new_spec, acknowledgment) or (None, None) when no pivot.
     """
+    if looks_like_spec_replacement(user_message):
+        return _rebuild_from_requirements(user_message)
+
     current = {c.name for c in spec.capabilities}
     if not looks_like_intent_pivot(user_message, current):
         return None, None
@@ -179,6 +206,55 @@ def try_pivot_specification(
             "we can couple this to a vault with no withdrawal path, or mark it "
             "as burn-style if that's the goal."
         )
+    return pivoted, ack
+
+
+def _rebuild_from_requirements(user_message: str) -> Tuple[ContractSpecification, str]:
+    """Replace the active spec from a pasted requirements block."""
+    if is_simple_token_timelock_vesting(user_message):
+        caps = simple_token_vesting_capability_instances()
+        lifecycle = "token_vesting"
+        label = "CashTokens timelock vesting"
+    else:
+        detected = detect_capabilities(
+            RawIntent(intent=user_message.strip(), capabilities=[], constraints={}),
+            user_message,
+        )
+        caps = list(detected.capabilities)
+        lifecycle = None
+        label = ", ".join(c.name.replace("_", " ") for c in caps) or "contract"
+
+    pivoted = ContractSpecification(
+        intent=user_message.strip(),
+        capabilities=caps,
+        parameters={"lifecycle_mode": lifecycle} if lifecycle else {},
+        status=SpecStatus.NEEDS_INPUT,
+        confirmed_fields=[],
+        pending_parameters={},
+    )
+    params = extract_parameters_from_message(user_message, pivoted)
+    if params:
+        pivoted.parameters.update(params)
+    from src.services.spec.spec_messaging import (
+        mark_token_vesting_awaiting_details,
+        token_vesting_pivot_message,
+    )
+
+    if lifecycle == "token_vesting":
+        pivoted = mark_token_vesting_awaiting_details(pivoted)
+        return pivoted, token_vesting_pivot_message(pivoted)
+
+    validation = SpecValidator.validate(pivoted)
+    pivoted.status = SpecStatus.IN_REVIEW if validation.is_complete else SpecStatus.NEEDS_INPUT
+    ack = (
+        f"Got it — I've switched to {label} from your requirements. "
+        f"I've parsed what I could (lock period, asset type, amounts). "
+    )
+    if validation.is_complete:
+        ack += "This looks complete — we can review it."
+    elif validation.missing_fields:
+        missing = validation.missing_fields[0].replace("_", " ")
+        ack += f"Still need: {missing}."
     return pivoted, ack
 
 
