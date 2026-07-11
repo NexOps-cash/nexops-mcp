@@ -15,6 +15,6 @@ def use_spec_graph_v2() -> bool:
 
 
 def graph_benchmark_legacy_only() -> bool:
-    """Force legacy keyword path for non-interactive benchmark runs."""
-    raw = os.getenv("NEXOPS_SPEC_GRAPH_LEGACY_BENCHMARK", "1").strip().lower()
+    """Force legacy keyword path for non-interactive benchmark runs (opt-in)."""
+    raw = os.getenv("NEXOPS_SPEC_GRAPH_LEGACY_BENCHMARK", "0").strip().lower()
     return raw in ("1", "true", "yes", "on")

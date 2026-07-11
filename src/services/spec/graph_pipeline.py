@@ -23,14 +23,15 @@ logger = logging.getLogger("nexops.spec.graph_pipeline")
 
 def should_use_graph_pipeline(resolution_mode: str = "interactive") -> bool:
     """
-    Graph SSOT is the default for interactive spec flows only.
-    Non-interactive / benchmark paths keep legacy keyword detection unless
-    NEXOPS_SPEC_GRAPH_NON_INTERACTIVE=1.
+    Graph SSOT when NEXOPS_SPEC_GRAPH_V2 is on.
+    Interactive and fast /generate use graph by default.
+    Benchmarks opt into legacy keywords via NEXOPS_SPEC_GRAPH_LEGACY_BENCHMARK=1.
     """
-    if resolution_mode != "interactive":
-        raw = os.getenv("NEXOPS_SPEC_GRAPH_NON_INTERACTIVE", "0").strip().lower()
-        return raw in ("1", "true", "yes", "on") and use_spec_graph_v2()
-    return use_spec_graph_v2()
+    if not use_spec_graph_v2():
+        return False
+    if resolution_mode == "interactive":
+        return True
+    return not graph_benchmark_legacy_only()
 
 
 async def bootstrap_graph(

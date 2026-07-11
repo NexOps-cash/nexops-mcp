@@ -65,6 +65,9 @@ def test_graph_generation_bridge():
 
 def test_graph_v2_default_enabled(monkeypatch):
     monkeypatch.delenv("NEXOPS_SPEC_GRAPH_V2", raising=False)
+    monkeypatch.delenv("NEXOPS_SPEC_GRAPH_LEGACY_BENCHMARK", raising=False)
     assert use_spec_graph_v2() is True
     assert should_use_graph_pipeline("interactive") is True
+    assert should_use_graph_pipeline("non_interactive") is True
+    monkeypatch.setenv("NEXOPS_SPEC_GRAPH_LEGACY_BENCHMARK", "1")
     assert should_use_graph_pipeline("non_interactive") is False

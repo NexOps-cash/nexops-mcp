@@ -119,7 +119,7 @@ def normalize_founder_vesting_spec(spec: ContractSpecification) -> ContractSpeci
 
 
 def _is_treasury_linear_decay_signal(intent_lower: str) -> bool:
-    if is_cliff_vesting_vault(intent_lower) or explicit_founder_vesting_choice(intent_lower):
+    if is_bare_vesting_intent(intent_lower) or explicit_founder_vesting_choice(intent_lower):
         return False
     if "founder" in intent_lower and ("vest" in intent_lower or "cliff" in intent_lower):
         return False
@@ -134,12 +134,35 @@ def _is_treasury_linear_decay_signal(intent_lower: str) -> bool:
     return False
 
 
+def is_bare_vesting_intent(intent_lower: str) -> bool:
+    """Vesting named without cliff/lock details — still a vesting contract, not multisig."""
+    if is_simple_token_timelock_vesting(intent_lower):
+        return False
+    if "decay" in intent_lower and "vest" not in intent_lower and "cliff" not in intent_lower:
+        if any(k in intent_lower for k in ("treasury", "governance", "dao", "approval threshold")):
+            return False
+    if any(k in intent_lower for k in _VESTING_VAULT_KEYS):
+        return True
+    return "vest" in intent_lower and any(
+        k in intent_lower for k in ("contract", "schedule", "founder", "token", "cliff", "lock")
+    )
+
+
+def is_hashlock_intent(intent_lower: str) -> bool:
+    return any(
+        k in intent_lower
+        for k in ("hashlock", "hash lock", "hash-lock", "htlc", "preimage", "hash preimage")
+    )
+
+
 def is_cliff_vesting_vault(intent_lower: str) -> bool:
     """
     Founder/cliff vesting: lock funds for N days, then release/split — not treasury voting decay.
     """
     if not intent_lower:
         return False
+    if is_bare_vesting_intent(intent_lower):
+        return True
     has_vesting = any(k in intent_lower for k in _VESTING_VAULT_KEYS) or (
         "vest" in intent_lower and ("vault" in intent_lower or "founder" in intent_lower)
     ) or explicit_founder_vesting_choice(intent_lower)
@@ -192,7 +215,16 @@ def detect_capabilities(
             parameters=params,
         )
 
-    if any(k in intent_lower for k in _VAULT_KEYS) or raw.intent.lower() in ("treasury", "vault"):
+    if is_hashlock_intent(intent_lower):
+        return ContractSpecification(
+            intent=raw.intent or original_intent,
+            capabilities=[CapabilityInstance(name="escrow"), CapabilityInstance(name="timelock")],
+            parameters={"hash_preimage": "PARAMETER", **dict(raw.constraints)},
+        )
+
+    if "vault" in intent_lower and not _is_governance_dao(intent_lower):
+        names.add("vault")
+    elif any(k in intent_lower for k in _VAULT_KEYS) or raw.intent.lower() in ("treasury", "vault"):
         names.add("treasury")
         names.add("vault")
     if _is_governance_dao(intent_lower):
@@ -230,9 +262,13 @@ def detect_capabilities(
             valid = ["split", "multisig"]
         elif is_cliff_vesting_vault(intent_lower) or explicit_founder_vesting_choice(intent_lower):
             valid = ["vault", "timelock", "split"]
+        elif is_hashlock_intent(intent_lower):
+            valid = ["escrow", "timelock"]
         elif _is_governance_dao(intent_lower):
             valid = ["treasury", "vault", "weighted_multisig"]
-        elif "vault" in intent_lower or "treasury" in intent_lower:
+        elif "vault" in intent_lower and not _is_governance_dao(intent_lower):
+            valid = ["vault"]
+        elif "treasury" in intent_lower:
             valid = ["treasury", "vault"]
         elif "auction" in intent_lower or "bid" in intent_lower or "dutch" in intent_lower:
             valid = ["auction"]

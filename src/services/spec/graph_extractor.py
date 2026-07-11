@@ -69,27 +69,14 @@ def _heuristic_graph(intent: str) -> ConstraintGraph:
     if lacks_contract_signal(intent):
         return ConstraintGraph(intent=intent)
 
-    from src.models import RawIntent
-    from src.services.spec.detection import detect_capabilities, is_cliff_vesting_vault
+    from src.services.spec.detection import detect_capabilities, is_hashlock_intent
+    from src.services.spec.orchestrator import _heuristic_raw_intent
     from src.services.spec.parameter_extraction import extract_parameters_from_message
 
-    il = intent.lower()
-    caps: list[str] = []
-    if is_cliff_vesting_vault(il):
-        caps.extend(["vault", "timelock", "split"])
-    elif "escrow" in il:
-        caps.extend(["escrow", "multisig"])
-    if "vault" in il or "treasury" in il:
-        if not is_cliff_vesting_vault(il):
-            caps.extend(["vault", "treasury"])
-    if not is_cliff_vesting_vault(il) and ("vest" in il or "decay" in il):
-        caps.append("linear_decay")
-    if "split" in il or "distribute" in il or is_cliff_vesting_vault(il):
-        caps.append("split")
-    if "multisig" in il and "escrow" in il:
-        caps.append("multisig")
-    raw = RawIntent(intent=intent, capabilities=list(dict.fromkeys(caps)), constraints={})
+    raw = _heuristic_raw_intent(intent)
     spec = detect_capabilities(raw, original_intent=intent)
+    if is_hashlock_intent(intent.lower()):
+        spec.parameters.setdefault("hash_preimage", "PARAMETER")
     params = extract_parameters_from_message(intent, spec)
     if params:
         spec.parameters.update(params)

@@ -108,14 +108,25 @@ def _default_for_field(field_name: str, intent: str) -> Any:
 
 
 def _heuristic_raw_intent(intent: str) -> RawIntent:
-    """Keyword-only extraction for non-interactive / benchmark paths (no LLM)."""
+    """Keyword-only extraction when graph LLM is unavailable (benchmark legacy path)."""
     from src.models import RawIntent
+    from src.services.spec.detection import (
+        is_cliff_vesting_vault,
+        is_hashlock_intent,
+        is_simple_token_timelock_vesting,
+    )
 
     il = intent.lower()
     caps: List[str] = []
-    if is_cliff_vesting_vault(il):
+    if is_simple_token_timelock_vesting(il):
+        caps.extend(["vault", "timelock"])
+    elif is_cliff_vesting_vault(il):
         caps.extend(["vault", "timelock", "split"])
-    elif any(k in il for k in ("treasury", "vault", "cold storage")):
+    elif is_hashlock_intent(il):
+        caps.extend(["escrow", "timelock"])
+    elif "vault" in il and not any(k in il for k in ("dao", "governance", "treasury", "catalyst")):
+        caps.append("vault")
+    elif any(k in il for k in ("treasury", "cold storage")):
         caps.extend(["treasury", "vault"])
     if any(
         k in il
@@ -124,18 +135,20 @@ def _heuristic_raw_intent(intent: str) -> RawIntent:
         caps.extend(["treasury", "vault", "weighted_multisig"])
     if any(k in il for k in ("weighted", "weight", "weights")):
         caps.append("weighted_multisig")
-    if not is_cliff_vesting_vault(il) and any(k in il for k in ("decay", "linear decay")):
-        caps.append("linear_decay")
+    if not is_cliff_vesting_vault(il) and not is_simple_token_timelock_vesting(il):
+        if any(k in il for k in ("decay", "linear decay")) and "vest" not in il:
+            caps.append("linear_decay")
     if "escrow" in il or "arbiter" in il:
         caps.extend(["escrow", "multisig"])
     elif "multisig" in il:
         caps.append("multisig")
     if any(k in il for k in ("split", "distribute", "payroll", "recipients")):
         caps.append("split")
-    if is_cliff_vesting_vault(il) or "timelock" in il or any(
+    if is_cliff_vesting_vault(il) or is_simple_token_timelock_vesting(il) or "timelock" in il or any(
         k in il for k in ("timeout", "refund", "reclaim", "locked", "lock")
     ):
-        caps.append("timelock")
+        if "timelock" not in caps:
+            caps.append("timelock")
     if "nft" in il and "mint" in il:
         caps.append("nft_minting")
     elif "nft" in il:
@@ -148,8 +161,10 @@ def _heuristic_raw_intent(intent: str) -> RawIntent:
     primary = "generic"
     if "auction" in il or "bid" in il:
         primary = "auction"
-    if "escrow" in il:
+    elif "escrow" in il:
         primary = "escrow"
+    elif is_cliff_vesting_vault(il):
+        primary = "vault"
     elif "vault" in il or "treasury" in il or "dao" in il or "governance" in il:
         primary = "treasury"
     elif "split" in il:
@@ -185,6 +200,7 @@ async def run_spec_pipeline(
     from src.services.spec.discovery import lacks_contract_signal
     from src.services.spec.graph_generation_bridge import GraphGenerationBridge
     from src.services.spec.graph_pattern_detection import GraphPatternDetection
+    from src.services.spec.graph_config import graph_benchmark_legacy_only
     from src.services.spec.graph_pipeline import bootstrap_graph, should_use_graph_pipeline
 
     use_graph = should_use_graph_pipeline(resolution_mode) and existing_spec is None
@@ -276,7 +292,9 @@ async def run_spec_pipeline(
         spec = detect_capabilities(
             raw,
             original_intent=intent,
-            allow_generic_multisig_default=(resolution_mode == "non_interactive"),
+            allow_generic_multisig_default=(
+                resolution_mode == "non_interactive" and graph_benchmark_legacy_only()
+            ),
         )
         spec.intent = spec.intent or intent
         extracted = extract_parameters_from_message(intent, spec)
